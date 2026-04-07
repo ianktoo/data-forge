@@ -1,0 +1,596 @@
+"""Typer CLI application — all commands and the interactive pipeline wizard."""
+from __future__ import annotations
+
+import asyncio
+import json
+import uuid
+from pathlib import Path
+from typing import Optional
+
+import typer
+from rich.console import Console
+from sqlmodel import select
+
+from dataforge.agents import Orchestrator, PipelineContext
+from dataforge.agents.exporter import ExporterAgent
+from dataforge.config import PROVIDER_INFO, get_settings
+from dataforge.storage import (
+    DataFormat,
+    DiscoveredURL,
+    PipelineSession,
+    PipelineStage,
+    SessionStatus,
+    SyntheticSample,
+    init_db,
+    open_session,
+)
+from dataforge.utils import get_logger, setup_logging, system_info
+
+from . import prompts, ui
+
+app = typer.Typer(
+    name="dataforge",
+    help="LLM data collection and synthetic fine-tuning pipeline.",
+    no_args_is_help=False,
+    add_completion=False,
+    rich_markup_mode="rich",
+)
+console = Console()
+log = get_logger("cli")
+
+
+def _bootstrap() -> None:
+    from dataforge.cli.preflight import check_env_file
+    check_env_file()
+    s = get_settings()
+    setup_logging(s.logs_dir(), s.log_level)
+    init_db(s.db_path)
+
+
+# ── Default: interactive pipeline ─────────────────────────────────────────────
+
+@app.callback(invoke_without_command=True)
+def main(ctx: typer.Context) -> None:
+    """Launch the interactive guided pipeline (default when no subcommand given)."""
+    if ctx.invoked_subcommand is None:
+        _bootstrap()
+        ui.banner()
+        asyncio.run(_interactive_pipeline())
+
+
+# ── pipeline command (alias for interactive mode) ─────────────────────────────
+
+@app.command()
+def pipeline() -> None:
+    """Start a new interactive pipeline."""
+    _bootstrap()
+    ui.banner()
+    asyncio.run(_interactive_pipeline())
+
+
+# ── explore command ───────────────────────────────────────────────────────────
+
+@app.command()
+def explore(url: str = typer.Argument(..., help="URL or sitemap URL to explore")) -> None:
+    """Quickly discover and display URLs from a sitemap."""
+    _bootstrap()
+    asyncio.run(_run_explore(url))
+
+
+async def _run_explore(url: str) -> None:
+    from dataforge.collectors import HTTPClient, discover_sitemap_url, parse_sitemap
+    from dataforge.utils import RateLimiter
+
+    s = get_settings()
+    limiter = RateLimiter(s.rate_limit)
+    ui.section("URL Discovery")
+
+    async with HTTPClient(limiter) as client:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        base = f"{parsed.scheme}://{parsed.netloc}"
+
+        if url.endswith(".xml"):
+            sitemap_url = url
+        else:
+            sitemap_url = await discover_sitemap_url(client, base)
+
+        if sitemap_url:
+            ui.info(f"Sitemap: {sitemap_url}")
+            urls = await parse_sitemap(client, sitemap_url)
+        else:
+            ui.warn("No sitemap found. Showing seed URL only.")
+            urls = [url]
+
+    ui.success(f"Found {len(urls)} URLs")
+    ui.url_table(urls)
+
+
+# ── resume command ────────────────────────────────────────────────────────────
+
+@app.command()
+def resume(session_id: str = typer.Argument(..., help="Session ID to resume")) -> None:
+    """Resume a paused pipeline session."""
+    _bootstrap()
+    asyncio.run(_resume_session(session_id))
+
+
+async def _resume_session(session_id: str) -> None:
+    s = get_settings()
+    with open_session(s.db_path) as db:
+        session = db.get(PipelineSession, session_id)
+        if not session:
+            # Allow prefix match
+            all_s = db.exec(select(PipelineSession)).all()
+            matches = [x for x in all_s if x.id.startswith(session_id)]
+            if len(matches) == 1:
+                session = matches[0]
+            elif len(matches) > 1:
+                ui.error("Ambiguous session ID prefix — be more specific")
+                return
+            else:
+                ui.error(f"Session '{session_id}' not found")
+                return
+
+        if session.status == SessionStatus.completed:
+            ui.warn("Session already completed. Use 'dataforge export' to re-export.")
+            return
+
+        ctx = PipelineContext(
+            session_id=session.id,
+            session_name=session.name,
+            goal=session.goal,
+            format=DataFormat(session.format),
+            seed_urls=session.seed_url_list(),
+            settings=s,
+        )
+
+    ui.banner()
+    ui.info(f"Resuming session [bold]{session.name}[/] from stage [cyan]{session.stage}[/]")
+    await _run_orchestrator(ctx, start_from=session.stage)
+
+
+# ── sessions command ──────────────────────────────────────────────────────────
+
+@app.command()
+def sessions() -> None:
+    """List all pipeline sessions."""
+    _bootstrap()
+    s = get_settings()
+    with open_session(s.db_path) as db:
+        all_sessions = db.exec(select(PipelineSession)).all()
+
+    if not all_sessions:
+        ui.info("No sessions found. Run 'dataforge pipeline' to start.")
+        return
+
+    rows = []
+    for sess in sorted(all_sessions, key=lambda x: x.created_at, reverse=True):
+        cfg = sess.config()
+        rows.append({
+            "id":      sess.id,
+            "name":    sess.name,
+            "stage":   sess.stage,
+            "status":  sess.status,
+            "urls":    cfg.get("discovered", 0),
+            "samples": cfg.get("approved", 0),
+            "created": sess.created_at.strftime("%Y-%m-%d %H:%M"),
+        })
+    ui.sessions_table(rows)
+
+
+# ── export command ────────────────────────────────────────────────────────────
+
+@app.command()
+def export(
+    session_id: str = typer.Argument(..., help="Session ID to export"),
+    approved_only: bool = typer.Option(True, "--approved/--all", help="Export only approved samples"),
+) -> None:
+    """Export data from any stage of a session."""
+    _bootstrap()
+    asyncio.run(_export_session(session_id, approved_only))
+
+
+async def _export_session(session_id: str, approved_only: bool) -> None:
+    s = get_settings()
+    with open_session(s.db_path) as db:
+        session = db.get(PipelineSession, session_id)
+
+    if not session:
+        ui.error(f"Session '{session_id}' not found")
+        raise typer.Exit(1)
+
+    # Check what's available
+    with open_session(s.db_path) as db:
+        sample_count = len(db.exec(
+            select(SyntheticSample).where(SyntheticSample.session_id == session_id)
+        ).all())
+
+    if sample_count == 0:
+        ui.warn("No synthetic samples yet. Run at least through the generation stage.")
+        raise typer.Exit(1)
+
+    ui.info(f"{sample_count} samples available")
+    targets = await prompts.ask_export_targets(
+        hf_configured=bool(s.huggingface_token),
+        kg_configured=bool(s.kaggle_username and s.kaggle_key),
+    )
+
+    export_kw: dict = {"targets": targets, "approved_only": approved_only,
+                       "stage_snapshot": session.stage}
+
+    if "huggingface" in targets:
+        export_kw["hf_repo_id"] = await prompts.ask_hf_repo()
+        export_kw["hf_private"] = await prompts.ask_hf_private()
+
+    if "kaggle" in targets:
+        export_kw["kaggle_slug"] = await prompts.ask_kaggle_slug(s.kaggle_username)
+        export_kw["kaggle_title"] = session.name
+
+    ctx = PipelineContext(
+        session_id=session.id,
+        session_name=session.name,
+        goal=session.goal,
+        format=DataFormat(session.format),
+        seed_urls=session.seed_url_list(),
+        settings=s,
+    )
+    agent = ExporterAgent(ctx, **export_kw)
+    ctx = await agent.run()
+    ui.export_summary(ctx.export_records)
+    ui.success("Export complete")
+
+
+# ── config command ────────────────────────────────────────────────────────────
+
+@app.command()
+def config() -> None:
+    """Interactively configure LLM provider and defaults."""
+    _bootstrap()
+    asyncio.run(_configure())
+
+
+async def _configure() -> None:
+    ui.section("Configuration")
+    s = get_settings()
+
+    provider = await prompts.ask_provider()
+    info = PROVIDER_INFO[provider]
+    model = await prompts.ask_model(info.models)
+
+    env_path = Path(".env")
+    if not env_path.exists():
+        env_path.write_text("")
+
+    lines = env_path.read_text().splitlines()
+    updated = _set_env_var(lines, "DATAFORGE_LLM_PROVIDER", provider)
+    updated = _set_env_var(updated, "DATAFORGE_LLM_MODEL", model)
+    env_path.write_text("\n".join(updated) + "\n")
+
+    if info.requires_key:
+        ui.info(f"Set [bold]{info.key_env}[/] in your .env file to authenticate with {info.name}")
+
+    ui.success(f"Saved: provider={provider}, model={model}")
+
+
+def _set_env_var(lines: list[str], key: str, value: str) -> list[str]:
+    for i, line in enumerate(lines):
+        if line.startswith(f"{key}="):
+            lines[i] = f"{key}={value}"
+            return lines
+    lines.append(f"{key}={value}")
+    return lines
+
+
+# ── providers command ─────────────────────────────────────────────────────────
+
+@app.command()
+def providers() -> None:
+    """List available LLM providers and their models."""
+    from rich.table import Table
+    from rich import box
+    t = Table(box=box.SIMPLE_HEAD, title="Available Providers")
+    t.add_column("Provider")
+    t.add_column("Models")
+    t.add_column("API Key Required")
+    for name, info in PROVIDER_INFO.items():
+        t.add_row(info.name, "\n".join(info.models), "Yes" if info.requires_key else "No (local)")
+    console.print(t)
+
+
+# ── test-llm command ──────────────────────────────────────────────────────────
+
+@app.command(name="test-llm")
+def test_llm() -> None:
+    """Send a test prompt to the configured LLM provider."""
+    _bootstrap()
+    asyncio.run(_test_llm())
+
+
+async def _test_llm() -> None:
+    from dataforge.generators import LLMClient
+    s = get_settings()
+    ui.info(f"Testing {s.llm_provider} / {s.llm_model}...")
+    client = LLMClient()
+    ok = await client.test_connection()
+    if ok:
+        ui.success("LLM connection successful")
+    else:
+        ui.error("LLM connection failed — check your API key and model name")
+
+
+# ── info command ──────────────────────────────────────────────────────────────
+
+@app.command()
+def info() -> None:
+    """Show system information and environment status."""
+    _bootstrap()
+    s = get_settings()
+    sysinfo = system_info()
+    stats = {
+        "OS":            f"{sysinfo['os']} {sysinfo['os_version'][:40]}",
+        "Python":        sysinfo["python"],
+        "CPU cores":     sysinfo["cpu_cores"],
+        "RAM available": f"{sysinfo['ram_available_gb']} GB",
+        "Disk free":     f"{sysinfo['disk_free_gb']} GB",
+        "Provider":      s.llm_provider,
+        "Model":         s.llm_model,
+        "Rate limit":    f"{s.rate_limit} req/s",
+        "Output dir":    str(s.output_dir),
+        "Database":      str(s.db_path),
+        "HF token":      "set" if s.huggingface_token else "not set",
+        "Kaggle":        "configured" if s.kaggle_username else "not configured",
+    }
+    ui.stats_panel(stats)
+
+
+# ── Interactive pipeline wizard ────────────────────────────────────────────────
+
+async def _interactive_pipeline() -> None:
+    s = get_settings()
+
+    action = await _main_menu()
+    if action == "resume":
+        await _pick_and_resume()
+        return
+    if action == "sessions":
+        with open_session(s.db_path) as db:
+            all_s = db.exec(select(PipelineSession)).all()
+        rows = [{"id": x.id, "name": x.name, "stage": x.stage,
+                 "status": x.status, "urls": 0, "samples": 0,
+                 "created": x.created_at.strftime("%Y-%m-%d %H:%M")} for x in all_s]
+        ui.sessions_table(rows)
+        return
+    if action == "config":
+        await _configure()
+        return
+    if action == "info":
+        sysinfo = system_info()
+        ui.stats_panel(sysinfo)
+        return
+    if action == "exit":
+        raise typer.Exit()
+
+    # ── New pipeline ──────────────────────────────────────────────────────────
+    ui.section("Input")
+    seed_urls = await _collect_urls()
+    if not seed_urls:
+        ui.error("No valid URLs provided")
+        raise typer.Exit(1)
+
+    session_name = await prompts.ask_session_name()
+    goal         = await prompts.ask_goal()
+    fmt          = await prompts.ask_format()
+    custom_sys   = ""
+    if fmt == "custom":
+        custom_sys = await prompts.ask_custom_system_prompt()
+    n_per_chunk = await prompts.ask_n_per_chunk()
+
+    session_id = str(uuid.uuid4())
+    ctx = PipelineContext(
+        session_id=session_id,
+        session_name=session_name,
+        goal=goal,
+        format=DataFormat(fmt),
+        seed_urls=seed_urls,
+        settings=s,
+        custom_system_prompt=custom_sys,
+        n_per_chunk=n_per_chunk,
+    )
+
+    ui.info(f"Session ID: [bold]{session_id[:8]}[/]")
+    await _run_orchestrator(ctx)
+
+
+async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None) -> None:
+    s = ctx.settings
+    _stage_map = {
+        PipelineStage.discovery:  ("Discovery",  1),
+        PipelineStage.collection: ("Collection", 2),
+        PipelineStage.processing: ("Processing", 3),
+        PipelineStage.generation: ("Generation", 4),
+        PipelineStage.quality:    ("Quality",    5),
+        PipelineStage.export:     ("Export",     6),
+    }
+
+    scraper_progress = _make_progress_cb("Scraping")
+    gen_progress     = _make_progress_cb("Generating")
+
+    async def stage_hook(stage: str, context: PipelineContext) -> bool:
+        name, step = _stage_map.get(stage, (stage, 0))
+
+        # Show summary
+        _print_stage_summary(stage, context)
+
+        # Always offer export after collection+ stages
+        if stage in (PipelineStage.collection, PipelineStage.processing,
+                     PipelineStage.generation, PipelineStage.quality):
+            action = await prompts.ask_stage_action(name)
+            if action == "export":
+                await _quick_export(context, stage)
+                cont = await prompts.ask_confirm("Continue pipeline after export?")
+                return cont
+            if action == "pause":
+                ui.info(f"Session saved. Resume with: [bold]dataforge resume {context.session_id[:8]}[/]")
+                return False
+        return True
+
+    # URL selection hook (after discovery)
+    async def post_discovery_hook(stage: str, context: PipelineContext) -> bool:
+        if stage != PipelineStage.discovery:
+            return True
+
+        ui.success(f"Discovered {len(context.discovered_urls)} URLs")
+        ui.url_table(context.discovered_urls)
+
+        pattern = await prompts.ask_url_filter(len(context.discovered_urls))
+        if pattern:
+            from dataforge.collectors import filter_urls
+            from urllib.parse import urlparse
+            domain = urlparse(context.seed_urls[0]).netloc if context.seed_urls else None
+            filtered = filter_urls(context.discovered_urls, pattern or None, base_domain=None)
+            context.selected_urls = filtered
+            ui.info(f"Filtered to {len(filtered)} URLs")
+        else:
+            context.selected_urls = context.discovered_urls
+
+        confirmed = await prompts.ask_confirm_urls(len(context.selected_urls),
+                                                    len(context.discovered_urls))
+        if not confirmed:
+            ui.info("Cancelled")
+            return False
+
+        return await stage_hook(stage, context)
+
+    async def combined_hook(stage: str, context: PipelineContext) -> bool:
+        if stage == PipelineStage.discovery:
+            return await post_discovery_hook(stage, context)
+        return await stage_hook(stage, context)
+
+    orch = Orchestrator(
+        ctx,
+        stage_hook=combined_hook,
+        scraper_progress_cb=scraper_progress,
+        generator_progress_cb=gen_progress,
+        export_kwargs=await _ask_export_config(s),
+    )
+    ctx = await orch.run(start_from=start_from)
+
+    if ctx.export_records:
+        ui.export_summary(ctx.export_records)
+
+    ui.success("Pipeline complete!")
+    ui.info(f"Session: [bold]{ctx.session_id[:8]}[/]  |  "
+            f"Approved samples: [bold]{len(ctx.approved_sample_ids)}[/]")
+
+
+def _make_progress_cb(label: str):
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
+    _prog: Progress | None = None
+    _task = None
+
+    async def cb(done: int, total: int) -> None:
+        nonlocal _prog, _task
+        if _prog is None:
+            _prog = ui.make_progress(label)
+            _prog.start()
+            _task = _prog.add_task(label, total=total)
+        _prog.update(_task, completed=done)
+        if done >= total and _prog:
+            _prog.stop()
+            _prog = None
+
+    return cb
+
+
+def _print_stage_summary(stage: str, ctx: PipelineContext) -> None:
+    summaries = {
+        PipelineStage.discovery:  {"Discovered URLs": len(ctx.discovered_urls)},
+        PipelineStage.collection: {"Scraped pages":   len(ctx.scraped_page_ids)},
+        PipelineStage.processing: {"Chunks":          len(ctx.processed_chunk_ids)},
+        PipelineStage.generation: {"Samples":         len(ctx.synthetic_sample_ids)},
+        PipelineStage.quality:    {"Approved":        len(ctx.approved_sample_ids),
+                                   "Rejected":        len(ctx.synthetic_sample_ids) - len(ctx.approved_sample_ids)},
+    }
+    if stage in summaries:
+        ui.stats_panel(summaries[stage])
+
+
+async def _quick_export(ctx: PipelineContext, stage: str) -> None:
+    s = ctx.settings
+    targets = await prompts.ask_export_targets(
+        hf_configured=bool(s.huggingface_token),
+        kg_configured=bool(s.kaggle_username),
+    )
+    export_kw: dict = {"targets": targets, "stage_snapshot": stage}
+    if "huggingface" in targets:
+        export_kw["hf_repo_id"] = await prompts.ask_hf_repo()
+        export_kw["hf_private"] = await prompts.ask_hf_private()
+    if "kaggle" in targets:
+        export_kw["kaggle_slug"] = await prompts.ask_kaggle_slug(s.kaggle_username)
+        export_kw["kaggle_title"] = ctx.session_name
+
+    agent = ExporterAgent(ctx, **export_kw)
+    ctx_out = await agent.run()
+    ui.export_summary(ctx_out.export_records)
+
+
+async def _ask_export_config(s) -> dict:
+    """Ask export config upfront so orchestrator is fully configured."""
+    # We'll ask at the export stage via stage_hook — return empty defaults
+    return {"targets": ["local"], "approved_only": True}
+
+
+async def _collect_urls() -> list[str]:
+    method = await prompts.ask_input_method()
+    if method == "Single URL":
+        return [await prompts.ask_single_url()]
+    if method == "Multiple URLs":
+        return await prompts.ask_multiple_urls()
+    if method == "Text file":
+        path = await prompts.ask_file_path()
+        urls = prompts.read_url_file(path)
+        ui.info(f"Read {len(urls)} URLs from {path}")
+        return urls
+    if method == "Sitemap URL":
+        url = await prompts.ask_single_url()
+        return [url]
+    return []
+
+
+async def _main_menu() -> str:
+    import questionary
+    return await questionary.select(
+        "What would you like to do?",
+        choices=[
+            questionary.Choice("Start new pipeline",   value="new"),
+            questionary.Choice("Resume session",        value="resume"),
+            questionary.Choice("View sessions",         value="sessions"),
+            questionary.Choice("Configure provider",    value="config"),
+            questionary.Choice("System info",           value="info"),
+            questionary.Choice("Exit",                  value="exit"),
+        ],
+    ).ask_async()
+
+
+async def _pick_and_resume() -> None:
+    s = get_settings()
+    with open_session(s.db_path) as db:
+        pausable = db.exec(
+            select(PipelineSession).where(PipelineSession.status == SessionStatus.paused)
+        ).all()
+
+    if not pausable:
+        ui.info("No paused sessions found")
+        return
+
+    import questionary
+    choice = await questionary.select(
+        "Select session to resume:",
+        choices=[
+            questionary.Choice(f"{s.name}  [{s.id[:8]}]  stage={s.stage}", value=s.id)
+            for s in pausable
+        ],
+    ).ask_async()
+
+    await _resume_session(choice)
