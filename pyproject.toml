@@ -1,5 +1,5 @@
 [project]
-name = "dataforge"
+name = "dataforge-cli"
 version = "0.1.0"
 description = "LLM data collection and synthetic fine-tuning dataset pipeline"
 readme = "README.md"
