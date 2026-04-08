@@ -37,7 +37,9 @@ jobs:
           pip install pyinstaller
 
       - name: Build executable
-        run: pyinstaller --onefile --name dataforge --exclude-module=kaggle src/dataforge/main.py
+        run: |
+          pip uninstall -y kaggle
+          pyinstaller --onefile --name dataforge src/dataforge/main.py
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
