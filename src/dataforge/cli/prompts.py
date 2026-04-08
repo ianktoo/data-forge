@@ -25,50 +25,65 @@ def _q(**kw):
 
 # ── Input collection ───────────────────────────────────────────────────────────
 
-async def ask_input_method() -> str:
-    return await questionary.select(
+async def ask_input_method() -> str | None:
+    answer = await questionary.select(
         "How would you like to provide URLs?",
-        choices=["Single URL", "Multiple URLs", "Text file", "Sitemap URL"],
+        choices=[
+            "Single URL",
+            "Multiple URLs",
+            "Text file",
+            "Sitemap URL",
+            questionary.Separator(),
+            questionary.Choice("(b) Back to menu", value=None),
+        ],
         **_q(),
     ).ask_async()
+    return answer
 
 
-async def ask_single_url() -> str:
+async def ask_single_url() -> str | None:
     url = await questionary.text(
         "Enter URL:",
         validate=lambda v: _valid_url(v) or "Enter a valid http(s) URL",
         **_q(),
     ).ask_async()
+    if url is None:
+        return None
     return url.strip()
 
 
-async def ask_multiple_urls() -> list[str]:
+async def ask_multiple_urls() -> list[str] | None:
     raw = await questionary.text(
         "Enter URLs (one per line, blank line to finish):",
         multiline=True,
         **_q(),
     ).ask_async()
+    if raw is None:
+        return None
     return [u.strip() for u in raw.splitlines() if u.strip() and _valid_url(u.strip())]
 
 
-async def ask_file_path() -> Path:
+async def ask_file_path() -> Path | None:
     path = await questionary.path(
         "Path to URL file:",
         validate=lambda v: Path(v).exists() or "File not found",
         **_q(),
     ).ask_async()
+    if path is None:
+        return None
     return Path(path)
 
 
-async def ask_goal() -> str:
-    return await questionary.text(
+async def ask_goal() -> str | None:
+    answer = await questionary.text(
         "Describe the goal of this dataset (e.g. 'customer support Q&A for a SaaS product'):",
         validate=lambda v: len(v.strip()) > 10 or "Please be more descriptive",
         **_q(),
     ).ask_async()
+    return answer
 
 
-async def ask_format() -> str:
+async def ask_format() -> str | None:
     choice = await questionary.select(
         "Select dataset format:",
         choices=[
@@ -82,30 +97,34 @@ async def ask_format() -> str:
     return choice
 
 
-async def ask_custom_system_prompt() -> str:
-    return await questionary.text(
+async def ask_custom_system_prompt() -> str | None:
+    answer = await questionary.text(
         "Enter your custom system prompt for the LLM generator:",
         multiline=True,
         **_q(),
     ).ask_async()
+    return answer
 
 
-async def ask_n_per_chunk() -> int:
+async def ask_n_per_chunk() -> int | None:
     val = await questionary.text(
         "Samples to generate per content chunk:",
         default="3",
         validate=lambda v: v.isdigit() and 1 <= int(v) <= 10 or "Enter a number 1–10",
         **_q(),
     ).ask_async()
+    if val is None:
+        return None
     return int(val)
 
 
-async def ask_session_name() -> str:
-    return await questionary.text(
+async def ask_session_name() -> str | None:
+    answer = await questionary.text(
         "Session name (for reference):",
         default="my-dataset",
         **_q(),
     ).ask_async()
+    return answer
 
 
 async def ask_review_action() -> str:

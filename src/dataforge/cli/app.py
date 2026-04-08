@@ -368,13 +368,32 @@ async def _step_urls(state: dict) -> StepResult:
 async def _step_config(state: dict) -> StepResult:
     """Step 2: collect session config. Populates state keys for name/goal/fmt/n."""
     try:
-        state["session_name"] = await prompts.ask_session_name()
-        state["goal"] = await prompts.ask_goal()
-        state["fmt"] = await prompts.ask_format()
+        session_name = await prompts.ask_session_name()
+        if session_name is None:
+            return "back"
+        state["session_name"] = session_name
+
+        goal = await prompts.ask_goal()
+        if goal is None:
+            return "back"
+        state["goal"] = goal
+
+        fmt = await prompts.ask_format()
+        if fmt is None:
+            return "back"
+        state["fmt"] = fmt
+
         state["custom_sys"] = ""
         if state["fmt"] == "custom":
-            state["custom_sys"] = await prompts.ask_custom_system_prompt()
-        state["n_per_chunk"] = await prompts.ask_n_per_chunk()
+            custom_sys = await prompts.ask_custom_system_prompt()
+            if custom_sys is None:
+                return "back"
+            state["custom_sys"] = custom_sys
+
+        n_per_chunk = await prompts.ask_n_per_chunk()
+        if n_per_chunk is None:
+            return "back"
+        state["n_per_chunk"] = n_per_chunk
     except KeyboardInterrupt:
         return "back"
     return "next"
@@ -473,6 +492,8 @@ async def _interactive_pipeline() -> None:
         n_per_chunk=state["n_per_chunk"],
     )
     ui.info(f"Session ID: [bold]{session_id[:8]}[/]")
+    ui.info(f"Session directory: [dim]{ctx.session_dir()}[/]")
+    ui.info(f"Database: [dim]{s.db_path.resolve()}[/]")
     await _run_orchestrator(ctx)
 
 
@@ -611,6 +632,7 @@ async def _quick_export(ctx: PipelineContext, stage: str) -> None:
 
     agent = ExporterAgent(ctx, **export_kw)
     ctx_out = await agent.run()
+    ui.info("Export complete!")
     ui.export_summary(ctx_out.export_records)
 
 
@@ -620,19 +642,31 @@ async def _ask_export_config(s) -> dict:
     return {"targets": ["local"], "approved_only": True}
 
 
-async def _collect_urls() -> list[str]:
+async def _collect_urls() -> list[str] | None:
     method = await prompts.ask_input_method()
+    if method is None:
+        return None
     if method == "Single URL":
-        return [await prompts.ask_single_url()]
+        url = await prompts.ask_single_url()
+        if url is None:
+            return None
+        return [url]
     if method == "Multiple URLs":
-        return await prompts.ask_multiple_urls()
+        urls = await prompts.ask_multiple_urls()
+        if urls is None:
+            return None
+        return urls
     if method == "Text file":
         path = await prompts.ask_file_path()
+        if path is None:
+            return None
         urls = prompts.read_url_file(path)
-        ui.info(f"Read {len(urls)} URLs from {path}")
+        ui.info(f"[green]✓[/] Loaded {len(urls)} URLs from [dim]{path.resolve()}[/]")
         return urls
     if method == "Sitemap URL":
         url = await prompts.ask_single_url()
+        if url is None:
+            return None
         return [url]
     return []
 
