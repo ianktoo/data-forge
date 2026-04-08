@@ -48,3 +48,19 @@ question types, and rigorous quality filtering to remove low-signal samples.</p>
 </body>
 </html>
 """
+
+SAMPLE_SITEMAP_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://example.com/page-1</loc></url>
+  <url><loc>https://example.com/page-2</loc></url>
+  <url><loc>https://www.example.com/page-3</loc></url>
+</urlset>
+"""
+
+SAMPLE_SITEMAP_INDEX_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap><loc>https://example.com/sitemap-posts.xml</loc></sitemap>
+</sitemapindex>
+"""

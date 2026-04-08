@@ -12,6 +12,11 @@ log = get_logger("sitemap")
 _SITEMAP_PATHS = ["/sitemap.xml", "/sitemap_index.xml", "/sitemap/sitemap.xml"]
 
 
+def _strip_www(domain: str) -> str:
+    """Normalize domain by removing 'www.' prefix for consistent matching."""
+    return domain.removeprefix("www.")
+
+
 async def discover_sitemap_url(client, base_url: str) -> str | None:
     """Try common sitemap paths; also check robots.txt Sitemap directive."""
     # robots.txt
@@ -28,7 +33,7 @@ async def discover_sitemap_url(client, base_url: str) -> str | None:
     for path in _SITEMAP_PATHS:
         url = urljoin(base_url, path)
         r = await client.get_safe(url)
-        if r and r.status_code == 200 and "<urlset" in r.text or (r and "<sitemapindex" in r.text):
+        if r and r.status_code == 200 and ("<urlset" in r.text or "<sitemapindex" in r.text):
             log.info(f"Found sitemap: {url}")
             return url
     return None
@@ -83,7 +88,8 @@ def filter_urls(urls: list[str], pattern: str | None, base_domain: str | None) -
     """Filter URLs by optional substring pattern and optionally same domain."""
     result = urls
     if base_domain:
-        result = [u for u in result if urlparse(u).netloc == base_domain]
+        canonical = _strip_www(base_domain)
+        result = [u for u in result if _strip_www(urlparse(u).netloc) == canonical]
     if pattern:
         result = [u for u in result if pattern in u]
     return list(dict.fromkeys(result))  # deduplicate, preserve order

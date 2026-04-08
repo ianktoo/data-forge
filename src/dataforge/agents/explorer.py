@@ -48,13 +48,23 @@ class ExplorerAgent(BaseAgent):
         # 2. Try to discover sitemap
         sitemap_url = await discover_sitemap_url(client, base)
         if sitemap_url:
-            urls = await parse_sitemap(client, sitemap_url)
-            if urls:
+            raw_urls = await parse_sitemap(client, sitemap_url)
+            if raw_urls:
                 # filter to same domain by default
-                return filter_urls(urls, pattern=None, base_domain=parsed.netloc)
+                filtered = filter_urls(raw_urls, pattern=None, base_domain=parsed.netloc)
+                if filtered:
+                    return filtered
+                # Sitemap parsed successfully but all URLs were filtered out
+                self.log.warning(
+                    f"Sitemap returned {len(raw_urls)} URLs but all were filtered by domain '{parsed.netloc}'. "
+                    "Returning all discovered URLs without domain filter."
+                )
+                return raw_urls
+            else:
+                self.log.warning(f"Sitemap found at {sitemap_url} but parsed 0 URLs")
 
         # 3. Fall back to the seed URL itself
-        self.log.info(f"No sitemap found for {base}, using seed URL directly")
+        self.log.info(f"No usable sitemap for {base}, using seed URL directly")
         return [seed]
 
     def _save_to_db(self, urls: list[str]) -> None:

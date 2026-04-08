@@ -108,6 +108,20 @@ async def ask_session_name() -> str:
     ).ask_async()
 
 
+async def ask_review_action() -> str:
+    """Ask user to review and confirm before launching the pipeline."""
+    return await questionary.select(
+        "Ready to launch?",
+        choices=[
+            questionary.Choice("Start pipeline", value="start"),
+            questionary.Choice("Edit URLs", value="edit_urls"),
+            questionary.Choice("Edit configuration", value="edit_config"),
+            questionary.Choice("Cancel (main menu)", value="cancel"),
+        ],
+        **_q(),
+    ).ask_async()
+
+
 # ── URL selection ──────────────────────────────────────────────────────────────
 
 async def ask_url_filter(total: int) -> str:

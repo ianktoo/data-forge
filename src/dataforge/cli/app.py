@@ -5,7 +5,7 @@ import asyncio
 import json
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import typer
 from rich.console import Console
@@ -37,6 +37,9 @@ app = typer.Typer(
 )
 console = Console()
 log = get_logger("cli")
+
+# Type alias for step result sentinels
+StepResult = Literal["next", "back", "back_to_urls", "back_to_config", "home", "exit"]
 
 
 def _bootstrap() -> None:
@@ -344,60 +347,131 @@ def info() -> None:
     ui.stats_panel(stats)
 
 
+# ── Wizard step functions ─────────────────────────────────────────────────────
+
+async def _step_urls(state: dict) -> StepResult:
+    """Step 1: collect seed URLs. Populates state['seed_urls']."""
+    try:
+        urls = await _collect_urls()
+    except KeyboardInterrupt:
+        return "home"
+    result = None if urls is None else urls
+    if result is None:
+        return "back"
+    if not result:
+        ui.error("No valid URLs provided")
+        return "back"
+    state["seed_urls"] = result
+    return "next"
+
+
+async def _step_config(state: dict) -> StepResult:
+    """Step 2: collect session config. Populates state keys for name/goal/fmt/n."""
+    try:
+        state["session_name"] = await prompts.ask_session_name()
+        state["goal"] = await prompts.ask_goal()
+        state["fmt"] = await prompts.ask_format()
+        state["custom_sys"] = ""
+        if state["fmt"] == "custom":
+            state["custom_sys"] = await prompts.ask_custom_system_prompt()
+        state["n_per_chunk"] = await prompts.ask_n_per_chunk()
+    except KeyboardInterrupt:
+        return "back"
+    return "next"
+
+
+async def _step_review(state: dict) -> StepResult:
+    """Step 3: summary panel + confirm/edit choice."""
+    ui.review_panel(state)
+    try:
+        action = await prompts.ask_review_action()
+    except KeyboardInterrupt:
+        return "back"
+    if action is None:
+        return "back"
+    if action == "start":
+        return "next"
+    if action == "edit_urls":
+        return "back_to_urls"
+    if action == "edit_config":
+        return "back_to_config"
+    if action == "cancel":
+        return "home"
+    return "next"
+
+
 # ── Interactive pipeline wizard ────────────────────────────────────────────────
 
 async def _interactive_pipeline() -> None:
     s = get_settings()
 
-    action = await _main_menu()
-    if action == "resume":
-        await _pick_and_resume()
-        return
-    if action == "sessions":
-        with open_session(s.db_path) as db:
-            all_s = db.exec(select(PipelineSession)).all()
-        rows = [{"id": x.id, "name": x.name, "stage": x.stage,
-                 "status": x.status, "urls": 0, "samples": 0,
-                 "created": x.created_at.strftime("%Y-%m-%d %H:%M")} for x in all_s]
-        ui.sessions_table(rows)
-        return
-    if action == "config":
-        await _configure()
-        return
-    if action == "info":
-        sysinfo = system_info()
-        ui.stats_panel(sysinfo)
-        return
-    if action == "exit":
-        raise typer.Exit()
+    # ── Main menu loop (allows returning here without restarting the process) ──
+    while True:
+        action = await _main_menu()
+        if action == "resume":
+            await _pick_and_resume()
+            continue
+        if action == "sessions":
+            with open_session(s.db_path) as db:
+                all_s = db.exec(select(PipelineSession)).all()
+            rows = [{"id": x.id, "name": x.name, "stage": x.stage,
+                     "status": x.status, "urls": 0, "samples": 0,
+                     "created": x.created_at.strftime("%Y-%m-%d %H:%M")} for x in all_s]
+            ui.sessions_table(rows)
+            continue
+        if action == "config":
+            await _configure()
+            continue
+        if action == "info":
+            sysinfo = system_info()
+            ui.stats_panel(sysinfo)
+            continue
+        if action == "exit":
+            raise typer.Exit()
+        break  # action == "new"
 
-    # ── New pipeline ──────────────────────────────────────────────────────────
-    ui.section("Input")
-    seed_urls = await _collect_urls()
-    if not seed_urls:
-        ui.error("No valid URLs provided")
-        raise typer.Exit(1)
+    # ── Wizard state-machine ──────────────────────────────────────────────────
+    state: dict = {}
+    STEPS = ["urls", "config", "review"]
+    step_idx = 0
 
-    session_name = await prompts.ask_session_name()
-    goal         = await prompts.ask_goal()
-    fmt          = await prompts.ask_format()
-    custom_sys   = ""
-    if fmt == "custom":
-        custom_sys = await prompts.ask_custom_system_prompt()
-    n_per_chunk = await prompts.ask_n_per_chunk()
+    while step_idx < len(STEPS):
+        step = STEPS[step_idx]
 
+        if step == "urls":
+            ui.section("Input")
+            result = await _step_urls(state)
+        elif step == "config":
+            ui.section("Configuration")
+            result = await _step_config(state)
+        elif step == "review":
+            result = await _step_review(state)
+
+        if result == "next":
+            step_idx += 1
+        elif result == "back":
+            step_idx = max(0, step_idx - 1)
+        elif result == "back_to_urls":
+            step_idx = STEPS.index("urls")
+        elif result == "back_to_config":
+            step_idx = STEPS.index("config")
+        elif result == "home":
+            return await _interactive_pipeline()
+        elif result == "exit":
+            raise typer.Exit()
+
+    # ── Launch pipeline ───────────────────────────────────────────────────────
     session_id = str(uuid.uuid4())
     ctx = PipelineContext(
         session_id=session_id,
-        session_name=session_name,
-        goal=goal,
-        format=DataFormat(fmt),
-        seed_urls=seed_urls,
+        session_name=state["session_name"],
+        goal=state["goal"],
+        format=DataFormat(state["fmt"]),
+        seed_urls=state["seed_urls"],
         settings=s,
-        custom_system_prompt=custom_sys,
-        n_per_chunk=n_per_chunk,
+        custom_system_prompt=state.get("custom_sys", ""),
+        n_per_chunk=state["n_per_chunk"],
     )
-
     ui.info(f"Session ID: [bold]{session_id[:8]}[/]")
     await _run_orchestrator(ctx)
 
@@ -441,6 +515,11 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
             return True
 
         ui.success(f"Discovered {len(context.discovered_urls)} URLs")
+
+        if len(context.discovered_urls) == 0:
+            ui.warn("Discovery returned 0 URLs. Check that the site has a reachable sitemap or provide a direct sitemap URL.")
+            return False
+
         ui.url_table(context.discovered_urls)
 
         pattern = await prompts.ask_url_filter(len(context.discovered_urls))
@@ -560,17 +639,20 @@ async def _collect_urls() -> list[str]:
 
 async def _main_menu() -> str:
     import questionary
-    return await questionary.select(
-        "What would you like to do?",
-        choices=[
-            questionary.Choice("Start new pipeline",   value="new"),
-            questionary.Choice("Resume session",        value="resume"),
-            questionary.Choice("View sessions",         value="sessions"),
-            questionary.Choice("Configure provider",    value="config"),
-            questionary.Choice("System info",           value="info"),
-            questionary.Choice("Exit",                  value="exit"),
-        ],
-    ).ask_async()
+    try:
+        return await questionary.select(
+            "What would you like to do?",
+            choices=[
+                questionary.Choice("Start new pipeline",   value="new"),
+                questionary.Choice("Resume session",        value="resume"),
+                questionary.Choice("View sessions",         value="sessions"),
+                questionary.Choice("Configure provider",    value="config"),
+                questionary.Choice("System info",           value="info"),
+                questionary.Choice("Exit",                  value="exit"),
+            ],
+        ).ask_async()
+    except KeyboardInterrupt:
+        raise typer.Exit()
 
 
 async def _pick_and_resume() -> None:

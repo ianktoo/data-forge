@@ -1,0 +1,88 @@
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test Coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Build & Output
+output/
+dist/
+build/
+
+# Sourcemaps
+*.map
+*.js.map
+*.css.map
+
+# Claude Code
+.claude/
+!.claude/keybindings.json
+
+# OS-specific
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Project-specific
+dataforge.db
+run.bat
+run.ps1
+run.sh

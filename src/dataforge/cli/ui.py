@@ -115,6 +115,25 @@ def stats_panel(stats: dict) -> None:
     console.print(Panel(t, title="[bold]Pipeline Stats[/]", border_style="cyan"))
 
 
+def review_panel(state: dict) -> None:
+    """Display a pre-launch summary of all wizard inputs."""
+    t = Table.grid(padding=(0, 2))
+    t.add_column(style="bold cyan", min_width=14)
+    t.add_column()
+    seed_urls = state.get("seed_urls", [])
+    t.add_row("URLs", f"{len(seed_urls)} seed URL(s)")
+    for url in seed_urls[:5]:
+        t.add_row("", url)
+    if len(seed_urls) > 5:
+        t.add_row("", f"[dim]... and {len(seed_urls) - 5} more[/]")
+    t.add_row("Session", state.get("session_name", ""))
+    goal_text = state.get("goal", "")[:80]
+    t.add_row("Goal", goal_text)
+    t.add_row("Format", state.get("fmt", ""))
+    t.add_row("Samples/chunk", str(state.get("n_per_chunk", 3)))
+    console.print(Panel(t, title="[bold]Review & Confirm[/]", border_style="cyan"))
+
+
 def make_progress(description: str = "Working") -> Progress:
     return Progress(
         SpinnerColumn(),
