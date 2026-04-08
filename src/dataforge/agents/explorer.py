@@ -1,6 +1,7 @@
 """ExplorerAgent — discovers URLs via sitemap and robots.txt."""
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from urllib.parse import urlparse
@@ -23,8 +24,10 @@ class ExplorerAgent(BaseAgent):
         all_urls: list[str] = []
 
         async with HTTPClient(limiter) as client:
-            for seed in self.ctx.seed_urls:
-                discovered = await self._explore_seed(client, seed)
+            # Parallelize seed URL exploration
+            tasks = [self._explore_seed(client, seed) for seed in self.ctx.seed_urls]
+            discovered_lists = await asyncio.gather(*tasks)
+            for discovered in discovered_lists:
                 all_urls.extend(discovered)
 
         # Deduplicate
