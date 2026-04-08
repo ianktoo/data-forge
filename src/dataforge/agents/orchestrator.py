@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Callable, Awaitable
 
 from sqlmodel import select
@@ -160,7 +160,7 @@ class Orchestrator:
         with open_session(self.ctx.settings.db_path) as db:
             session = db.get(PipelineSession, self.ctx.session_id)
             if session:
-                session.updated_at = datetime.utcnow()
+                session.updated_at = datetime.now(UTC)
                 session.config_json = json.dumps({
                     "discovered": len(self.ctx.discovered_urls),
                     "selected":   len(self.ctx.selected_urls),

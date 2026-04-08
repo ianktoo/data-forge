@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlmodel import select
@@ -46,7 +46,7 @@ class ExporterAgent(BaseAgent):
             self.log.warning("No samples to export")
             return self.ctx
 
-        export_dir = self.ctx.session_dir() / "exports" / datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        export_dir = self.ctx.session_dir() / "exports" / datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         self.log.info(f"Exporting {len(records)} samples → {export_dir}")
 
         paths = export_all_formats(
