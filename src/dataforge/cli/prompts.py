@@ -6,6 +6,11 @@ from urllib.parse import urlparse
 
 import questionary
 from questionary import Style
+from prompt_toolkit import PromptSession
+from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
+from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.styles import Style as PTStyle
 
 _STYLE = Style([
     ("qmark",     "fg:cyan bold"),
@@ -21,6 +26,79 @@ _STYLE = Style([
 
 def _q(**kw):
     return {**kw, "style": _STYLE}
+
+
+# ── Ghost-text command prompt ─────────────────────────────────────────────────
+
+class _SuggestFromChoices(AutoSuggest):
+    """Suggest the first matching choice as inline ghost text."""
+
+    def __init__(self, choices: list[str]) -> None:
+        self._choices = choices
+
+    def get_suggestion(self, buffer, document) -> Suggestion | None:
+        text = document.text_before_cursor
+        if not text:
+            return None
+        for choice in self._choices:
+            if choice.lower().startswith(text.lower()) and choice.lower() != text.lower():
+                return Suggestion(choice[len(text):])
+        return None
+
+
+_CMD_PT_STYLE = PTStyle.from_dict({
+    "prompt":      "bold cyan",
+    "completion-menu.completion.current": "bg:ansicyan ansiwhite bold",
+    "completion-menu.completion":         "bg:ansiblue ansiwhite",
+    "auto-suggestion":                    "fg:ansibrightblack italic",
+})
+
+_COMMAND_ALIASES: dict[str, str] = {
+    "start": "new",
+    "quit":  "exit",
+    "q":     "exit",
+}
+
+
+async def ask_command(choices: list[str], aliases: dict[str, str] | None = None) -> str | None:
+    """Typed command prompt with faded ghost-text autocomplete and Tab completion.
+
+    As the user types, the first matching command appears as faded ghost text.
+    Tab accepts the suggestion; Enter submits. Returns the canonical choice value
+    or None on Ctrl-C / Ctrl-D.
+    """
+    all_aliases = {**_COMMAND_ALIASES, **(aliases or {})}
+    # Include aliases in the completer so Tab works for them too
+    all_words = list(choices) + list(all_aliases.keys())
+    completer = WordCompleter(all_words, ignore_case=True, sentence=True)
+    session: PromptSession[str] = PromptSession(
+        completer=completer,
+        auto_suggest=_SuggestFromChoices(all_words),
+        style=_CMD_PT_STYLE,
+        complete_while_typing=False,  # ghost text only; Tab opens dropdown
+    )
+    hint = "/".join(choices)
+    while True:
+        try:
+            raw = await session.prompt_async(
+                HTML(f"<prompt>dataforge</prompt> [<ansicyan>{hint}</ansicyan>]: "),
+            )
+        except (KeyboardInterrupt, EOFError):
+            return None
+        value = raw.strip().lower()
+        if not value:
+            continue
+        # Resolve alias
+        value = all_aliases.get(value, value)
+        if value in choices:
+            return value
+        # Fuzzy fallback: first choice that starts with input
+        matches = [c for c in choices if c.startswith(value)]
+        if len(matches) == 1:
+            return matches[0]
+        # Unknown — show inline error and re-prompt
+        known = "  ".join(f"[cyan]{c}[/cyan]" for c in choices)
+        print(f"\033[33m  Unknown command '{raw.strip()}'. Valid: {', '.join(choices)}\033[0m")
 
 
 # ── Input collection ───────────────────────────────────────────────────────────

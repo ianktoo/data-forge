@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     # Pipeline
     rate_limit: float = Field(2.0, description="Requests per second per domain")
     max_pages: int = Field(500, description="Max pages scraped per session")
+    max_crawl_pages: int = Field(50, description="Max pages discovered by BFS crawler (sitemap fallback)")
+    max_crawl_depth: int = Field(3, description="Max link depth for BFS crawler")
     chunk_size: int = Field(512, description="Tokens per chunk")
     chunk_overlap: int = Field(64, description="Token overlap between chunks")
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"

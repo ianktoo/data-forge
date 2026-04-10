@@ -294,3 +294,84 @@ The setup scripts:
 2. Create the virtual environment (`uv sync`)
 3. Copy `.env.example` → `.env` if not present
 4. Launch `dataforge` interactive mode
+
+---
+
+## Installing via pip
+
+If you installed DataForge globally with `pip install dataforge` and run it from any directory (not the project repo), there is no `.env` file to load from. Set your configuration using environment variables directly.
+
+### Option 1 — export in your shell session
+
+```bash
+# Required: set at least one LLM provider key
+export OPENAI_API_KEY=sk-...
+
+# Optional: tune pipeline defaults
+export DATAFORGE_LLM_PROVIDER=openai
+export DATAFORGE_LLM_MODEL=gpt-4o-mini
+export DATAFORGE_MAX_PAGES=500
+export DATAFORGE_MAX_CRAWL_PAGES=50   # BFS crawler page cap (sitemap fallback)
+export DATAFORGE_MAX_CRAWL_DEPTH=3    # BFS crawler max link depth
+export DATAFORGE_OUTPUT_DIR=~/dataforge-output
+export DATAFORGE_DB_PATH=~/dataforge.db
+
+dataforge
+```
+
+On Windows (PowerShell):
+
+```powershell
+$env:OPENAI_API_KEY = "sk-..."
+$env:DATAFORGE_LLM_PROVIDER = "openai"
+$env:DATAFORGE_OUTPUT_DIR = "$HOME\dataforge-output"
+dataforge
+```
+
+### Option 2 — place a `.env` file in your working directory
+
+DataForge reads `.env` from the directory where you run the command. Create one anywhere:
+
+```bash
+cd ~/my-project
+cp /path/to/dataforge/.env.example .env   # or create from scratch
+# fill in your keys
+dataforge
+```
+
+### Option 3 — place a `.env` file in your home directory
+
+Alternatively, point the loader at a central file by setting the path explicitly:
+
+```bash
+export DATAFORGE_ENV_FILE=~/.config/dataforge/.env
+dataforge
+```
+
+> **Note:** `DATAFORGE_ENV_FILE` is not currently supported by default — use Option 1 or 2 instead, or add this variable support in `config/settings.py` via `SettingsConfigDict(env_file=...)`.
+
+### Full reference of environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | — | OpenAI key (required for openai provider) |
+| `ANTHROPIC_API_KEY` | — | Anthropic key (required for anthropic provider) |
+| `GROQ_API_KEY` | — | Groq key |
+| `TOGETHER_API_KEY` | — | Together AI key |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama local endpoint |
+| `DATAFORGE_LLM_PROVIDER` | `openai` | Active LLM provider |
+| `DATAFORGE_LLM_MODEL` | `gpt-4o-mini` | Model name (passed to LiteLLM) |
+| `DATAFORGE_LLM_TEMPERATURE` | `0.7` | Generation temperature |
+| `DATAFORGE_LLM_MAX_TOKENS` | `2048` | Max tokens per LLM call |
+| `DATAFORGE_RATE_LIMIT` | `2.0` | Requests/sec per domain |
+| `DATAFORGE_MAX_PAGES` | `500` | Max pages scraped per session |
+| `DATAFORGE_MAX_CRAWL_PAGES` | `50` | Max pages found by BFS crawler (sitemap fallback) |
+| `DATAFORGE_MAX_CRAWL_DEPTH` | `3` | Max link depth for BFS crawler |
+| `DATAFORGE_CHUNK_SIZE` | `512` | Tokens per chunk |
+| `DATAFORGE_CHUNK_OVERLAP` | `64` | Token overlap between chunks |
+| `DATAFORGE_LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+| `DATAFORGE_OUTPUT_DIR` | `./output` | Base directory for session output |
+| `DATAFORGE_DB_PATH` | `./dataforge.db` | SQLite database file path |
+| `HUGGINGFACE_TOKEN` | — | HuggingFace Hub write token |
+| `KAGGLE_USERNAME` | — | Kaggle username |
+| `KAGGLE_KEY` | — | Kaggle API key |

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Literal, Optional
@@ -27,6 +28,35 @@ from dataforge.storage import (
 from dataforge.utils import get_logger, setup_logging, system_info
 
 from . import prompts, ui
+
+def _typer_error_handler(error: Exception) -> None:
+    """Called by Typer when an unknown subcommand is entered."""
+    msg = str(error)
+    if "No such command" in msg or "no such option" in msg.lower():
+        _VALID_COMMANDS = [
+            "pipeline", "explore", "resume", "sessions",
+            "export", "config", "providers", "info", "test-llm", "update",
+        ]
+        # Try to find the closest match
+        import difflib
+        parts = msg.split("'")
+        bad = parts[1] if len(parts) >= 2 else ""
+        closest = difflib.get_close_matches(bad, _VALID_COMMANDS, n=1, cutoff=0.5)
+        hint = f"Did you mean [bold cyan]{closest[0]}[/]?" if closest else ""
+        from rich.console import Console as RC
+        from rich.panel import Panel
+        from rich.text import Text
+        from rich import box
+        c = RC(stderr=True)
+        body = Text()
+        body.append(f"'{bad}' is not a valid command.\n\n", style="white")
+        if hint:
+            body.append(f"{hint}\n\n", style="yellow")
+        body.append("Valid commands: " + "  ".join(f"[cyan]{x}[/cyan]" for x in _VALID_COMMANDS))
+        c.print(Panel(body, title="[bold red]Unknown command[/]",
+                      border_style="red", box=box.ROUNDED, padding=(0, 1)))
+    raise SystemExit(2)
+
 
 app = typer.Typer(
     name="dataforge",
@@ -270,8 +300,28 @@ async def _configure() -> None:
     updated = _set_env_var(updated, "DATAFORGE_LLM_MODEL", model)
     env_path.write_text("\n".join(updated) + "\n")
 
+    # Persist provider/model to user prefs (cross-project)
+    from dataforge.cli import prefs as user_prefs
+    user_prefs.set("llm_provider", provider)
+    user_prefs.set("llm_model", model)
+
     if info.requires_key:
-        ui.info(f"Set [bold]{info.key_env}[/] in your .env file to authenticate with {info.name}")
+        import getpass
+        existing = os.getenv(info.key_env, "")
+        masked = f"{existing[:8]}..." if len(existing) > 8 else ("set" if existing else "")
+        prompt_label = (
+            f"  {info.key_env} [{masked}] (leave blank to keep): "
+            if existing else
+            f"  {info.key_env} (paste your key, input hidden): "
+        )
+        key_value = getpass.getpass(prompt_label)
+        if key_value:
+            updated = _set_env_var(updated, info.key_env, key_value)
+            env_path.write_text("\n".join(updated) + "\n")
+            os.environ[info.key_env] = key_value
+            ui.success(f"Saved {info.key_env} to .env")
+        elif not existing:
+            ui.info(f"No key entered — set {info.key_env} in your .env when ready")
 
     ui.success(f"Saved: provider={provider}, model={model}")
 
@@ -320,6 +370,32 @@ async def _test_llm() -> None:
         ui.success("LLM connection successful")
     else:
         ui.error("LLM connection failed — check your API key and model name")
+
+
+# ── update command ───────────────────────────────────────────────────────────
+
+@app.command()
+def update() -> None:
+    """Update DataForge to the latest version via pip."""
+    import subprocess
+    import sys
+    ui.info("Checking for updates...")
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--upgrade", "dataforge"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        ui.success("DataForge is up to date.")
+        if "Successfully installed" in result.stdout:
+            # Extract installed version from pip output
+            for line in result.stdout.splitlines():
+                if "Successfully installed" in line:
+                    ui.info(line.strip())
+                    break
+    else:
+        ui.error("Update failed.")
+        console.print(result.stderr.strip(), style="dim red")
 
 
 # ── info command ──────────────────────────────────────────────────────────────
@@ -445,6 +521,9 @@ async def _interactive_pipeline() -> None:
             sysinfo = system_info()
             ui.stats_panel(sysinfo)
             continue
+        if action == "update":
+            update()
+            continue
         if action == "exit":
             raise typer.Exit()
         break  # action == "new"
@@ -514,8 +593,9 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
     async def stage_hook(stage: str, context: PipelineContext) -> bool:
         name, step = _stage_map.get(stage, (stage, 0))
 
-        # Show summary
+        # Show summary + contextual tip
         _print_stage_summary(stage, context)
+        ui.tip(stage)
 
         # Always offer export after collection+ stages
         if stage in (PipelineStage.collection, PipelineStage.processing,
@@ -643,6 +723,8 @@ async def _ask_export_config(s) -> dict:
 
 
 async def _collect_urls() -> list[str] | None:
+    from dataforge.utils import sanitise, sanitise_many
+
     method = await prompts.ask_input_method()
     if method is None:
         return None
@@ -650,43 +732,68 @@ async def _collect_urls() -> list[str] | None:
         url = await prompts.ask_single_url()
         if url is None:
             return None
-        return [url]
+        clean = sanitise(url)
+        if not clean:
+            ui.error(f"'{url}' is not a valid URL — skipping.")
+            return None
+        if clean != url:
+            ui.info(f"URL corrected to: [dim]{clean}[/]")
+        return [clean]
     if method == "Multiple URLs":
         urls = await prompts.ask_multiple_urls()
         if urls is None:
             return None
-        return urls
+        clean = sanitise_many(urls)
+        dropped = len(urls) - len(clean)
+        if dropped:
+            ui.warn(f"{dropped} invalid URL(s) removed.")
+        return clean
     if method == "Text file":
         path = await prompts.ask_file_path()
         if path is None:
             return None
         urls = prompts.read_url_file(path)
-        ui.info(f"[green]✓[/] Loaded {len(urls)} URLs from [dim]{path.resolve()}[/]")
-        return urls
+        clean = sanitise_many(urls)
+        dropped = len(urls) - len(clean)
+        if dropped:
+            ui.warn(f"{dropped} invalid URL(s) removed from file.")
+        ui.info(f"Loaded {len(clean)} URLs from [dim]{path.resolve()}[/]")
+        return clean
     if method == "Sitemap URL":
         url = await prompts.ask_single_url()
         if url is None:
             return None
-        return [url]
+        clean = sanitise(url)
+        if not clean:
+            ui.error(f"'{url}' is not a valid URL — skipping.")
+            return None
+        if clean != url:
+            ui.info(f"URL corrected to: [dim]{clean}[/]")
+        return [clean]
     return []
 
 
 async def _main_menu() -> str:
-    import questionary
-    try:
-        return await questionary.select(
-            "What would you like to do?",
-            choices=[
-                questionary.Choice("Start new pipeline",   value="new"),
-                questionary.Choice("Resume session",        value="resume"),
-                questionary.Choice("View sessions",         value="sessions"),
-                questionary.Choice("Configure provider",    value="config"),
-                questionary.Choice("System info",           value="info"),
-                questionary.Choice("Exit",                  value="exit"),
-            ],
-        ).ask_async()
-    except KeyboardInterrupt:
+    _COMMANDS = ["new", "resume", "sessions", "config", "info", "update", "exit"]
+    _DESCRIPTIONS = {
+        "new":      "Start new pipeline",
+        "resume":   "Resume a paused session",
+        "sessions": "List all sessions",
+        "config":   "Configure LLM provider & keys",
+        "info":     "System info & env status",
+        "update":   "Update DataForge to latest",
+        "exit":     "Exit",
+    }
+    # Print command hints above the prompt
+    ui.console.print("")
+    for cmd, desc in _DESCRIPTIONS.items():
+        ui.console.print(f"  [bold cyan]{cmd:<10}[/]  [dim]{desc}[/]")
+    ui.console.print("")
+
+    result = await prompts.ask_command(_COMMANDS)
+    if result is None:
         raise typer.Exit()
+    return result
 
 
 async def _pick_and_resume() -> None:

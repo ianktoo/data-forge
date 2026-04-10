@@ -12,6 +12,7 @@ from .errors import (
 from .logger import get_logger, setup_logging
 from .rate_limiter import RateLimiter
 from .system import concurrency_ceiling, system_info
+from .url_sanitiser import is_page_url, sanitise, sanitise_many
 
 __all__ = [
     "get_logger",
@@ -28,4 +29,7 @@ __all__ = [
     "show_error",
     "show_warning",
     "show_skipped",
+    "sanitise",
+    "sanitise_many",
+    "is_page_url",
 ]

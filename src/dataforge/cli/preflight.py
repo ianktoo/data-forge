@@ -6,6 +6,7 @@ either skips the stage or halts, depending on whether the stage is optional.
 """
 from __future__ import annotations
 
+import getpass
 import os
 from pathlib import Path
 
@@ -33,12 +34,34 @@ _PROVIDER_KEY_MAP = {
 
 
 def check_env_file() -> bool:
-    """Warn (not fatal) if .env doesn't exist."""
-    if not Path(".env").exists():
+    """Warn (not fatal) if .env doesn't exist or no provider key is configured."""
+    from dataforge.cli import prefs as user_prefs
+
+    env_exists = Path(".env").exists()
+    if not env_exists:
         show_warning(
             ".env file not found — using default settings and environment variables.",
             "Run:  cp .env.example .env  then fill in your API keys.",
         )
+        # Apply saved prefs as env var defaults so pip-installed users keep their config
+        saved_provider = user_prefs.get("llm_provider")
+        saved_model = user_prefs.get("llm_model")
+        if saved_provider and not os.getenv("DATAFORGE_LLM_PROVIDER"):
+            os.environ["DATAFORGE_LLM_PROVIDER"] = saved_provider
+        if saved_model and not os.getenv("DATAFORGE_LLM_MODEL"):
+            os.environ["DATAFORGE_LLM_MODEL"] = saved_model
+
+    # Check whether the active provider is satisfied (keyless like Ollama, or has a key set)
+    s = get_settings()
+    active_key_env = _PROVIDER_KEY_MAP.get(s.llm_provider.lower())
+    needs_key = active_key_env is not None
+    has_key = bool(needs_key and os.getenv(active_key_env))
+    if needs_key and not has_key:
+        show_warning(
+            "No LLM provider key detected — you will be prompted for one when needed.",
+            "To avoid this each session, run:  dataforge config  to save your key permanently.",
+        )
+
     return True   # non-fatal
 
 
@@ -52,6 +75,14 @@ def check_llm_credentials() -> tuple[bool, str | None]:
         return _check_ollama(s.ollama_base_url)
 
     if key_env and not os.getenv(key_env) and not getattr(s, key_env.lower(), ""):
+        # Offer a live prompt before failing
+        try:
+            value = getpass.getpass(f"  {key_env} not set — paste your key now (hidden, session-only): ")
+        except (KeyboardInterrupt, EOFError):
+            value = ""
+        if value.strip():
+            os.environ[key_env] = value.strip()
+            return True, None
         show_error(key_env)
         return False, key_env
 

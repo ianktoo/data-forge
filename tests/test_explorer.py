@@ -69,7 +69,7 @@ class TestExplorerAgent:
         )
         agent = ExplorerAgent(ctx)
 
-        urls = await agent._explore_seed(mock_client, "https://example.com/sitemap.xml")
+        urls, source = await agent._explore_seed(mock_client, "https://example.com/sitemap.xml")
         assert len(urls) == 3
         assert "https://example.com/page-1" in urls
 
@@ -86,19 +86,23 @@ class TestExplorerAgent:
         mock_client.get = AsyncMock(side_effect=get_side_effect)
         mock_client.get_safe = AsyncMock(return_value=None)
 
+        mock_settings = MagicMock()
+        mock_settings.max_crawl_pages = 5
+        mock_settings.max_crawl_depth = 1
+
         ctx = PipelineContext(
             session_id="test",
             session_name="Test",
             goal="Test",
             format=DataFormat.qa,
             seed_urls=["https://example.com"],
-            settings=MagicMock(),
+            settings=mock_settings,
             custom_system_prompt="",
             n_per_chunk=3,
         )
         agent = ExplorerAgent(ctx)
 
-        urls = await agent._explore_seed(mock_client, "https://example.com")
+        urls, source = await agent._explore_seed(mock_client, "https://example.com")
         assert urls == ["https://example.com"]
 
     @pytest.mark.asyncio
@@ -129,7 +133,7 @@ class TestExplorerAgent:
         )
         agent = ExplorerAgent(ctx)
 
-        urls = await agent._explore_seed(mock_client, "https://example.com")
+        urls, source = await agent._explore_seed(mock_client, "https://example.com")
         # All 3 URLs should pass through (www and non-www normalization enabled)
         assert len(urls) == 3
 
@@ -168,7 +172,7 @@ class TestExplorerAgent:
         )
         agent = ExplorerAgent(ctx)
 
-        urls = await agent._explore_seed(mock_client, "https://example.com")
+        urls, source = await agent._explore_seed(mock_client, "https://example.com")
         # Should return unfiltered URLs as fallback
         assert len(urls) == 2
         assert "https://other.com/page-1" in urls

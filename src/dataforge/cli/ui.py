@@ -134,6 +134,19 @@ def review_panel(state: dict) -> None:
     console.print(Panel(t, title="[bold]Review & Confirm[/]", border_style="cyan"))
 
 
+def tip(stage: str) -> None:
+    """Print the next rotating tip for a pipeline stage."""
+    from dataforge.cli.tips import STAGE_TIPS, GENERAL_TIPS
+    from dataforge.cli import prefs
+
+    tips = STAGE_TIPS.get(stage, GENERAL_TIPS)
+    idx = prefs.next_tip_index(stage, len(tips))
+    text = Text()
+    text.append("Tip  ", style="bold yellow")
+    text.append(tips[idx])
+    console.print(Panel(text, border_style="dim yellow", box=box.SIMPLE, padding=(0, 1)))
+
+
 def make_progress(description: str = "Working") -> Progress:
     return Progress(
         SpinnerColumn(),
