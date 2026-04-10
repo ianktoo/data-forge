@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     output_dir: Path = Path("./output")
     db_path: Path = Path("./dataforge.db")
+    ignore_robots: bool = Field(False, description="Skip robots.txt enforcement")
 
     # Export
     huggingface_token: str = ""

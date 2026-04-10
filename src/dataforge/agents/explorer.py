@@ -23,7 +23,7 @@ class ExplorerAgent(BaseAgent):
 
         source_map: dict[str, str] = {}  # url -> URLSource value
 
-        async with HTTPClient(limiter) as client:
+        async with HTTPClient(limiter, ignore_robots=self.ctx.ignore_robots) as client:
             # Parallelize seed URL exploration
             tasks = [self._explore_seed(client, seed) for seed in self.ctx.seed_urls]
             results = await asyncio.gather(*tasks)

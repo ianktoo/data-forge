@@ -45,8 +45,9 @@ async def _robots(client: httpx.AsyncClient, base_url: str) -> RobotFileParser:
 
 
 class HTTPClient:
-    def __init__(self, limiter: RateLimiter) -> None:
+    def __init__(self, limiter: RateLimiter, *, ignore_robots: bool = False) -> None:
         self._limiter = limiter
+        self._ignore_robots = ignore_robots
         self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "HTTPClient":
@@ -73,7 +74,7 @@ class HTTPClient:
         parsed = urlparse(url)
         base = f"{parsed.scheme}://{parsed.netloc}"
 
-        if check_robots:
+        if check_robots and not self._ignore_robots:
             robots = await _robots(self._client, base)
             if not robots.can_fetch("DataForge", url):
                 log.warning(f"robots.txt disallows {url}")

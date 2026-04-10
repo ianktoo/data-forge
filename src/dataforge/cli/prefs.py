@@ -46,6 +46,18 @@ def set(key: str, value: Any) -> None:  # noqa: A001
     save(prefs)
 
 
+def get_api_key(key_env: str) -> str:
+    """Return a saved API key from the global prefs store (empty string if not set)."""
+    return load().get("api_keys", {}).get(key_env, "")
+
+
+def set_api_key(key_env: str, value: str) -> None:
+    """Persist an API key in the global prefs store."""
+    prefs = load()
+    prefs.setdefault("api_keys", {})[key_env] = value
+    save(prefs)
+
+
 def next_tip_index(stage: str, total: int) -> int:
     """Return the next tip index for a stage and advance the stored counter."""
     prefs = load()

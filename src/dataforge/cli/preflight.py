@@ -37,11 +37,12 @@ def check_env_file() -> bool:
     """Warn (not fatal) if .env doesn't exist or no provider key is configured."""
     from dataforge.cli import prefs as user_prefs
 
-    env_exists = Path(".env").exists()
+    env_path = Path(".env").resolve()
+    env_exists = env_path.exists()
     if not env_exists:
         show_warning(
-            ".env file not found — using default settings and environment variables.",
-            "Run:  cp .env.example .env  then fill in your API keys.",
+            f".env file not found at {env_path}",
+            f"Run:  dataforge config  to save settings globally to {user_prefs._prefs_path()}",
         )
         # Apply saved prefs as env var defaults so pip-installed users keep their config
         saved_provider = user_prefs.get("llm_provider")
@@ -50,6 +51,10 @@ def check_env_file() -> bool:
             os.environ["DATAFORGE_LLM_PROVIDER"] = saved_provider
         if saved_model and not os.getenv("DATAFORGE_LLM_MODEL"):
             os.environ["DATAFORGE_LLM_MODEL"] = saved_model
+        # Apply globally-saved API keys so pip-installed users work without .env
+        for key_env, value in user_prefs.load().get("api_keys", {}).items():
+            if value and not os.getenv(key_env):
+                os.environ[key_env] = value
 
     # Check whether the active provider is satisfied (keyless like Ollama, or has a key set)
     s = get_settings()

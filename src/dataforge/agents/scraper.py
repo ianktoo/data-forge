@@ -33,7 +33,7 @@ class ScraperAgent(BaseAgent):
         self.log.info(f"Scraping {len(urls)} URLs (concurrency={concur})")
 
         done = 0
-        async with HTTPClient(limiter) as client:
+        async with HTTPClient(limiter, ignore_robots=self.ctx.ignore_robots) as client:
             tasks = [self._scrape_one(client, sem, url, raw_dir, i)
                      for i, url in enumerate(urls)]
             for coro in asyncio.as_completed(tasks):

@@ -10,7 +10,7 @@ STAGE_TIPS: dict[str, list[str]] = {
         "Multiple seed URLs are supported — separate them with commas or provide a text file.",
     ],
     "collection": [
-        "DataForge respects robots.txt automatically — restricted pages are skipped cleanly.",
+        "DataForge respects robots.txt by default — enable override in the pipeline wizard for sites you own.",
         "Rate limiting is per-domain. Multiple seed domains are throttled independently.",
         "Pages are saved as Markdown in the session's [bold]raw/[/] folder — inspect them anytime.",
         "Very short pages (< 50 words) are filtered out to keep your dataset clean.",

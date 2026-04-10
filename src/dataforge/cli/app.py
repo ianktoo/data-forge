@@ -316,12 +316,17 @@ async def _configure() -> None:
         )
         key_value = getpass.getpass(prompt_label)
         if key_value:
-            updated = _set_env_var(updated, info.key_env, key_value)
-            env_path.write_text("\n".join(updated) + "\n")
             os.environ[info.key_env] = key_value
-            ui.success(f"Saved {info.key_env} to .env")
+            save_globally = await prompts.ask_save_key_globally()
+            if save_globally:
+                user_prefs.set_api_key(info.key_env, key_value)
+                ui.success(f"Saved {info.key_env} globally → {user_prefs._prefs_path()}")
+            else:
+                updated = _set_env_var(updated, info.key_env, key_value)
+                env_path.write_text("\n".join(updated) + "\n")
+                ui.success(f"Saved {info.key_env} to {env_path.resolve()}")
         elif not existing:
-            ui.info(f"No key entered — set {info.key_env} in your .env when ready")
+            ui.info(f"No key entered — set {info.key_env} via 'dataforge config' when ready")
 
     ui.success(f"Saved: provider={provider}, model={model}")
 
@@ -470,6 +475,11 @@ async def _step_config(state: dict) -> StepResult:
         if n_per_chunk is None:
             return "back"
         state["n_per_chunk"] = n_per_chunk
+
+        ignore_robots = await prompts.ask_ignore_robots()
+        if ignore_robots:
+            ui.warn("robots.txt enforcement disabled — ensure you have permission to scrape this site.")
+        state["ignore_robots"] = ignore_robots
     except KeyboardInterrupt:
         return "back"
     return "next"
@@ -498,7 +508,13 @@ async def _step_review(state: dict) -> StepResult:
 # ── Interactive pipeline wizard ────────────────────────────────────────────────
 
 async def _interactive_pipeline() -> None:
+    from dataforge.cli import prefs as user_prefs
     s = get_settings()
+
+    # Show where files will land so the user always knows what's happening
+    ui.info(f"Output:   [dim]{s.output_dir.resolve()}[/]")
+    ui.info(f"Database: [dim]{s.db_path.resolve()}[/]")
+    ui.info(f"Config:   [dim]{user_prefs._prefs_path()}[/]")
 
     # ── Main menu loop (allows returning here without restarting the process) ──
     while True:
@@ -569,6 +585,7 @@ async def _interactive_pipeline() -> None:
         settings=s,
         custom_system_prompt=state.get("custom_sys", ""),
         n_per_chunk=state["n_per_chunk"],
+        ignore_robots=state.get("ignore_robots", False),
     )
     ui.info(f"Session ID: [bold]{session_id[:8]}[/]")
     ui.info(f"Session directory: [dim]{ctx.session_dir()}[/]")

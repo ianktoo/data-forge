@@ -34,6 +34,7 @@ class PipelineContext:
     # Custom system prompt override
     custom_system_prompt: str = ""
     n_per_chunk: int = 3
+    ignore_robots: bool = False
 
     # Lifecycle
     current_stage: PipelineStage = PipelineStage.discovery

@@ -196,6 +196,24 @@ async def ask_n_per_chunk() -> int | None:
     return int(val)
 
 
+async def ask_ignore_robots() -> bool:
+    answer = await questionary.confirm(
+        "Ignore robots.txt restrictions? (only enable on sites you own or have permission to scrape)",
+        default=False,
+        **_q(),
+    ).ask_async()
+    return bool(answer)
+
+
+async def ask_save_key_globally() -> bool:
+    answer = await questionary.confirm(
+        "Save API key globally (persists across all directories, no .env needed)?",
+        default=True,
+        **_q(),
+    ).ask_async()
+    return bool(answer)
+
+
 async def ask_session_name() -> str | None:
     answer = await questionary.text(
         "Session name (for reference):",
