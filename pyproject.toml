@@ -1,5 +1,5 @@
 [project]
-name = "llm-web-crawler"
+name = "dataforge"
 version = "0.2.1"
 description = "LLM data collection and synthetic fine-tuning dataset pipeline"
 readme = "README.md"
@@ -40,6 +40,7 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
     "respx>=0.21",
+    "pyinstaller>=6",
 ]
 
 [project.scripts]
