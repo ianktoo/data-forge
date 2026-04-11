@@ -515,86 +515,6 @@ wheels = [
 ]
 
 [[package]]
-name = "dataforge"
-version = "0.3.0"
-source = { editable = "." }
-dependencies = [
-    { name = "aiofiles" },
-    { name = "beautifulsoup4" },
-    { name = "datasets" },
-    { name = "httpx", extra = ["http2"] },
-    { name = "huggingface-hub" },
-    { name = "jinja2" },
-    { name = "kaggle" },
-    { name = "litellm" },
-    { name = "loguru" },
-    { name = "lxml" },
-    { name = "markdownify" },
-    { name = "psutil" },
-    { name = "pyarrow" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "python-dotenv" },
-    { name = "questionary" },
-    { name = "rich" },
-    { name = "sqlmodel" },
-    { name = "tenacity" },
-    { name = "tiktoken" },
-    { name = "typer" },
-    { name = "xmltodict" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "pyinstaller" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "respx" },
-    { name = "ruff" },
-]
-unsloth = [
-    { name = "unsloth" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiofiles", specifier = ">=23" },
-    { name = "beautifulsoup4", specifier = ">=4.12" },
-    { name = "datasets", specifier = ">=2.20" },
-    { name = "httpx", extras = ["http2"], specifier = ">=0.27" },
-    { name = "huggingface-hub", specifier = ">=0.23" },
-    { name = "jinja2", specifier = ">=3.1" },
-    { name = "kaggle", specifier = ">=1.6" },
-    { name = "litellm", specifier = ">=1.40" },
-    { name = "loguru", specifier = ">=0.7" },
-    { name = "lxml", specifier = ">=5" },
-    { name = "markdownify", specifier = ">=0.12" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
-    { name = "psutil", specifier = ">=5.9" },
-    { name = "pyarrow", specifier = ">=16" },
-    { name = "pydantic", specifier = ">=2.7" },
-    { name = "pydantic-settings", specifier = ">=2.3" },
-    { name = "pyinstaller", marker = "extra == 'dev'", specifier = ">=6" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5" },
-    { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "questionary", specifier = ">=2.0" },
-    { name = "respx", marker = "extra == 'dev'", specifier = ">=0.21" },
-    { name = "rich", specifier = ">=13" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
-    { name = "sqlmodel", specifier = ">=0.0.18" },
-    { name = "tenacity", specifier = ">=8.3" },
-    { name = "tiktoken", specifier = ">=0.7" },
-    { name = "typer", specifier = ">=0.12" },
-    { name = "unsloth", marker = "extra == 'unsloth'", specifier = ">=2024.0" },
-    { name = "xmltodict", specifier = ">=0.13" },
-]
-provides-extras = ["unsloth", "dev"]
-
-[[package]]
 name = "datasets"
 version = "4.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1332,6 +1252,86 @@ sdist = { url = "https://files.pythonhosted.org/packages/22/92/6ce9737554994ca8e
 wheels = [
     { url = "https://files.pythonhosted.org/packages/19/2c/a670cc050fcd6f45c6199eb99e259c73aea92edba8d5c2fc1b3686d36217/litellm-1.83.0-py3-none-any.whl", hash = "sha256:88c536d339248f3987571493015784671ba3f193a328e1ea6780dbebaa2094a8", size = 15610306, upload-time = "2026-03-31T05:08:21.987Z" },
 ]
+
+[[package]]
+name = "llm-web-crawler"
+version = "0.3.1"
+source = { editable = "." }
+dependencies = [
+    { name = "aiofiles" },
+    { name = "beautifulsoup4" },
+    { name = "datasets" },
+    { name = "httpx", extra = ["http2"] },
+    { name = "huggingface-hub" },
+    { name = "jinja2" },
+    { name = "kaggle" },
+    { name = "litellm" },
+    { name = "loguru" },
+    { name = "lxml" },
+    { name = "markdownify" },
+    { name = "psutil" },
+    { name = "pyarrow" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "python-dotenv" },
+    { name = "questionary" },
+    { name = "rich" },
+    { name = "sqlmodel" },
+    { name = "tenacity" },
+    { name = "tiktoken" },
+    { name = "typer" },
+    { name = "xmltodict" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pyinstaller" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "respx" },
+    { name = "ruff" },
+]
+unsloth = [
+    { name = "unsloth" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiofiles", specifier = ">=23" },
+    { name = "beautifulsoup4", specifier = ">=4.12" },
+    { name = "datasets", specifier = ">=2.20" },
+    { name = "httpx", extras = ["http2"], specifier = ">=0.27" },
+    { name = "huggingface-hub", specifier = ">=0.23" },
+    { name = "jinja2", specifier = ">=3.1" },
+    { name = "kaggle", specifier = ">=1.6" },
+    { name = "litellm", specifier = ">=1.40" },
+    { name = "loguru", specifier = ">=0.7" },
+    { name = "lxml", specifier = ">=5" },
+    { name = "markdownify", specifier = ">=0.12" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
+    { name = "psutil", specifier = ">=5.9" },
+    { name = "pyarrow", specifier = ">=16" },
+    { name = "pydantic", specifier = ">=2.7" },
+    { name = "pydantic-settings", specifier = ">=2.3" },
+    { name = "pyinstaller", marker = "extra == 'dev'", specifier = ">=6" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5" },
+    { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "questionary", specifier = ">=2.0" },
+    { name = "respx", marker = "extra == 'dev'", specifier = ">=0.21" },
+    { name = "rich", specifier = ">=13" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
+    { name = "sqlmodel", specifier = ">=0.0.18" },
+    { name = "tenacity", specifier = ">=8.3" },
+    { name = "tiktoken", specifier = ">=0.7" },
+    { name = "typer", specifier = ">=0.12" },
+    { name = "unsloth", marker = "extra == 'unsloth'", specifier = ">=2024.0" },
+    { name = "xmltodict", specifier = ">=0.13" },
+]
+provides-extras = ["unsloth", "dev"]
 
 [[package]]
 name = "loguru"
