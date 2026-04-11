@@ -45,6 +45,7 @@ class Orchestrator:
         context: PipelineContext,
         *,
         stage_hook: StageHook | None = None,
+        pre_stage_hook: StageHook | None = None,
         scraper_progress_cb=None,
         generator_progress_cb=None,
         export_kwargs: dict | None = None,
@@ -54,6 +55,7 @@ class Orchestrator:
     ) -> None:
         self.ctx = context
         self._hook = stage_hook
+        self._pre_hook = pre_stage_hook
         self._scraper_cb = scraper_progress_cb
         self._gen_cb = generator_progress_cb
         self._export_kw = export_kwargs or {}
@@ -95,6 +97,8 @@ class Orchestrator:
                 continue
 
             try:
+                if self._pre_hook:
+                    await self._pre_hook(stage, self.ctx)
                 agent = self._build_agent(stage)
                 self.ctx = await agent.run()
             except Exception as exc:

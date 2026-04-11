@@ -268,6 +268,65 @@ def view_chunks(rows: list[dict], max_rows: int = 50) -> None:
     console.print(t)
 
 
+def pipeline_overview_panel(current_stage: str | None = None, next_stage: str | None = None) -> None:
+    """Print a full pipeline stage overview with descriptions."""
+    from rich.text import Text as RText
+
+    STAGES = [
+        ("discovery",  "1",  "Discovery",   "Crawls sitemaps and robots.txt to discover all URLs on the target site."),
+        ("collection", "2",  "Collection",  "Fetches each URL and converts the page to clean Markdown text, respecting rate limits."),
+        ("processing", "3",  "Processing",  "Splits pages into token-aware overlapping chunks and attaches source metadata."),
+        ("generation", "4",  "Generation",  "Prompts the LLM to synthesise Q&A / instruction / conversation samples from each chunk."),
+        ("quality",    "5",  "Quality",     "Asks the LLM to score every sample 1–5; only samples above the threshold are approved."),
+        ("export",     "6",  "Export",      "Writes approved samples to local JSONL, HuggingFace Hub, or Kaggle datasets."),
+    ]
+    t = Table(box=box.SIMPLE_HEAD, title="[bold]Pipeline Stages[/]", show_header=True)
+    t.add_column("Step", width=6, justify="center")
+    t.add_column("Stage", width=14)
+    t.add_column("What happens", no_wrap=False)
+
+    for key, num, name, desc in STAGES:
+        if key == current_stage:
+            step_str = f"[bold cyan]► {num}[/]"
+            name_str = f"[bold cyan]{name}[/]"
+            desc_str = f"[cyan]{desc}[/]"
+        elif key == next_stage:
+            step_str = f"[yellow]{num}[/]"
+            name_str = f"[yellow]{name}[/]"
+            desc_str = f"[yellow]{desc}[/]"
+        else:
+            step_str = f"[dim]{num}[/]"
+            name_str = f"[dim]{name}[/]"
+            desc_str = f"[dim]{desc}[/]"
+        t.add_row(step_str, name_str, desc_str)
+
+    console.print(t)
+    if current_stage:
+        console.print(f"  [cyan]►[/] Currently at stage: [bold cyan]{current_stage}[/]")
+    if next_stage:
+        console.print(f"  [yellow]→[/] Next stage: [bold yellow]{next_stage}[/]")
+
+
+def stage_description(stage: str, step: int, total: int, detail: str) -> None:
+    """Print a rich stage header with what the stage will do."""
+    from rich.text import Text as RText
+    t = RText()
+    t.append(f"Step {step}/{total}  ", style="bold cyan")
+    t.append(stage.title(), style="bold white")
+    t.append(f"\n{detail}", style="dim")
+    console.print(Panel(t, border_style="cyan", box=box.ROUNDED, padding=(0, 2)))
+
+
+def project_info_panel(project: dict) -> None:
+    """Panel showing .dataforge project-level and folder-level details."""
+    t = Table.grid(padding=(0, 2))
+    t.add_column(style="bold cyan", min_width=18)
+    t.add_column()
+    for k, v in project.items():
+        t.add_row(k, str(v))
+    console.print(Panel(t, title="[bold]Project & Folder Info[/]", border_style="cyan"))
+
+
 def view_samples(rows: list[dict], title: str = "Samples", max_rows: int = 30) -> None:
     """Table of synthetic samples."""
     t = Table(box=box.SIMPLE_HEAD, title=f"{title} ({len(rows)} total)")

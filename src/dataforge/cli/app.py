@@ -35,7 +35,7 @@ def _typer_error_handler(error: Exception) -> None:
     if "No such command" in msg or "no such option" in msg.lower():
         _VALID_COMMANDS = [
             "pipeline", "explore", "resume", "sessions",
-            "export", "view", "config", "providers", "info", "test-llm", "update",
+            "export", "view", "config", "providers", "info", "test-llm", "update", "plan",
         ]
         # Try to find the closest match
         import difflib
@@ -346,13 +346,17 @@ def view(
         None, "--stage", "-s",
         help="Stage to view: discovery | collection | processing | generation | quality",
     ),
+    limit: int = typer.Option(
+        5, "--limit", "-n",
+        help="Number of records to show per stage (default: 5).",
+    ),
 ) -> None:
-    """View collected data at each pipeline stage for a session."""
+    """View a sample of collected data at each pipeline stage for a session."""
     _bootstrap()
-    asyncio.run(_view_session(session_id, stage))
+    asyncio.run(_view_session(session_id, stage, limit=limit))
 
 
-async def _view_session(session_id: str, stage: str | None) -> None:
+async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> None:
     from dataforge.storage import ScrapedPage, ProcessedChunk, ExportRecord
     s = get_settings()
 
@@ -404,14 +408,16 @@ async def _view_session(session_id: str, stage: str | None) -> None:
             rows_db = db.exec(select(DiscoveredURL).where(DiscoveredURL.session_id == sid)).all()
         rows = [{"url": r.url, "source": r.source, "selected": r.selected,
                  "http_status": r.http_status} for r in rows_db]
-        ui.view_urls(rows)
+        ui.info(f"Showing {min(limit, len(rows))} of {len(rows)} discovered URLs  [dim](use --limit to change)[/]")
+        ui.view_urls(rows, max_rows=limit)
 
     elif stage == "collection":
         with open_session(s.db_path) as db:
             rows_db = db.exec(select(ScrapedPage).where(ScrapedPage.session_id == sid)).all()
         rows = [{"url": r.url, "title": r.title, "word_count": r.word_count,
                  "scraped_at": r.scraped_at.strftime("%Y-%m-%d %H:%M")} for r in rows_db]
-        ui.view_pages(rows)
+        ui.info(f"Showing {min(limit, len(rows))} of {len(rows)} scraped pages  [dim](use --limit to change)[/]")
+        ui.view_pages(rows, max_rows=limit)
 
     elif stage == "processing":
         with open_session(s.db_path) as db:
@@ -419,7 +425,8 @@ async def _view_session(session_id: str, stage: str | None) -> None:
         rows = [{"chunk_index": r.chunk_index, "token_count": r.token_count,
                  "content": r.content,
                  "source_url": r.parsed_meta().get("source_url", "")} for r in rows_db]
-        ui.view_chunks(rows)
+        ui.info(f"Showing {min(limit, len(rows))} of {len(rows)} chunks  [dim](use --limit to change)[/]")
+        ui.view_chunks(rows, max_rows=limit)
 
     elif stage in ("generation", "quality"):
         with open_session(s.db_path) as db:
@@ -430,7 +437,8 @@ async def _view_session(session_id: str, stage: str | None) -> None:
         rows = [{"format": r.format, "quality_score": r.quality_score,
                  "approved": r.approved, "messages": r.messages()} for r in rows_db]
         title = "Approved Samples" if stage == "quality" else "Generated Samples"
-        ui.view_samples(rows, title=title)
+        ui.info(f"Showing {min(limit, len(rows))} of {len(rows)} samples  [dim](use --limit to change)[/]")
+        ui.view_samples(rows, title=title, max_rows=limit)
 
     else:
         ui.error(f"Unknown stage '{stage}'. Valid: discovery, collection, processing, generation, quality")
@@ -546,31 +554,59 @@ def update() -> None:
     """Update DataForge to the latest version via pip."""
     import subprocess
     import sys
+    from importlib.metadata import version as _pkg_version, PackageNotFoundError
+
+    try:
+        current_ver = _pkg_version("llm-web-crawler")
+    except PackageNotFoundError:
+        current_ver = "unknown"
+
+    ui.info(f"Current version: [bold]{current_ver}[/]")
     ui.info("Checking for updates...")
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--upgrade", "dataforge"],
+        [sys.executable, "-m", "pip", "install", "--upgrade", "llm-web-crawler"],
         capture_output=True,
         text=True,
     )
     if result.returncode == 0:
-        ui.success("DataForge is up to date.")
-        if "Successfully installed" in result.stdout:
-            # Extract installed version from pip output
-            for line in result.stdout.splitlines():
-                if "Successfully installed" in line:
-                    ui.info(line.strip())
-                    break
+        new_ver = current_ver
+        for line in result.stdout.splitlines():
+            if "Successfully installed" in line:
+                for token in line.split():
+                    if token.lower().startswith("llm-web-crawler-"):
+                        new_ver = token[len("llm-web-crawler-"):]
+                        break
+        if new_ver != current_ver and current_ver != "unknown":
+            ui.success(f"Updated: [dim]{current_ver}[/] → [bold green]{new_ver}[/]")
+        elif "already" in result.stdout.lower() or new_ver == current_ver:
+            ui.success(f"Already up to date (v{current_ver})")
+        else:
+            ui.success(f"Updated to v{new_ver}")
     else:
         ui.error("Update failed.")
         console.print(result.stderr.strip(), style="dim red")
+
+
+# ── plan command ─────────────────────────────────────────────────────────────
+
+@app.command()
+def plan() -> None:
+    """Show the full pipeline overview and current project status."""
+    _bootstrap()
+    _show_pipeline_plan()
 
 
 # ── info command ──────────────────────────────────────────────────────────────
 
 @app.command()
 def info() -> None:
-    """Show system information and environment status."""
+    """Show system information, environment status, and folder-level project info."""
     _bootstrap()
+    _show_info()
+
+
+def _show_info() -> None:
+    from dataforge.cli.dataforge_file import find_project_file, get_project_sessions
     s = get_settings()
     sysinfo = system_info()
     stats = {
@@ -588,6 +624,172 @@ def info() -> None:
         "Kaggle":        "configured" if s.kaggle_username else "not configured",
     }
     ui.stats_panel(stats)
+
+    # ── Folder / project level ────────────────────────────────────────────────
+    pf = find_project_file(Path.cwd())
+    if pf:
+        try:
+            proj_sessions = get_project_sessions(pf)
+            db_path = Path(pf.parent / "dataforge.db")
+            db_size = f"{db_path.stat().st_size / 1024:.1f} KB" if db_path.exists() else "not found"
+            out_dir = s.output_dir
+            try:
+                out_size_bytes = sum(f.stat().st_size for f in out_dir.rglob("*") if f.is_file())
+                out_size = f"{out_size_bytes / (1024 * 1024):.1f} MB"
+            except Exception:
+                out_size = "unavailable"
+
+            # Count sessions by status from DB
+            with open_session(s.db_path) as db:
+                all_s = db.exec(select(PipelineSession)).all()
+            tracked_ids = {e["id"] for e in proj_sessions}
+            proj_s = [x for x in all_s if x.id in tracked_ids]
+            status_counts = {}
+            for sess in proj_s:
+                status_counts[sess.status] = status_counts.get(sess.status, 0) + 1
+            status_str = "  ".join(f"{k}={v}" for k, v in status_counts.items()) or "none"
+
+            proj_info = {
+                ".dataforge file":    str(pf),
+                "Project directory":  str(pf.parent),
+                "Sessions tracked":   str(len(proj_sessions)),
+                "Session status":     status_str,
+                "Database size":      db_size,
+                "Output dir size":    out_size,
+                "Output directory":   str(out_dir),
+            }
+        except Exception as exc:
+            proj_info = {".dataforge": str(pf), "Parse error": str(exc)}
+        ui.project_info_panel(proj_info)
+    else:
+        ui.info(
+            "No [bold].dataforge[/] project file found in this directory or parents.\n"
+            "  Start a pipeline to create one: [bold]dataforge pipeline[/]\n"
+            "  [dim](On Windows, .dataforge is a hidden file — enable 'Show hidden items' in Explorer)[/]"
+        )
+
+
+# ── Pipeline plan helper ──────────────────────────────────────────────────────
+
+def _show_pipeline_plan() -> None:
+    """Show pipeline stage overview + current project session status."""
+    from dataforge.cli.dataforge_file import find_project_file, get_project_sessions
+    from dataforge.storage import PipelineStage
+
+    _STAGE_FLOW_LIST = [
+        PipelineStage.discovery, PipelineStage.collection, PipelineStage.processing,
+        PipelineStage.generation, PipelineStage.quality, PipelineStage.export,
+    ]
+
+    ui.section("Pipeline Plan")
+
+    # Find current project sessions for context
+    pf = find_project_file(Path.cwd())
+    current_stage: str | None = None
+    next_stage: str | None = None
+
+    if pf:
+        s = get_settings()
+        try:
+            proj_sessions = get_project_sessions(pf)
+            tracked_ids = {e["id"] for e in proj_sessions}
+            with open_session(s.db_path) as db:
+                all_s = db.exec(select(PipelineSession)).all()
+            active = [x for x in all_s if x.id in tracked_ids
+                      and x.status in ("active", "paused")]
+            if active:
+                latest = sorted(active, key=lambda x: x.updated_at or x.created_at, reverse=True)[0]
+                current_stage = latest.stage
+                idx = _STAGE_FLOW_LIST.index(current_stage) if current_stage in _STAGE_FLOW_LIST else -1
+                if idx >= 0 and idx + 1 < len(_STAGE_FLOW_LIST):
+                    next_stage = _STAGE_FLOW_LIST[idx + 1]
+                ui.info(
+                    f"Project session [bold]{latest.name}[/]  [{latest.id[:8]}]"
+                    f"  status=[yellow]{latest.status}[/]  at stage=[cyan]{current_stage}[/]"
+                )
+                if next_stage:
+                    ui.info(f"Next stage to run: [bold yellow]{next_stage}[/]")
+        except Exception:
+            pass
+
+    ui.pipeline_overview_panel(current_stage=current_stage, next_stage=next_stage)
+
+
+# ── Explore menu (interactive data browser) ────────────────────────────────────
+
+async def _explore_menu(limit: int = 5) -> None:
+    """Interactive menu for exploring data collected in a session."""
+    import questionary
+    s = get_settings()
+
+    with open_session(s.db_path) as db:
+        all_s = db.exec(select(PipelineSession)).all()
+
+    if not all_s:
+        ui.info("No sessions found. Run [bold]dataforge pipeline[/] to start one.")
+        return
+
+    sorted_s = sorted(all_s, key=lambda x: x.created_at, reverse=True)
+    choices = [
+        questionary.Choice(
+            f"{x.name}  [{x.id[:8]}]  stage={x.stage}  status={x.status}",
+            value=x.id,
+        )
+        for x in sorted_s
+    ]
+    choices.append(questionary.Choice("[dim]← Back[/]", value="__back__"))
+
+    session_id = await questionary.select(
+        "Select a session to explore:", choices=choices
+    ).ask_async()
+
+    if not session_id or session_id == "__back__":
+        return
+
+    with open_session(s.db_path) as db:
+        session = db.get(PipelineSession, session_id)
+    if not session:
+        ui.error("Session not found")
+        return
+
+    # Stage sub-menu loop
+    _STAGE_OPTIONS = [
+        ("discovery",  "Discovery  — discovered URLs"),
+        ("collection", "Collection — scraped pages"),
+        ("processing", "Processing — text chunks"),
+        ("generation", "Generation — synthetic samples"),
+        ("quality",    "Quality    — approved samples"),
+    ]
+
+    while True:
+        ui.info(
+            f"Exploring [bold]{session.name}[/]  [{session.id[:8]}]"
+            f"  stage=[cyan]{session.stage}[/]  limit=[bold]{limit}[/]"
+        )
+        stage_choices = [questionary.Choice(label, value=key) for key, label in _STAGE_OPTIONS]
+        stage_choices.append(questionary.Choice(f"Change sample limit  (current: {limit})", value="__limit__"))
+        stage_choices.append(questionary.Choice("← Back to main menu", value="__back__"))
+
+        picked = await questionary.select(
+            "Which stage do you want to explore?", choices=stage_choices
+        ).ask_async()
+
+        if not picked or picked == "__back__":
+            break
+
+        if picked == "__limit__":
+            raw = await questionary.text(
+                f"Enter number of records to show (current: {limit}):",
+                default=str(limit),
+            ).ask_async()
+            try:
+                limit = max(1, int(raw or limit))
+                ui.info(f"Sample limit set to [bold]{limit}[/]")
+            except ValueError:
+                ui.warn("Invalid number — keeping current limit")
+            continue
+
+        await _view_session(session.id, picked, limit=limit)
 
 
 # ── Wizard step functions ─────────────────────────────────────────────────────
@@ -696,36 +898,100 @@ async def _interactive_pipeline() -> None:
     ui.info(f"Database: [dim]{s.db_path.resolve()}[/]")
     ui.info(f"Config:   [dim]{user_prefs._prefs_path()}[/]")
 
-    # ── Main menu loop (allows returning here without restarting the process) ──
+    # ── Outer application loop — returns to menu after each pipeline run ───────
     while True:
-        action = await _main_menu()
-        if action == "resume":
-            await _pick_and_resume()
-            continue
-        if action == "sessions":
-            with open_session(s.db_path) as db:
-                all_s = db.exec(select(PipelineSession)).all()
-            rows = [{"id": x.id, "name": x.name, "stage": x.stage,
-                     "status": x.status, "urls": 0, "samples": 0,
-                     "created": x.created_at.strftime("%Y-%m-%d %H:%M")} for x in all_s]
-            ui.sessions_table(rows)
-            continue
-        if action == "config":
-            await _configure()
-            continue
-        if action == "info":
-            sysinfo = system_info()
-            ui.stats_panel(sysinfo)
-            continue
-        if action == "update":
-            update()
-            continue
-        if action == "exit":
-            raise typer.Exit()
-        break  # action == "new"
+        # ── Main menu loop ────────────────────────────────────────────────────
+        while True:
+            action = await _main_menu()
+            if action == "new":
+                break  # fall through to wizard
+            if action == "resume":
+                await _pick_and_resume()
+                continue
+            if action == "explore":
+                await _explore_menu()
+                continue
+            if action == "plan":
+                _show_pipeline_plan()
+                continue
+            if action == "sessions":
+                with open_session(s.db_path) as db:
+                    all_s = db.exec(select(PipelineSession)).all()
+                rows = [{"id": x.id, "name": x.name, "stage": x.stage,
+                         "status": x.status, "urls": 0, "samples": 0,
+                         "created": x.created_at.strftime("%Y-%m-%d %H:%M")} for x in all_s]
+                ui.sessions_table(rows)
+                continue
+            if action == "config":
+                await _configure()
+                continue
+            if action == "info":
+                _show_info()
+                continue
+            if action == "update":
+                update()
+                continue
+            if action == "exit":
+                raise typer.Exit()
 
-    # ── Wizard state-machine ──────────────────────────────────────────────────
-    state: dict = {}
+        # ── Wizard ────────────────────────────────────────────────────────────
+        state: dict = {}
+        wizard_result = await _run_wizard(state)
+
+        if wizard_result == "home":
+            continue  # back to main menu
+        if wizard_result == "exit":
+            raise typer.Exit()
+        # wizard_result == "done" — fall through to launch
+
+        # ── Launch pipeline ───────────────────────────────────────────────────
+        # Re-read settings in case output dir was updated during wizard
+        s = get_settings()
+        session_id = str(uuid.uuid4())
+        ctx = PipelineContext(
+            session_id=session_id,
+            session_name=state["session_name"],
+            goal=state["goal"],
+            format=DataFormat(state["fmt"]),
+            seed_urls=state["seed_urls"],
+            settings=s,
+            custom_system_prompt=state.get("custom_sys", ""),
+            n_per_chunk=state["n_per_chunk"],
+            ignore_robots=state.get("ignore_robots", False),
+        )
+
+        # Write / update .dataforge project file so 'resume' always works
+        from dataforge.cli.dataforge_file import find_project_file, create_project, add_session
+        cwd = Path.cwd()
+        pf = find_project_file(cwd)
+        if pf and pf.parent == cwd:
+            add_session(pf, session_id, state["session_name"])
+            ui.info(f"Session recorded in [bold].dataforge[/] → [dim]{pf}[/]")
+        else:
+            pf = create_project(cwd, s.db_path, s.output_dir, session_id, state["session_name"])
+            ui.info(
+                f"[bold].dataforge[/] project file created → [dim]{pf}[/]\n"
+                "  Tracks sessions so [bold]dataforge resume[/] works from this directory.\n"
+                "  [dim](Windows: hidden file — enable 'Show hidden items' in Explorer to see it)[/]"
+            )
+        # Re-initialise DB at the (possibly new) path chosen during the wizard
+        from dataforge.storage import init_db
+        init_db(s.db_path)
+
+        ui.info(f"Session ID: [bold]{session_id[:8]}[/]")
+        ui.info(f"Session directory: [dim]{ctx.session_dir()}[/]")
+        ui.info(f"Database: [dim]{s.db_path.resolve()}[/]")
+
+        await _run_orchestrator(ctx)
+
+        # ── Post-pipeline: offer explore or loop back to menu ─────────────────
+        ui.section("Pipeline Complete")
+        ui.info("Returning to main menu — use [bold]explore[/] to inspect your data.")
+        # Loop back to the top of the outer while True (shows main menu again)
+
+
+async def _run_wizard(state: dict) -> str:
+    """Run the pipeline setup wizard. Returns 'done' | 'home' | 'exit'."""
     STEPS = ["urls", "output", "config", "review"]
     step_idx = 0
 
@@ -743,6 +1009,8 @@ async def _interactive_pipeline() -> None:
             result = await _step_config(state)
         elif step == "review":
             result = await _step_review(state)
+        else:
+            result = "next"
 
         if result == "next":
             step_idx += 1
@@ -753,47 +1021,41 @@ async def _interactive_pipeline() -> None:
         elif result == "back_to_config":
             step_idx = STEPS.index("config")
         elif result == "home":
-            return await _interactive_pipeline()
+            return "home"
         elif result == "exit":
-            raise typer.Exit()
+            return "exit"
 
-    # ── Launch pipeline ───────────────────────────────────────────────────────
-    # Re-read settings in case output dir was updated during wizard
-    s = get_settings()
-    session_id = str(uuid.uuid4())
-    ctx = PipelineContext(
-        session_id=session_id,
-        session_name=state["session_name"],
-        goal=state["goal"],
-        format=DataFormat(state["fmt"]),
-        seed_urls=state["seed_urls"],
-        settings=s,
-        custom_system_prompt=state.get("custom_sys", ""),
-        n_per_chunk=state["n_per_chunk"],
-        ignore_robots=state.get("ignore_robots", False),
-    )
+    return "done"
 
-    # Write / update .dataforge project file so 'resume' always works from this dir
-    from dataforge.cli.dataforge_file import find_project_file, create_project, add_session
-    cwd = Path.cwd()
-    pf = find_project_file(cwd)
-    if pf and pf.parent == cwd:
-        add_session(pf, session_id, state["session_name"])
-        ui.info(f"Session recorded in [bold].dataforge[/] at [dim]{pf}[/]")
-    else:
-        pf = create_project(cwd, s.db_path, s.output_dir, session_id, state["session_name"])
-        ui.info(
-            f"[bold].dataforge[/] project file created at [dim]{pf}[/]\n"
-            "  This file tracks your sessions so 'dataforge resume' works from this directory."
-        )
-    # Re-initialise DB at the (possibly new) path chosen during the wizard
-    from dataforge.storage import init_db
-    init_db(s.db_path)
 
-    ui.info(f"Session ID: [bold]{session_id[:8]}[/]")
-    ui.info(f"Session directory: [dim]{ctx.session_dir()}[/]")
-    ui.info(f"Database: [dim]{s.db_path.resolve()}[/]")
-    await _run_orchestrator(ctx)
+_STAGE_PRE_DESCRIPTIONS = {
+    PipelineStage.discovery:  (
+        "Crawling sitemaps and robots.txt to build the full URL list for this site. "
+        "No pages are downloaded yet — this only maps what's available."
+    ),
+    PipelineStage.collection: (
+        "Fetching each selected URL and converting page HTML to clean Markdown. "
+        "Rate limiting is applied so the target server is not overloaded."
+    ),
+    PipelineStage.processing: (
+        "Splitting pages into token-aware overlapping chunks. "
+        "Each chunk gets source metadata so samples can be traced back to their origin."
+    ),
+    PipelineStage.generation: (
+        "Prompting the LLM to generate synthetic training samples from each chunk. "
+        "Format, system prompt, and samples-per-chunk follow your session settings."
+    ),
+    PipelineStage.quality: (
+        "Asking the LLM to score every sample on a 1–5 quality scale. "
+        "Only samples at or above the threshold are marked approved and included in exports."
+    ),
+    PipelineStage.export: (
+        "Writing approved samples to the configured destinations "
+        "(local JSONL, HuggingFace Hub, or Kaggle)."
+    ),
+}
+
+_STAGE_TOTAL = 6
 
 
 async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None) -> None:
@@ -867,9 +1129,16 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
             return await post_discovery_hook(stage, context)
         return await stage_hook(stage, context)
 
+    async def pre_stage_hook(stage: str, context: PipelineContext) -> bool:
+        name, step = _stage_map.get(stage, (stage, 0))
+        detail = _STAGE_PRE_DESCRIPTIONS.get(stage, "")
+        ui.stage_description(name, step, _STAGE_TOTAL, detail)
+        return True
+
     orch = Orchestrator(
         ctx,
         stage_hook=combined_hook,
+        pre_stage_hook=pre_stage_hook,
         scraper_progress_cb=scraper_progress,
         generator_progress_cb=gen_progress,
         export_kwargs=await _ask_export_config(s),
@@ -879,9 +1148,14 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
     if ctx.export_records:
         ui.export_summary(ctx.export_records)
 
-    ui.success("Pipeline complete!")
-    ui.info(f"Session: [bold]{ctx.session_id[:8]}[/]  |  "
-            f"Approved samples: [bold]{len(ctx.approved_sample_ids)}[/]")
+    ui.success(
+        f"Pipeline complete!  Session [bold]{ctx.session_id[:8]}[/]  |  "
+        f"Approved samples: [bold]{len(ctx.approved_sample_ids)}[/]"
+    )
+    ui.info(
+        f"Use [bold]explore[/] from the menu to browse results, "
+        f"or [bold]dataforge view {ctx.session_id[:8]} --stage generation[/] from the terminal."
+    )
 
 
 def _make_progress_cb(label: str):
@@ -1012,13 +1286,15 @@ async def _collect_urls() -> list[str] | None:
 
 
 async def _main_menu() -> str:
-    _COMMANDS = ["new", "resume", "sessions", "config", "info", "update", "exit"]
+    _COMMANDS = ["new", "resume", "explore", "plan", "sessions", "config", "info", "update", "exit"]
     _DESCRIPTIONS = {
-        "new":      "Start new pipeline",
+        "new":      "Start a new pipeline",
         "resume":   "Resume a paused session",
+        "explore":  "Explore collected data from a session",
+        "plan":     "Show pipeline stages & current project status",
         "sessions": "List all sessions",
         "config":   "Configure LLM provider & keys",
-        "info":     "System info & env status",
+        "info":     "System & folder info",
         "update":   "Update DataForge to latest",
         "exit":     "Exit",
     }
