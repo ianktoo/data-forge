@@ -343,6 +343,44 @@ async def ask_model(choices: list[str]) -> str:
     return selection
 
 
+# ── Quality / model overrides ─────────────────────────────────────────────────
+
+async def ask_quality_threshold() -> float | None:
+    val = await questionary.text(
+        "Minimum quality score to approve samples (0.0–1.0):",
+        default="0.5",
+        validate=lambda v: (
+            v.replace(".", "", 1).isdigit() and 0.0 <= float(v) <= 1.0
+        ) or "Enter a decimal between 0.0 and 1.0",
+        **_q(),
+    ).ask_async()
+    if val is None:
+        return None
+    return float(val)
+
+
+async def ask_generation_model(current: str) -> str | None:
+    val = await questionary.text(
+        "Generation model (leave blank to keep current):",
+        default=current,
+        **_q(),
+    ).ask_async()
+    if val is None:
+        return None
+    return val.strip() or current
+
+
+async def ask_quality_model(generation_model: str) -> str | None:
+    val = await questionary.text(
+        "Quality model (leave blank to reuse generation model):",
+        default=generation_model,
+        **_q(),
+    ).ask_async()
+    if val is None:
+        return None
+    return val.strip() or generation_model
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _valid_url(v: str) -> bool:

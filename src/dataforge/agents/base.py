@@ -36,6 +36,16 @@ class PipelineContext:
     n_per_chunk: int = 3
     ignore_robots: bool = False
 
+    # Quality control
+    quality_threshold: float = 0.5   # min score to approve a sample
+
+    # Per-session model overrides (empty string = use settings.llm_model)
+    generation_model: str = ""
+    quality_model: str = ""
+
+    # Pause signal — any agent checks this and stops early when True
+    pause_requested: bool = False
+
     # Lifecycle
     current_stage: PipelineStage = PipelineStage.discovery
     errors: list[str] = field(default_factory=list)

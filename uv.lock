@@ -1255,7 +1255,7 @@ wheels = [
 
 [[package]]
 name = "llm-web-crawler"
-version = "0.4.0"
+version = "2.0.4"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },

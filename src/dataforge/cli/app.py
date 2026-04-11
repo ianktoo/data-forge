@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import Literal, Optional
@@ -862,6 +863,22 @@ async def _step_config(state: dict) -> StepResult:
         if ignore_robots:
             ui.warn("robots.txt enforcement disabled — ensure you have permission to scrape this site.")
         state["ignore_robots"] = ignore_robots
+
+        threshold = await prompts.ask_quality_threshold()
+        if threshold is None:
+            return "back"
+        state["quality_threshold"] = threshold
+
+        s = get_settings()
+        gen_model = await prompts.ask_generation_model(s.llm_model)
+        if gen_model is None:
+            return "back"
+        state["generation_model"] = gen_model
+
+        quality_model = await prompts.ask_quality_model(gen_model)
+        if quality_model is None:
+            return "back"
+        state["quality_model"] = quality_model
     except KeyboardInterrupt:
         return "back"
     return "next"
@@ -958,6 +975,9 @@ async def _interactive_pipeline() -> None:
             custom_system_prompt=state.get("custom_sys", ""),
             n_per_chunk=state["n_per_chunk"],
             ignore_robots=state.get("ignore_robots", False),
+            quality_threshold=state.get("quality_threshold", 0.5),
+            generation_model=state.get("generation_model", ""),
+            quality_model=state.get("quality_model", ""),
         )
 
         # Write / update .dataforge project file so 'resume' always works
@@ -1057,6 +1077,22 @@ _STAGE_PRE_DESCRIPTIONS = {
 
 _STAGE_TOTAL = 6
 
+_LANG_RE = re.compile(
+    r"/([a-z]{2}(?:-[a-z]{2})?)/|[?&]lang(?:uage)?=([a-z]{2})|[?&]locale=([a-z]{2})",
+    re.IGNORECASE,
+)
+
+
+def _detect_language_groups(urls: list[str]) -> dict[str, int]:
+    """Return {locale_code: count} for URLs containing language/locale patterns."""
+    counts: dict[str, int] = {}
+    for url in urls:
+        m = _LANG_RE.search(url)
+        if m:
+            lang = next(g for g in m.groups() if g).lower()
+            counts[lang] = counts.get(lang, 0) + 1
+    return counts
+
 
 async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None) -> None:
     s = ctx.settings
@@ -1105,6 +1141,15 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
 
         ui.url_table(context.discovered_urls)
 
+        # Show language/locale groups if multiple variants exist
+        lang_groups = _detect_language_groups(context.discovered_urls)
+        if len(lang_groups) >= 2:
+            ui.language_groups_panel(lang_groups, len(context.discovered_urls))
+            ui.warn(
+                "Multiple language variants detected — use the URL filter below "
+                "to select a single locale (e.g. type '/en/' to keep only English URLs)."
+            )
+
         pattern = await prompts.ask_url_filter(len(context.discovered_urls))
         if pattern:
             from dataforge.collectors import filter_urls
@@ -1133,6 +1178,17 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
         name, step = _stage_map.get(stage, (stage, 0))
         detail = _STAGE_PRE_DESCRIPTIONS.get(stage, "")
         ui.stage_description(name, step, _STAGE_TOTAL, detail)
+        if stage == PipelineStage.generation:
+            from dataforge.generators.templates import build_prompt
+            prompt = build_prompt(
+                "[your content here]",
+                context.format,
+                context.goal,
+                n=context.n_per_chunk,
+                custom_system=context.custom_system_prompt,
+            )
+            model = context.generation_model or context.settings.llm_model
+            ui.prompt_preview_panel(prompt.system, model)
         return True
 
     orch = Orchestrator(
@@ -1143,7 +1199,20 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
         generator_progress_cb=gen_progress,
         export_kwargs=await _ask_export_config(s),
     )
-    ctx = await orch.run(start_from=start_from)
+    try:
+        ctx = await orch.run(start_from=start_from)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        ui.warn(
+            f"Pipeline paused.  Resume: [bold]dataforge resume {ctx.session_id[:8]}[/]"
+        )
+        return
+
+    if ctx.pause_requested:
+        ui.warn(
+            f"Pipeline paused after partial scrape.  "
+            f"Resume: [bold]dataforge resume {ctx.session_id[:8]}[/]"
+        )
+        return
 
     if ctx.export_records:
         ui.export_summary(ctx.export_records)
@@ -1189,6 +1258,7 @@ def _print_stage_summary(stage: str, ctx: PipelineContext) -> None:
         PipelineStage.quality:    {
             "Approved": len(ctx.approved_sample_ids),
             "Rejected": len(ctx.synthetic_sample_ids) - len(ctx.approved_sample_ids),
+            "Threshold": f"{ctx.quality_threshold:.1f}",
         },
     }
     if stage not in summaries:
@@ -1206,6 +1276,19 @@ def _print_stage_summary(stage: str, ctx: PipelineContext) -> None:
         if cost:
             stats["LLM cost"]          = f"${cost:.4f}"
     ui.stats_panel(stats)
+
+    # Show quality score distribution after quality stage
+    if stage == PipelineStage.quality and ctx.synthetic_sample_ids:
+        from dataforge.storage import SyntheticSample, open_session
+        with open_session(ctx.settings.db_path) as db:
+            from sqlmodel import select as _select
+            rows = db.exec(
+                _select(SyntheticSample)
+                .where(SyntheticSample.session_id == ctx.session_id)
+            ).all()
+        scores = [r.quality_score for r in rows if r.quality_score is not None]
+        if scores:
+            ui.quality_distribution_panel(scores, ctx.quality_threshold)
 
 
 async def _quick_export(ctx: PipelineContext, stage: str) -> None:

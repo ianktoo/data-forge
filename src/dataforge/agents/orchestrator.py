@@ -101,6 +101,10 @@ class Orchestrator:
                     await self._pre_hook(stage, self.ctx)
                 agent = self._build_agent(stage)
                 self.ctx = await agent.run()
+            except KeyboardInterrupt:
+                log.info(f"Interrupted at stage '{stage}' — marking session paused")
+                self._update_session_status(SessionStatus.paused)
+                return self.ctx
             except Exception as exc:
                 log.error(f"Stage '{stage}' failed: {exc}", exc_info=True)
                 self.ctx.add_error(f"Stage '{stage}' error: {exc}")
@@ -111,6 +115,12 @@ class Orchestrator:
                 return self.ctx
 
             self._checkpoint()
+
+            # Mid-stage pause signal (e.g. scraper stopped early on Ctrl+C)
+            if self.ctx.pause_requested:
+                log.info(f"Pipeline paused after stage '{stage}' (pause_requested)")
+                self._update_session_status(SessionStatus.paused)
+                return self.ctx
 
             if self._hook:
                 proceed = await self._hook(stage, self.ctx)

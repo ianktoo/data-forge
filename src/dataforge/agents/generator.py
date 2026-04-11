@@ -53,7 +53,7 @@ class GeneratorAgent(BaseAgent):
         self.log.info(f"Generating samples from {len(records)} chunks "
                       f"(format={self.ctx.format}, n={self.ctx.n_per_chunk})")
 
-        llm = LLMClient()
+        llm = LLMClient(model_override=self.ctx.generation_model)
         sample_ids: list[int] = []
         done = 0
 

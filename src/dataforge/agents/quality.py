@@ -13,7 +13,6 @@ from .base import BaseAgent, PipelineContext
 
 _MIN_ANSWER_WORDS = 10
 _MIN_QUESTION_WORDS = 5
-_MIN_QUALITY = 0.5
 
 
 class QualityAgent(BaseAgent):
@@ -40,7 +39,7 @@ class QualityAgent(BaseAgent):
             else:
                 seen_hashes.add(fingerprint)
 
-            approved = score >= _MIN_QUALITY
+            approved = score >= self.ctx.quality_threshold
             with open_session(self.ctx.settings.db_path) as db:
                 s = db.get(SyntheticSample, sample.id)
                 if s:

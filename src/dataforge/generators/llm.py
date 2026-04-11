@@ -39,9 +39,10 @@ class UsageSummary:
 
 
 class LLMClient:
-    def __init__(self) -> None:
+    def __init__(self, model_override: str = "") -> None:
         s = get_settings()
-        self._model  = litellm_model(s.llm_provider, s.llm_model)
+        raw_model    = model_override or s.llm_model
+        self._model  = litellm_model(s.llm_provider, raw_model)
         self._temp   = s.llm_temperature
         self._max_tk = s.llm_max_tokens
         self.usage   = UsageSummary()

@@ -40,13 +40,20 @@ class ScraperAgent(BaseAgent):
                 return url, page_id
 
             tasks = [_tagged(url, i) for i, url in enumerate(urls)]
-            for coro in asyncio.as_completed(tasks):
-                url_label, page_id = await coro
-                done += 1
-                if page_id:
-                    self.ctx.scraped_page_ids.append(page_id)
-                if self._progress_cb:
-                    await self._progress_cb(done, len(urls), url_label)
+            try:
+                for coro in asyncio.as_completed(tasks):
+                    url_label, page_id = await coro
+                    done += 1
+                    if page_id:
+                        self.ctx.scraped_page_ids.append(page_id)
+                    if self._progress_cb:
+                        await self._progress_cb(done, len(urls), url_label)
+                    if self.ctx.pause_requested:
+                        self.log.info(f"Scraping paused after {done}/{len(urls)} URLs")
+                        break
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                self.ctx.pause_requested = True
+                self.log.info(f"Scraping interrupted after {done}/{len(urls)} URLs — partial results saved")
 
         self.log.info(f"Scraped {len(self.ctx.scraped_page_ids)}/{len(urls)} pages")
         return self.ctx

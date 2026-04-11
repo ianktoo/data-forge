@@ -327,6 +327,62 @@ def project_info_panel(project: dict) -> None:
     console.print(Panel(t, title="[bold]Project & Folder Info[/]", border_style="cyan"))
 
 
+def language_groups_panel(groups: dict[str, int], total: int) -> None:
+    """Show detected language/locale groups in discovered URLs."""
+    t = Table(box=box.SIMPLE_HEAD, title="[bold]Language Variants Detected[/]")
+    t.add_column("Locale", style="bold cyan", width=10)
+    t.add_column("URLs", justify="right", width=8)
+    t.add_column("Share", width=10)
+    t.add_column("", width=20)
+    for lang, count in sorted(groups.items(), key=lambda x: -x[1]):
+        pct = count / max(total, 1) * 100
+        bar = "█" * int(pct / 5)
+        t.add_row(lang, str(count), f"{pct:.0f}%", f"[cyan]{bar}[/]")
+    console.print(t)
+
+
+def quality_distribution_panel(scores: list[float], threshold: float) -> None:
+    """Show quality score distribution with bucket counts."""
+    if not scores:
+        return
+    buckets = {"Poor (<0.3)": 0, "Fair (0.3–0.5)": 0, "Good (0.5–0.8)": 0, "Excellent (≥0.8)": 0}
+    for s in scores:
+        if s < 0.3:
+            buckets["Poor (<0.3)"] += 1
+        elif s < 0.5:
+            buckets["Fair (0.3–0.5)"] += 1
+        elif s < 0.8:
+            buckets["Good (0.5–0.8)"] += 1
+        else:
+            buckets["Excellent (≥0.8)"] += 1
+
+    total = len(scores)
+    approved = sum(1 for s in scores if s >= threshold)
+    t = Table(box=box.SIMPLE_HEAD,
+              title=f"[bold]Quality Distribution[/]  (threshold: {threshold:.1f}  |  approved: {approved}/{total})")
+    t.add_column("Bucket", style="bold cyan", width=18)
+    t.add_column("Count", justify="right", width=7)
+    t.add_column("Share", width=8)
+    t.add_column("", width=24)
+    for label, count in buckets.items():
+        pct = count / max(total, 1) * 100
+        bar = "█" * int(pct / 4)
+        style = "green" if count and label in ("Good (0.5–0.8)", "Excellent (≥0.8)") else "dim"
+        t.add_row(label, str(count), f"{pct:.0f}%", f"[{style}]{bar}[/]")
+    console.print(t)
+
+
+def prompt_preview_panel(system_prompt: str, model: str) -> None:
+    """Show the LLM system prompt and model that will be used for generation."""
+    preview = system_prompt[:300] + ("…" if len(system_prompt) > 300 else "")
+    t = Table.grid(padding=(0, 1))
+    t.add_column(style="bold cyan", min_width=8)
+    t.add_column()
+    t.add_row("Model", f"[bold]{model}[/]")
+    t.add_row("Prompt", f"[dim]{preview}[/]")
+    console.print(Panel(t, title="[bold]Generation Prompt Preview[/]", border_style="cyan"))
+
+
 def view_samples(rows: list[dict], title: str = "Samples", max_rows: int = 30) -> None:
     """Table of synthetic samples."""
     t = Table(box=box.SIMPLE_HEAD, title=f"{title} ({len(rows)} total)")
