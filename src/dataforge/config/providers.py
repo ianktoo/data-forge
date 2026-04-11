@@ -15,6 +15,12 @@ PROVIDERS: dict[str, list[str]] = {
         "claude-sonnet-4-6",
         "claude-haiku-4-5-20251001",
     ],
+    "google": [
+        "gemini/gemini-2.5-pro-preview-03-25",
+        "gemini/gemini-2.0-flash",
+        "gemini/gemini-1.5-pro",
+        "gemini/gemini-1.5-flash",
+    ],
     "groq": [
         "groq/llama-3.3-70b-versatile",
         "groq/llama-3.1-8b-instant",
@@ -42,11 +48,12 @@ class ProviderInfo:
 
 
 PROVIDER_INFO: dict[str, ProviderInfo] = {
-    "openai":    ProviderInfo("OpenAI",    PROVIDERS["openai"],    True,  "OPENAI_API_KEY"),
-    "anthropic": ProviderInfo("Anthropic", PROVIDERS["anthropic"], True,  "ANTHROPIC_API_KEY"),
-    "groq":      ProviderInfo("Groq",      PROVIDERS["groq"],      True,  "GROQ_API_KEY"),
-    "together":  ProviderInfo("Together",  PROVIDERS["together"],  True,  "TOGETHER_API_KEY"),
-    "ollama":    ProviderInfo("Ollama",    PROVIDERS["ollama"],    False, ""),
+    "openai":    ProviderInfo("OpenAI",      PROVIDERS["openai"],    True,  "OPENAI_API_KEY"),
+    "anthropic": ProviderInfo("Anthropic",   PROVIDERS["anthropic"], True,  "ANTHROPIC_API_KEY"),
+    "google":    ProviderInfo("Google AI",   PROVIDERS["google"],    True,  "GEMINI_API_KEY"),
+    "groq":      ProviderInfo("Groq",        PROVIDERS["groq"],      True,  "GROQ_API_KEY"),
+    "together":  ProviderInfo("Together",    PROVIDERS["together"],  True,  "TOGETHER_API_KEY"),
+    "ollama":    ProviderInfo("Ollama",      PROVIDERS["ollama"],    False, ""),
 }
 
 

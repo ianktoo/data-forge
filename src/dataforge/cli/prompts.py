@@ -322,7 +322,7 @@ async def ask_confirm(msg: str, default: bool = True) -> bool:
 async def ask_provider() -> str:
     return await questionary.select(
         "LLM provider:",
-        choices=["openai", "anthropic", "groq", "together", "ollama"],
+        choices=["openai", "anthropic", "google", "groq", "together", "ollama"],
         **_q(),
     ).ask_async()
 

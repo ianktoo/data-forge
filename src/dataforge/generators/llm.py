@@ -92,6 +92,7 @@ class LLMClient:
                 from dataforge.utils.errors import MissingCredentialError
                 _KEY_MAP = {
                     "openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY",
+                    "google": "GEMINI_API_KEY",
                     "groq": "GROQ_API_KEY", "together": "TOGETHER_API_KEY",
                 }
                 s = get_settings()
@@ -216,6 +217,7 @@ class LLMClient:
                 from dataforge.utils.errors import MissingCredentialError
                 _KEY_MAP = {
                     "openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY",
+                    "google": "GEMINI_API_KEY",
                     "groq": "GROQ_API_KEY", "together": "TOGETHER_API_KEY",
                 }
                 key = _KEY_MAP.get(s.llm_provider, "API key")

@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     # Provider keys (passed through to litellm via env, not stored here)
     openai_api_key: str = Field("", alias="OPENAI_API_KEY")
     anthropic_api_key: str = Field("", alias="ANTHROPIC_API_KEY")
+    gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
     groq_api_key: str = Field("", alias="GROQ_API_KEY")
     together_api_key: str = Field("", alias="TOGETHER_API_KEY")
     ollama_base_url: str = Field("http://localhost:11434", alias="OLLAMA_BASE_URL")
