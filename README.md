@@ -10,14 +10,34 @@ samples, scores them for quality, and exports to HuggingFace Hub, Kaggle, or loc
 
 ### uv (recommended)
 ```bash
-uv tool install dataforge
+uv tool install llm-web-crawler
 dataforge
+```
+
+Update:
+```bash
+uv tool upgrade llm-web-crawler
+```
+
+Uninstall:
+```bash
+uv tool uninstall llm-web-crawler
 ```
 
 ### pip
 ```bash
-pip install dataforge
+pip install llm-web-crawler
 dataforge
+```
+
+Update:
+```bash
+pip install --upgrade llm-web-crawler
+```
+
+Uninstall:
+```bash
+pip uninstall llm-web-crawler
 ```
 
 ### From source
