@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +51,7 @@ def create_project(
             {
                 "id": session_id,
                 "name": session_name,
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
             }
         ],
     }
@@ -68,7 +68,7 @@ def add_session(project_path: Path, session_id: str, session_name: str) -> None:
             {
                 "id": session_id,
                 "name": session_name,
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
             }
         )
     data["sessions"] = sessions

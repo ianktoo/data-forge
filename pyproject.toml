@@ -1,6 +1,6 @@
 [project]
 name = "llm-web-crawler"
-version = "2.0.0"
+version = "2.0.1"
 description = "LLM data collection and synthetic fine-tuning dataset pipeline"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -65,6 +65,9 @@ ignore = ["E501"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "--cov=src/dataforge --cov-report=term-missing -q"
+markers = [
+    "integration: marks tests that require live network access (deselect with -m 'not integration')",
+]
 
 [tool.mypy]
 python_version = "3.11"

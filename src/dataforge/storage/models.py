@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Optional
 
@@ -55,8 +55,8 @@ class PipelineSession(SQLModel, table=True):
     status: str      = Field(default=SessionStatus.active)
     seed_urls: str   = Field(default="[]")   # JSON list
     config_json: str = Field(default="{}")   # JSON dict
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def seed_url_list(self) -> list[str]:
         return json.loads(self.seed_urls)
@@ -75,7 +75,7 @@ class DiscoveredURL(SQLModel, table=True):
     selected: bool      = Field(default=True)
     scraped: bool       = Field(default=False)
     http_status: Optional[int] = None
-    discovered_at: datetime = Field(default_factory=datetime.utcnow)
+    discovered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ScrapedPage(SQLModel, table=True):
@@ -90,7 +90,7 @@ class ScrapedPage(SQLModel, table=True):
     published_date: str = Field(default="")
     raw_path: str       = Field(default="")   # path to saved HTML/text
     word_count: int     = Field(default=0)
-    scraped_at: datetime = Field(default_factory=datetime.utcnow)
+    scraped_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ProcessedChunk(SQLModel, table=True):
@@ -103,7 +103,7 @@ class ProcessedChunk(SQLModel, table=True):
     token_count: int    = Field(default=0)
     chunk_index: int    = Field(default=0)
     metadata_json: str  = Field(default="{}")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def parsed_meta(self) -> dict[str, Any]:
         return json.loads(self.metadata_json)
@@ -120,7 +120,7 @@ class SyntheticSample(SQLModel, table=True):
     messages_json: str      = Field(default="[]")  # [{role, content}]
     quality_score: float    = Field(default=0.0)
     approved: bool          = Field(default=False)
-    created_at: datetime    = Field(default_factory=datetime.utcnow)
+    created_at: datetime    = Field(default_factory=lambda: datetime.now(UTC))
 
     def messages(self) -> list[dict[str, str]]:
         return json.loads(self.messages_json)
@@ -136,4 +136,4 @@ class ExportRecord(SQLModel, table=True):
     format: str
     sample_count: int   = Field(default=0)
     stage_snapshot: str = Field(default="")  # which stage data came from
-    exported_at: datetime = Field(default_factory=datetime.utcnow)
+    exported_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
