@@ -1,6 +1,6 @@
 [project]
 name = "llm-web-crawler"
-version = "0.3.2"
+version = "0.4.0"
 description = "LLM data collection and synthetic fine-tuning dataset pipeline"
 readme = "README.md"
 requires-python = ">=3.11"

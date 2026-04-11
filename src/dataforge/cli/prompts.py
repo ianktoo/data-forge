@@ -317,7 +317,19 @@ async def ask_provider() -> str:
 
 
 async def ask_model(choices: list[str]) -> str:
-    return await questionary.select("Model:", choices=choices, **_q()).ask_async()
+    _CUSTOM = "(custom) Enter model ID manually"
+    selection = await questionary.select(
+        "Model:",
+        choices=choices + [questionary.Separator(), _CUSTOM],
+        **_q(),
+    ).ask_async()
+    if selection == _CUSTOM:
+        return await questionary.text(
+            "Model ID (e.g. openai/o3, groq/llama-3.3-70b-versatile):",
+            validate=lambda v: bool(v.strip()) or "Model ID cannot be empty",
+            **_q(),
+        ).ask_async()
+    return selection
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
