@@ -34,15 +34,19 @@ class ScraperAgent(BaseAgent):
 
         done = 0
         async with HTTPClient(limiter, ignore_robots=self.ctx.ignore_robots) as client:
-            tasks = [self._scrape_one(client, sem, url, raw_dir, i)
-                     for i, url in enumerate(urls)]
+
+            async def _tagged(url: str, idx: int):
+                page_id = await self._scrape_one(client, sem, url, raw_dir, idx)
+                return url, page_id
+
+            tasks = [_tagged(url, i) for i, url in enumerate(urls)]
             for coro in asyncio.as_completed(tasks):
-                page_id = await coro
+                url_label, page_id = await coro
                 done += 1
                 if page_id:
                     self.ctx.scraped_page_ids.append(page_id)
                 if self._progress_cb:
-                    await self._progress_cb(done, len(urls))
+                    await self._progress_cb(done, len(urls), url_label)
 
         self.log.info(f"Scraped {len(self.ctx.scraped_page_ids)}/{len(urls)} pages")
         return self.ctx

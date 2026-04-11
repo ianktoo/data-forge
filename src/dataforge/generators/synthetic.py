@@ -14,6 +14,9 @@ from .templates import PromptPair, build_prompt
 
 log = get_logger("generator")
 
+# Serialize thinking display so concurrent chunk workers don't interleave output
+_thinking_lock = asyncio.Lock()
+
 
 @dataclass
 class GeneratedSample:
@@ -34,6 +37,15 @@ async def generate_from_chunk(
     n_per_chunk: int = 3,
     custom_system: str = "",
 ) -> list[GeneratedSample]:
+    from dataforge.config import model_supports_thinking, get_settings
+    s = get_settings()
+    if model_supports_thinking(s.llm_provider, s.llm_model):
+        return await _generate_with_thinking(
+            client, record,
+            format=format, goal=goal,
+            n_per_chunk=n_per_chunk, custom_system=custom_system,
+        )
+
     prompt = build_prompt(record.content, format=format, goal=goal,
                           n=n_per_chunk, custom_system=custom_system)
     messages = [
@@ -56,6 +68,76 @@ async def generate_from_chunk(
     except Exception as exc:
         log.warning(f"Generation failed for chunk {record.chunk_id}: {exc}")
         return []
+
+
+async def _generate_with_thinking(
+    client: LLMClient,
+    record: DataRecord,
+    *,
+    format: str,
+    goal: str,
+    n_per_chunk: int,
+    custom_system: str,
+) -> list[GeneratedSample]:
+    """Generate samples with live thinking token display (for capable models)."""
+    from rich.console import Console
+    from rich.live import Live
+    from rich.panel import Panel
+
+    prompt = build_prompt(record.content, format=format, goal=goal,
+                          n=n_per_chunk, custom_system=custom_system)
+    messages = [
+        {"role": "system", "content": prompt.system},
+        {"role": "user",   "content": prompt.user},
+    ]
+
+    thinking_buf: list[str] = []
+    _console = Console()
+
+    def _make_panel() -> Panel:
+        text = "".join(thinking_buf)
+        # Show last 400 chars so very long thinking doesn't swamp the terminal
+        display = ("…" + text[-400:]) if len(text) > 400 else text
+        return Panel(
+            f"[dim italic]{display}[/]",
+            title="[bold yellow]Thinking…[/]",
+            border_style="dim yellow",
+            padding=(0, 1),
+        )
+
+    async with _thinking_lock:
+        live = Live(_make_panel(), console=_console, refresh_per_second=8,
+                    transient=True)
+
+        def on_thinking(chunk: str) -> None:
+            thinking_buf.append(chunk)
+            live.update(_make_panel())
+
+        try:
+            with live:
+                resp = await client.complete_stream(
+                    messages,
+                    on_thinking=on_thinking,
+                )
+        except Exception as exc:
+            log.warning(f"Thinking-stream generation failed for chunk {record.chunk_id}: {exc}")
+            # Fall back to regular completion
+            try:
+                resp = await client.complete(messages)
+            except Exception:
+                return []
+
+    items = _parse_response(resp.content, format)
+    return [
+        GeneratedSample(
+            chunk_id=record.chunk_id,
+            format=format,
+            system_prompt=prompt.system,
+            messages=_to_messages(item, format),
+            raw_response=resp.content,
+        )
+        for item in items
+    ]
 
 
 async def generate_batch(

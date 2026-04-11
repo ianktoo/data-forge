@@ -35,7 +35,7 @@ def _typer_error_handler(error: Exception) -> None:
     if "No such command" in msg or "no such option" in msg.lower():
         _VALID_COMMANDS = [
             "pipeline", "explore", "resume", "sessions",
-            "export", "config", "providers", "info", "test-llm", "update",
+            "export", "view", "config", "providers", "info", "test-llm", "update",
         ]
         # Try to find the closest match
         import difflib
@@ -74,8 +74,19 @@ StepResult = Literal["next", "back", "back_to_urls", "back_to_config", "home", "
 
 def _bootstrap() -> None:
     from dataforge.cli.preflight import check_env_file
+    from dataforge.cli.dataforge_file import find_project_file, load_project
     check_env_file()
     s = get_settings()
+    # If a .dataforge project file exists (anywhere up the directory tree), use
+    # the absolute paths it records so 'resume', 'sessions', etc. work from any CWD.
+    pf = find_project_file(Path.cwd())
+    if pf:
+        try:
+            proj = load_project(pf)
+            s.db_path    = Path(proj["db_path"])
+            s.output_dir = Path(proj["output_dir"])
+        except Exception:
+            pass  # Malformed file — ignore and fall back to defaults
     setup_logging(s.logs_dir(), s.log_level)
     init_db(s.db_path)
 
@@ -142,41 +153,93 @@ async def _run_explore(url: str) -> None:
 # ── resume command ────────────────────────────────────────────────────────────
 
 @app.command()
-def resume(session_id: str = typer.Argument(..., help="Session ID to resume")) -> None:
+def resume(
+    session_id: Optional[str] = typer.Argument(
+        None,
+        help="Session ID (or prefix) to resume. Omit to auto-detect from .dataforge.",
+    ),
+) -> None:
     """Resume a paused pipeline session."""
     _bootstrap()
     asyncio.run(_resume_session(session_id))
 
 
-async def _resume_session(session_id: str) -> None:
+async def _resume_session(session_id: str | None) -> None:
+    from dataforge.cli.dataforge_file import find_project_file, get_project_sessions
     s = get_settings()
-    with open_session(s.db_path) as db:
-        session = db.get(PipelineSession, session_id)
-        if not session:
-            # Allow prefix match
-            all_s = db.exec(select(PipelineSession)).all()
-            matches = [x for x in all_s if x.id.startswith(session_id)]
-            if len(matches) == 1:
-                session = matches[0]
-            elif len(matches) > 1:
-                ui.error("Ambiguous session ID prefix — be more specific")
-                return
-            else:
-                ui.error(f"Session '{session_id}' not found")
-                return
+    session = None
 
-        if session.status == SessionStatus.completed:
-            ui.warn("Session already completed. Use 'dataforge export' to re-export.")
+    # ── Resolve session record ────────────────────────────────────────────────
+    if not session_id:
+        # Auto-detect from .dataforge project file
+        pf = find_project_file(Path.cwd())
+        if not pf:
+            ui.error(
+                "No session ID given and no .dataforge project file found.\n"
+                "  Run 'dataforge resume <session-id>' or start a new pipeline first."
+            )
             return
+        tracked = get_project_sessions(pf)
+        tracked_ids = {entry["id"] for entry in tracked}
+        with open_session(s.db_path) as db:
+            all_s = db.exec(select(PipelineSession)).all()
+        paused = [x for x in all_s if x.id in tracked_ids and x.status == SessionStatus.paused]
+        if not paused:
+            active = [x for x in all_s if x.id in tracked_ids and x.status == SessionStatus.active]
+            if active:
+                ui.warn("No paused sessions in this project — session is still active.")
+            else:
+                ui.info("No paused sessions found. Run 'dataforge pipeline' to start one.")
+            return
+        if len(paused) == 1:
+            session = paused[0]
+        else:
+            import questionary
+            choice = await questionary.select(
+                "Multiple paused sessions — select one to resume:",
+                choices=[
+                    questionary.Choice(f"{x.name}  [{x.id[:8]}]  stage={x.stage}", value=x.id)
+                    for x in paused
+                ],
+            ).ask_async()
+            with open_session(s.db_path) as db:
+                session = db.get(PipelineSession, choice)
+    else:
+        with open_session(s.db_path) as db:
+            session = db.get(PipelineSession, session_id)
+            if not session:
+                all_s = db.exec(select(PipelineSession)).all()
+                matches = [x for x in all_s if x.id.startswith(session_id)]
+                if len(matches) == 1:
+                    session = matches[0]
+                elif len(matches) > 1:
+                    ui.error("Ambiguous session ID prefix — be more specific")
+                    return
+                else:
+                    ui.error(
+                        f"Session '{session_id}' not found.\n"
+                        "  Tip: run from the project directory that has a .dataforge file, "
+                        "or use 'dataforge sessions' to list all sessions."
+                    )
+                    return
 
-        ctx = PipelineContext(
-            session_id=session.id,
-            session_name=session.name,
-            goal=session.goal,
-            format=DataFormat(session.format),
-            seed_urls=session.seed_url_list(),
-            settings=s,
-        )
+    # ── Validate & build context ──────────────────────────────────────────────
+    if session is None:
+        ui.error("Could not resolve session")
+        return
+
+    if session.status == SessionStatus.completed:
+        ui.warn("Session already completed. Use 'dataforge export' to re-export.")
+        return
+
+    ctx = PipelineContext(
+        session_id=session.id,
+        session_name=session.name,
+        goal=session.goal,
+        format=DataFormat(session.format),
+        seed_urls=session.seed_url_list(),
+        settings=s,
+    )
 
     ui.banner()
     ui.info(f"Resuming session [bold]{session.name}[/] from stage [cyan]{session.stage}[/]")
@@ -272,6 +335,105 @@ async def _export_session(session_id: str, approved_only: bool) -> None:
     ctx = await agent.run()
     ui.export_summary(ctx.export_records)
     ui.success("Export complete")
+
+
+# ── view command ──────────────────────────────────────────────────────────────
+
+@app.command()
+def view(
+    session_id: str = typer.Argument(..., help="Session ID (or prefix) to inspect"),
+    stage: Optional[str] = typer.Option(
+        None, "--stage", "-s",
+        help="Stage to view: discovery | collection | processing | generation | quality",
+    ),
+) -> None:
+    """View collected data at each pipeline stage for a session."""
+    _bootstrap()
+    asyncio.run(_view_session(session_id, stage))
+
+
+async def _view_session(session_id: str, stage: str | None) -> None:
+    from dataforge.storage import ScrapedPage, ProcessedChunk, ExportRecord
+    s = get_settings()
+
+    # Resolve session (support prefix match)
+    with open_session(s.db_path) as db:
+        session = db.get(PipelineSession, session_id)
+        if not session:
+            all_s = db.exec(select(PipelineSession)).all()
+            matches = [x for x in all_s if x.id.startswith(session_id)]
+            if len(matches) == 1:
+                session = matches[0]
+            elif len(matches) > 1:
+                ui.error("Ambiguous session ID prefix — be more specific")
+                return
+            else:
+                ui.error(f"Session '{session_id}' not found")
+                return
+
+    sid = session.id
+    ui.info(f"Session [bold]{session.name}[/]  [{sid[:8]}]  stage=[cyan]{session.stage}[/]  status={session.status}")
+
+    if not stage:
+        # Summary: count each stage
+        with open_session(s.db_path) as db:
+            n_discovered = len(db.exec(select(DiscoveredURL).where(DiscoveredURL.session_id == sid)).all())
+            n_scraped    = len(db.exec(select(ScrapedPage).where(ScrapedPage.session_id == sid)).all())
+            n_chunks     = len(db.exec(select(ProcessedChunk).where(ProcessedChunk.session_id == sid)).all())
+            n_samples    = len(db.exec(select(SyntheticSample).where(SyntheticSample.session_id == sid)).all())
+            n_approved   = len(db.exec(
+                select(SyntheticSample)
+                .where(SyntheticSample.session_id == sid)
+                .where(SyntheticSample.approved == True)  # noqa: E712
+            ).all())
+            n_exports    = len(db.exec(select(ExportRecord).where(ExportRecord.session_id == sid)).all())
+        ui.view_summary({
+            "discovered": n_discovered,
+            "scraped":    n_scraped,
+            "chunks":     n_chunks,
+            "samples":    n_samples,
+            "approved":   n_approved,
+            "exports":    n_exports,
+        })
+        ui.info("Use [bold]--stage <name>[/] to drill into a specific stage.")
+        return
+
+    stage = stage.lower()
+    if stage == "discovery":
+        with open_session(s.db_path) as db:
+            rows_db = db.exec(select(DiscoveredURL).where(DiscoveredURL.session_id == sid)).all()
+        rows = [{"url": r.url, "source": r.source, "selected": r.selected,
+                 "http_status": r.http_status} for r in rows_db]
+        ui.view_urls(rows)
+
+    elif stage == "collection":
+        with open_session(s.db_path) as db:
+            rows_db = db.exec(select(ScrapedPage).where(ScrapedPage.session_id == sid)).all()
+        rows = [{"url": r.url, "title": r.title, "word_count": r.word_count,
+                 "scraped_at": r.scraped_at.strftime("%Y-%m-%d %H:%M")} for r in rows_db]
+        ui.view_pages(rows)
+
+    elif stage == "processing":
+        with open_session(s.db_path) as db:
+            rows_db = db.exec(select(ProcessedChunk).where(ProcessedChunk.session_id == sid)).all()
+        rows = [{"chunk_index": r.chunk_index, "token_count": r.token_count,
+                 "content": r.content,
+                 "source_url": r.parsed_meta().get("source_url", "")} for r in rows_db]
+        ui.view_chunks(rows)
+
+    elif stage in ("generation", "quality"):
+        with open_session(s.db_path) as db:
+            query = select(SyntheticSample).where(SyntheticSample.session_id == sid)
+            if stage == "quality":
+                query = query.where(SyntheticSample.approved == True)  # noqa: E712
+            rows_db = db.exec(query).all()
+        rows = [{"format": r.format, "quality_score": r.quality_score,
+                 "approved": r.approved, "messages": r.messages()} for r in rows_db]
+        title = "Approved Samples" if stage == "quality" else "Generated Samples"
+        ui.view_samples(rows, title=title)
+
+    else:
+        ui.error(f"Unknown stage '{stage}'. Valid: discovery, collection, processing, generation, quality")
 
 
 # ── config command ────────────────────────────────────────────────────────────
@@ -446,6 +608,24 @@ async def _step_urls(state: dict) -> StepResult:
     return "next"
 
 
+async def _step_output(state: dict) -> StepResult:
+    """Step 2: confirm (or change) the output directory."""
+    s = get_settings()
+    default = str(s.output_dir.resolve())
+    try:
+        chosen = await prompts.ask_output_dir(default)
+    except KeyboardInterrupt:
+        return "back"
+    if chosen is None:
+        return "back"
+    chosen_path = Path(chosen).expanduser().resolve()
+    state["output_dir"] = chosen_path
+    # Apply immediately so later wizard steps see the right path
+    s.output_dir = chosen_path
+    s.db_path    = chosen_path / "dataforge.db"
+    return "next"
+
+
 async def _step_config(state: dict) -> StepResult:
     """Step 2: collect session config. Populates state keys for name/goal/fmt/n."""
     try:
@@ -546,7 +726,7 @@ async def _interactive_pipeline() -> None:
 
     # ── Wizard state-machine ──────────────────────────────────────────────────
     state: dict = {}
-    STEPS = ["urls", "config", "review"]
+    STEPS = ["urls", "output", "config", "review"]
     step_idx = 0
 
     while step_idx < len(STEPS):
@@ -555,6 +735,9 @@ async def _interactive_pipeline() -> None:
         if step == "urls":
             ui.section("Input")
             result = await _step_urls(state)
+        elif step == "output":
+            ui.section("Output Location")
+            result = await _step_output(state)
         elif step == "config":
             ui.section("Configuration")
             result = await _step_config(state)
@@ -575,6 +758,8 @@ async def _interactive_pipeline() -> None:
             raise typer.Exit()
 
     # ── Launch pipeline ───────────────────────────────────────────────────────
+    # Re-read settings in case output dir was updated during wizard
+    s = get_settings()
     session_id = str(uuid.uuid4())
     ctx = PipelineContext(
         session_id=session_id,
@@ -587,6 +772,24 @@ async def _interactive_pipeline() -> None:
         n_per_chunk=state["n_per_chunk"],
         ignore_robots=state.get("ignore_robots", False),
     )
+
+    # Write / update .dataforge project file so 'resume' always works from this dir
+    from dataforge.cli.dataforge_file import find_project_file, create_project, add_session
+    cwd = Path.cwd()
+    pf = find_project_file(cwd)
+    if pf and pf.parent == cwd:
+        add_session(pf, session_id, state["session_name"])
+        ui.info(f"Session recorded in [bold].dataforge[/] at [dim]{pf}[/]")
+    else:
+        pf = create_project(cwd, s.db_path, s.output_dir, session_id, state["session_name"])
+        ui.info(
+            f"[bold].dataforge[/] project file created at [dim]{pf}[/]\n"
+            "  This file tracks your sessions so 'dataforge resume' works from this directory."
+        )
+    # Re-initialise DB at the (possibly new) path chosen during the wizard
+    from dataforge.storage import init_db
+    init_db(s.db_path)
+
     ui.info(f"Session ID: [bold]{session_id[:8]}[/]")
     ui.info(f"Session directory: [dim]{ctx.session_dir()}[/]")
     ui.info(f"Database: [dim]{s.db_path.resolve()}[/]")
@@ -682,17 +885,20 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
 
 
 def _make_progress_cb(label: str):
-    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
-    _prog: Progress | None = None
+    _prog: ui.Progress | None = None
     _task = None
 
-    async def cb(done: int, total: int) -> None:
+    async def cb(done: int, total: int, item: str = "") -> None:
         nonlocal _prog, _task
         if _prog is None:
             _prog = ui.make_progress(label)
             _prog.start()
             _task = _prog.add_task(label, total=total)
-        _prog.update(_task, completed=done)
+        desc = f"[cyan]{label}[/]"
+        if item:
+            short = item if len(item) <= 60 else "…" + item[-57:]
+            desc += f"  [dim]{short}[/]"
+        _prog.update(_task, description=desc, completed=done)
         if done >= total and _prog:
             _prog.stop()
             _prog = None
@@ -701,16 +907,31 @@ def _make_progress_cb(label: str):
 
 
 def _print_stage_summary(stage: str, ctx: PipelineContext) -> None:
-    summaries = {
+    summaries: dict = {
         PipelineStage.discovery:  {"Discovered URLs": len(ctx.discovered_urls)},
         PipelineStage.collection: {"Scraped pages":   len(ctx.scraped_page_ids)},
         PipelineStage.processing: {"Chunks":          len(ctx.processed_chunk_ids)},
         PipelineStage.generation: {"Samples":         len(ctx.synthetic_sample_ids)},
-        PipelineStage.quality:    {"Approved":        len(ctx.approved_sample_ids),
-                                   "Rejected":        len(ctx.synthetic_sample_ids) - len(ctx.approved_sample_ids)},
+        PipelineStage.quality:    {
+            "Approved": len(ctx.approved_sample_ids),
+            "Rejected": len(ctx.synthetic_sample_ids) - len(ctx.approved_sample_ids),
+        },
     }
-    if stage in summaries:
-        ui.stats_panel(summaries[stage])
+    if stage not in summaries:
+        return
+    stats = summaries[stage]
+    # Append LLM usage if available (generation / quality stages)
+    if stage in (PipelineStage.generation, PipelineStage.quality) and ctx.llm_usage:
+        u = ctx.llm_usage
+        pt  = u.get("prompt_tokens", 0)
+        ct  = u.get("completion_tokens", 0)
+        cost = u.get("cost_usd", 0.0)
+        if pt or ct:
+            stats["Prompt tokens"]     = f"{pt:,}"
+            stats["Completion tokens"] = f"{ct:,}"
+        if cost:
+            stats["LLM cost"]          = f"${cost:.4f}"
+    ui.stats_panel(stats)
 
 
 async def _quick_export(ctx: PipelineContext, stage: str) -> None:

@@ -33,6 +33,9 @@ if sys.platform == "win32":
 
 console = Console()
 
+# Re-export Progress so callers can type-hint with ui.Progress
+__all__ = ["Progress"]
+
 
 def banner() -> None:
     text = Text()
@@ -150,7 +153,7 @@ def tip(stage: str) -> None:
 def make_progress(description: str = "Working") -> Progress:
     return Progress(
         SpinnerColumn(),
-        TextColumn(f"[cyan]{description}[/]  "),
+        TextColumn("{task.description}"),
         BarColumn(),
         MofNCompleteColumn(),
         TaskProgressColumn(),
@@ -180,4 +183,108 @@ def export_summary(records: list[dict]) -> None:
     t.add_column("Location")
     for r in records:
         t.add_row(r["dest"], str(r["count"]), r["url"])
+    console.print(t)
+
+
+# ── View command display functions ─────────────────────────────────────────────
+
+def view_summary(stage_counts: dict) -> None:
+    """Overview panel showing record counts per pipeline stage."""
+    t = Table.grid(padding=(0, 3))
+    t.add_column(style="bold cyan", min_width=16)
+    t.add_column(justify="right")
+    labels = {
+        "discovered": "Discovered URLs",
+        "scraped":    "Scraped pages",
+        "chunks":     "Processed chunks",
+        "samples":    "Generated samples",
+        "approved":   "Approved samples",
+        "exports":    "Exports",
+    }
+    for key, label in labels.items():
+        count = stage_counts.get(key, 0)
+        style = "green" if count else "dim"
+        t.add_row(label, f"[{style}]{count}[/]")
+    console.print(Panel(t, title="[bold]Session Overview[/]", border_style="cyan"))
+
+
+def view_urls(rows: list[dict], max_rows: int = 50) -> None:
+    """Table of discovered URLs."""
+    t = Table(box=box.SIMPLE_HEAD, title=f"Discovered URLs ({len(rows)} total)")
+    t.add_column("#", style="dim", width=5)
+    t.add_column("URL", no_wrap=False)
+    t.add_column("Source", width=10)
+    t.add_column("Sel", width=5)
+    t.add_column("Status", width=7, justify="right")
+    for i, r in enumerate(rows[:max_rows]):
+        sel = "[green]✓[/]" if r.get("selected") else "[dim]—[/]"
+        status = str(r.get("http_status", "")) or "[dim]—[/]"
+        t.add_row(str(i + 1), r.get("url", ""), r.get("source", ""), sel, status)
+    if len(rows) > max_rows:
+        t.add_row("…", f"[dim]+ {len(rows) - max_rows} more[/]", "", "", "")
+    console.print(t)
+
+
+def view_pages(rows: list[dict], max_rows: int = 50) -> None:
+    """Table of scraped pages."""
+    t = Table(box=box.SIMPLE_HEAD, title=f"Scraped Pages ({len(rows)} total)")
+    t.add_column("#", style="dim", width=5)
+    t.add_column("URL", no_wrap=False)
+    t.add_column("Title")
+    t.add_column("Words", justify="right", width=8)
+    t.add_column("Scraped at", width=17)
+    for i, r in enumerate(rows[:max_rows]):
+        t.add_row(
+            str(i + 1),
+            r.get("url", ""),
+            r.get("title", "") or "[dim]—[/]",
+            str(r.get("word_count", 0)),
+            r.get("scraped_at", ""),
+        )
+    if len(rows) > max_rows:
+        t.add_row("…", f"[dim]+ {len(rows) - max_rows} more[/]", "", "", "")
+    console.print(t)
+
+
+def view_chunks(rows: list[dict], max_rows: int = 50) -> None:
+    """Table of processed chunks."""
+    t = Table(box=box.SIMPLE_HEAD, title=f"Processed Chunks ({len(rows)} total)")
+    t.add_column("#", style="dim", width=5)
+    t.add_column("Chunk", width=7, justify="right")
+    t.add_column("Tokens", width=7, justify="right")
+    t.add_column("Source URL", no_wrap=False)
+    t.add_column("Preview")
+    for i, r in enumerate(rows[:max_rows]):
+        preview = (r.get("content", "") or "")[:80].replace("\n", " ")
+        t.add_row(
+            str(i + 1),
+            str(r.get("chunk_index", "")),
+            str(r.get("token_count", 0)),
+            r.get("source_url", "") or "[dim]—[/]",
+            f"[dim]{preview}…[/]" if len(r.get("content", "")) > 80 else f"[dim]{preview}[/]",
+        )
+    if len(rows) > max_rows:
+        t.add_row("…", "", "", f"[dim]+ {len(rows) - max_rows} more[/]", "")
+    console.print(t)
+
+
+def view_samples(rows: list[dict], title: str = "Samples", max_rows: int = 30) -> None:
+    """Table of synthetic samples."""
+    t = Table(box=box.SIMPLE_HEAD, title=f"{title} ({len(rows)} total)")
+    t.add_column("#", style="dim", width=5)
+    t.add_column("Format", width=12)
+    t.add_column("Score", width=6, justify="right")
+    t.add_column("OK", width=4)
+    t.add_column("Preview (first turn)")
+    for i, r in enumerate(rows[:max_rows]):
+        ok = "[green]✓[/]" if r.get("approved") else "[dim]—[/]"
+        score = f"{r.get('quality_score', 0.0):.1f}" if r.get("quality_score") else "[dim]—[/]"
+        msgs = r.get("messages", [])
+        first_content = ""
+        if msgs:
+            first_content = (msgs[0].get("content", "") or "")[:100].replace("\n", " ")
+        t.add_row(str(i + 1), r.get("format", ""), score, ok,
+                  f"[dim]{first_content}[/]")
+    if len(rows) > max_rows:
+        t.add_row("…", "", "", "", f"[dim]+ {len(rows) - max_rows} more[/]")
     console.print(t)

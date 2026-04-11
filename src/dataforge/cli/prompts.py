@@ -214,6 +214,17 @@ async def ask_save_key_globally() -> bool:
     return bool(answer)
 
 
+async def ask_output_dir(default: str = "./output") -> str | None:
+    answer = await questionary.text(
+        "Output directory (where files and the database will be saved):",
+        default=default,
+        **_q(),
+    ).ask_async()
+    if answer is None:
+        return None
+    return answer.strip() or default
+
+
 async def ask_session_name() -> str | None:
     answer = await questionary.text(
         "Session name (for reference):",

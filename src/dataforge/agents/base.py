@@ -40,6 +40,9 @@ class PipelineContext:
     current_stage: PipelineStage = PipelineStage.discovery
     errors: list[str] = field(default_factory=list)
 
+    # LLM usage accumulated across all stages (total_calls, tokens, cost)
+    llm_usage: dict = field(default_factory=dict)
+
     def session_dir(self) -> Path:
         return self.settings.session_dir(self.session_id)
 

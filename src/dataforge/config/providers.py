@@ -58,3 +58,17 @@ def litellm_model(provider: str, model: str) -> str:
         return model
     # groq, together already have prefix in model string
     return model
+
+
+# Models that support extended thinking / reasoning tokens.
+# Anthropic Claude 4.x and DeepSeek-R1 can stream their reasoning process.
+THINKING_MODELS: set[str] = {
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+    "ollama/deepseek-r1",
+}
+
+
+def model_supports_thinking(provider: str, model: str) -> bool:
+    """Return True if this model can emit thinking/reasoning tokens."""
+    return model in THINKING_MODELS

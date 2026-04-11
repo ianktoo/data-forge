@@ -71,7 +71,11 @@ class GeneratorAgent(BaseAgent):
                     sample_ids.append(sid)
                 done += 1
                 if self._progress_cb:
-                    await self._progress_cb(done, len(records) * self.ctx.n_per_chunk)
+                    await self._progress_cb(
+                        done,
+                        len(records) * self.ctx.n_per_chunk,
+                        f"chunk {sample.chunk_id}",
+                    )
         except MissingCredentialError as exc:
             show_error(exc.credential)
             show_warning(
@@ -93,6 +97,13 @@ class GeneratorAgent(BaseAgent):
             self.log.error(f"Generation error: {exc}", exc_info=True)
 
         self.ctx.synthetic_sample_ids = sample_ids
+        self.ctx.llm_usage = {
+            "total_calls":       llm.usage.total_calls,
+            "prompt_tokens":     llm.usage.prompt_tokens,
+            "completion_tokens": llm.usage.completion_tokens,
+            "cost_usd":          llm.usage.cost_usd,
+            "errors":            llm.usage.errors,
+        }
         if sample_ids:
             self.log.info(f"Generated {len(sample_ids)} samples  "
                           f"(cost: ${llm.usage.cost_usd:.4f})")
