@@ -34,7 +34,7 @@ jobs:
         run: uv sync --frozen --extra dev
 
       - name: Build executable
-        run: uv run pyinstaller --onefile --name dataforge src/dataforge/main.py
+        run: uv run pyinstaller --onefile --name dataforge --exclude-module kaggle src/dataforge/main.py
         env:
           PYTHONPATH: src
 
