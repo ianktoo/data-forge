@@ -2,6 +2,10 @@
 
 Stores cross-project settings (provider, model, tip indices) that survive
 across different working directories, unlike the project-local .env file.
+
+API keys are stored in the OS keychain via the ``keyring`` library when
+available (macOS Keychain, Windows Credential Manager, Linux Secret Service).
+The prefs.json file is used as a fallback if keyring is unavailable.
 """
 from __future__ import annotations
 
@@ -9,6 +13,15 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+
+_KEYRING_SERVICE = "dataforge"
+
+try:
+    import keyring as _keyring  # type: ignore[import-untyped]
+    _HAS_KEYRING = True
+except ImportError:
+    _keyring = None  # type: ignore[assignment]
+    _HAS_KEYRING = False
 
 
 def _prefs_path() -> Path:
@@ -47,12 +60,31 @@ def set(key: str, value: Any) -> None:  # noqa: A001
 
 
 def get_api_key(key_env: str) -> str:
-    """Return a saved API key from the global prefs store (empty string if not set)."""
+    """Return a saved API key — checks OS keychain first, falls back to prefs.json."""
+    if _HAS_KEYRING:
+        try:
+            value = _keyring.get_password(_KEYRING_SERVICE, key_env)
+            if value:
+                return value
+        except Exception:
+            pass
     return load().get("api_keys", {}).get(key_env, "")
 
 
 def set_api_key(key_env: str, value: str) -> None:
-    """Persist an API key in the global prefs store."""
+    """Persist an API key — stores in OS keychain when available, else prefs.json."""
+    if _HAS_KEYRING:
+        try:
+            _keyring.set_password(_KEYRING_SERVICE, key_env, value)
+            # Remove any plaintext copy that may exist from a previous version
+            prefs = load()
+            if "api_keys" in prefs and key_env in prefs["api_keys"]:
+                del prefs["api_keys"][key_env]
+                save(prefs)
+            return
+        except Exception:
+            pass
+    # Fallback: plaintext prefs.json
     prefs = load()
     prefs.setdefault("api_keys", {})[key_env] = value
     save(prefs)

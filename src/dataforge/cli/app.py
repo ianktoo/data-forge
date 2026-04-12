@@ -69,6 +69,17 @@ app = typer.Typer(
 console = Console()
 log = get_logger("cli")
 
+# Global output-mode state (set by callback options before any command runs)
+_JSON_OUTPUT: bool = False
+_QUIET: bool = False
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        from dataforge import __version__
+        typer.echo(__version__)
+        raise typer.Exit()
+
 # Type alias for step result sentinels
 StepResult = Literal["next", "back", "back_to_urls", "back_to_config", "home", "exit"]
 
@@ -95,11 +106,41 @@ def _bootstrap() -> None:
 # ── Default: interactive pipeline ─────────────────────────────────────────────
 
 @app.callback(invoke_without_command=True)
-def main(ctx: typer.Context) -> None:
+def main(
+    ctx: typer.Context,
+    version: Optional[bool] = typer.Option(
+        None, "--version", "-V",
+        callback=_version_callback, is_eager=True,
+        help="Show version and exit.",
+    ),
+    no_color: bool = typer.Option(
+        False, "--no-color",
+        envvar="NO_COLOR",
+        help="Disable ANSI colour output (also honoured via NO_COLOR env var).",
+        is_eager=True,
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q",
+        help="Suppress banners, tips, and decorative output.",
+        is_eager=True,
+    ),
+    json_output: bool = typer.Option(
+        False, "--json",
+        help="Emit machine-readable JSON for 'sessions' and 'view' commands.",
+        is_eager=True,
+    ),
+) -> None:
     """Launch the interactive guided pipeline (default when no subcommand given)."""
+    global _JSON_OUTPUT, _QUIET
+    _JSON_OUTPUT = json_output
+    _QUIET = quiet
+    if no_color:
+        # Rich respects the NO_COLOR env var; set it so all consoles pick it up
+        os.environ["NO_COLOR"] = "1"
     if ctx.invoked_subcommand is None:
         _bootstrap()
-        ui.banner()
+        if not quiet:
+            ui.banner()
         asyncio.run(_interactive_pipeline())
 
 
@@ -109,7 +150,8 @@ def main(ctx: typer.Context) -> None:
 def pipeline() -> None:
     """Start a new interactive pipeline."""
     _bootstrap()
-    ui.banner()
+    if not _QUIET:
+        ui.banner()
     asyncio.run(_interactive_pipeline())
 
 
@@ -258,7 +300,10 @@ def sessions() -> None:
         all_sessions = db.exec(select(PipelineSession)).all()
 
     if not all_sessions:
-        ui.info("No sessions found. Run 'dataforge pipeline' to start.")
+        if _JSON_OUTPUT:
+            typer.echo("[]")
+        else:
+            ui.info("No sessions found. Run 'dataforge pipeline' to start.")
         return
 
     rows = []
@@ -273,7 +318,10 @@ def sessions() -> None:
             "samples": cfg.get("approved", 0),
             "created": sess.created_at.strftime("%Y-%m-%d %H:%M"),
         })
-    ui.sessions_table(rows)
+    if _JSON_OUTPUT:
+        typer.echo(json.dumps(rows, indent=2))
+    else:
+        ui.sessions_table(rows)
 
 
 # ── export command ────────────────────────────────────────────────────────────
@@ -392,15 +440,19 @@ async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> N
                 .where(SyntheticSample.approved == True)  # noqa: E712
             ).all())
             n_exports    = len(db.exec(select(ExportRecord).where(ExportRecord.session_id == sid)).all())
-        ui.view_summary({
+        summary = {
             "discovered": n_discovered,
             "scraped":    n_scraped,
             "chunks":     n_chunks,
             "samples":    n_samples,
             "approved":   n_approved,
             "exports":    n_exports,
-        })
-        ui.info("Use [bold]--stage <name>[/] to drill into a specific stage.")
+        }
+        if _JSON_OUTPUT:
+            typer.echo(json.dumps({"session_id": sid, "stage_counts": summary}, indent=2))
+        else:
+            ui.view_summary(summary)
+            ui.info("Use [bold]--stage <name>[/] to drill into a specific stage.")
         return
 
     stage = stage.lower()

@@ -21,6 +21,15 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
 
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run tests
+        run: uv run pytest -m 'not integration' -q
+
+      - name: Audit dependencies
+        run: uv run pip-audit --require-hashes -r <(uv export --no-emit-project --format requirements-txt) || true
+
       - name: Build distributions
         run: uv build --no-sources
 

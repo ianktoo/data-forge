@@ -1,6 +1,6 @@
 [project]
 name = "llm-web-crawler"
-version = "2.0.6"
+version = "2.0.7"
 description = "LLM data collection and synthetic fine-tuning dataset pipeline"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,6 +28,7 @@ dependencies = [
     "aiofiles>=23",
     "pyarrow>=16",
     "jinja2>=3.1",
+    "keyring>=24",
     # robotparser is part of Python stdlib (urllib.robotparser) — no extra package needed
 ]
 
@@ -41,6 +42,7 @@ dev = [
     "mypy>=1.10",
     "respx>=0.21",
     "pyinstaller>=6",
+    "pip-audit>=2.7",
 ]
 
 [project.scripts]
