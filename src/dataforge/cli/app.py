@@ -21,6 +21,8 @@ from dataforge.storage import (
     DiscoveredURL,
     PipelineSession,
     PipelineStage,
+    ProcessedChunk,
+    ScrapedPage,
     SessionStatus,
     SyntheticSample,
     init_db,
@@ -283,6 +285,19 @@ async def _resume_session(session_id: str | None) -> None:
         seed_urls=session.seed_url_list(),
         settings=s,
     )
+
+    # Re-hydrate prior-stage data from DB so _checkpoint() doesn't zero out saved counts
+    with open_session(s.db_path) as db:
+        disc = db.exec(select(DiscoveredURL).where(DiscoveredURL.session_id == session.id)).all()
+        ctx.discovered_urls = [u.url for u in disc]
+        ctx.selected_urls   = [u.url for u in disc if u.selected]
+        pages  = db.exec(select(ScrapedPage).where(ScrapedPage.session_id == session.id)).all()
+        ctx.scraped_page_ids = [p.id for p in pages]
+        chunks = db.exec(select(ProcessedChunk).where(ProcessedChunk.session_id == session.id)).all()
+        ctx.processed_chunk_ids = [c.id for c in chunks]
+        samps  = db.exec(select(SyntheticSample).where(SyntheticSample.session_id == session.id)).all()
+        ctx.synthetic_sample_ids = [s_.id for s_ in samps]
+        ctx.approved_sample_ids  = [s_.id for s_ in samps if s_.approved]
 
     ui.banner()
     ui.info(f"Resuming session [bold]{session.name}[/] from stage [cyan]{session.stage}[/]")
@@ -1296,6 +1311,7 @@ def _make_progress_cb(label: str):
         _prog.update(_task, description=desc, completed=done)
         if done >= total and _prog:
             _prog.stop()
+            ui.console.print("")  # reset cursor to fresh line after live display clears
             _prog = None
 
     return cb

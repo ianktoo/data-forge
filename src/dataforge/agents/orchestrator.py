@@ -170,19 +170,27 @@ class Orchestrator:
                 db.commit()
 
     def _checkpoint(self) -> None:
-        """Persist current context summary to the session record."""
+        """Persist current context summary to the session record.
+
+        Uses a max-merge strategy: keeps the higher of the existing vs new count
+        for each key, so a resumed pipeline with a partially-populated context
+        never zeros out counts saved by earlier stages.
+        """
         with open_session(self.ctx.settings.db_path) as db:
             session = db.get(PipelineSession, self.ctx.session_id)
             if session:
-                session.updated_at = datetime.now(UTC)
-                session.config_json = json.dumps({
+                existing = json.loads(session.config_json or "{}")
+                new = {
                     "discovered": len(self.ctx.discovered_urls),
                     "selected":   len(self.ctx.selected_urls),
                     "scraped":    len(self.ctx.scraped_page_ids),
                     "chunks":     len(self.ctx.processed_chunk_ids),
                     "samples":    len(self.ctx.synthetic_sample_ids),
                     "approved":   len(self.ctx.approved_sample_ids),
-                })
+                }
+                merged = {k: max(existing.get(k, 0), v) for k, v in new.items()}
+                session.updated_at = datetime.now(UTC)
+                session.config_json = json.dumps(merged)
                 db.add(session)
                 db.commit()
 
