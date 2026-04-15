@@ -160,6 +160,7 @@ def make_progress(description: str = "Working") -> Progress:
         TimeElapsedColumn(),
         TimeRemainingColumn(),
         console=console,
+        transient=True,  # clear bar from terminal on stop, prevents cursor artifacts
     )
 
 
