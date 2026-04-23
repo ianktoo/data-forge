@@ -59,3 +59,24 @@ def test_filter_urls_deduplicates():
     urls = ["https://a.com/", "https://a.com/", "https://b.com/"]
     filtered = filter_urls(urls, pattern=None, base_domain=None)
     assert len(filtered) == 2
+
+
+def test_filter_urls_glob():
+    urls = [
+        "https://example.com/blog/post-1",
+        "https://example.com/products/widget",
+    ]
+    assert filter_urls(urls, "/blog/*", None) == ["https://example.com/blog/post-1"]
+
+
+def test_filter_urls_regex():
+    urls = [
+        "https://example.com/blog/post-1",
+        "https://example.com/products/widget",
+    ]
+    assert filter_urls(urls, "re:products", None) == ["https://example.com/products/widget"]
+
+
+def test_filter_urls_substring_case_insensitive():
+    urls = ["https://example.com/BLOG/post", "https://example.com/other"]
+    assert filter_urls(urls, "blog", None) == ["https://example.com/BLOG/post"]

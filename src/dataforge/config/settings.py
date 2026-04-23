@@ -63,7 +63,7 @@ class Settings(BaseSettings):
         return self.output_dir / "sessions" / session_id
 
     def logs_dir(self) -> Path:
-        return Path("./logs").resolve()
+        return self.output_dir / "logs"
 
 
 _settings: Settings | None = None

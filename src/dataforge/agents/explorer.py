@@ -34,11 +34,17 @@ class ExplorerAgent(BaseAgent):
                         all_urls.append(url)
 
         # Deduplicate (already maintained by source_map insertion order)
-        self.ctx.discovered_urls = all_urls
+        discovered = all_urls
+
+        # Optionally skip URLs already scraped in any previous session
+        if self.ctx.skip_known and discovered:
+            discovered = self._filter_already_scraped(discovered)
+
+        self.ctx.discovered_urls = discovered
 
         # Persist
-        self._save_to_db(all_urls, source_map)
-        self.log.info(f"Discovery complete: {len(all_urls)} URLs found")
+        self._save_to_db(discovered, source_map)
+        self.log.info(f"Discovery complete: {len(discovered)} URLs found")
         return self.ctx
 
     async def _explore_seed(self, client, seed: str) -> tuple[list[str], str]:
@@ -81,6 +87,24 @@ class ExplorerAgent(BaseAgent):
             max_depth=self.ctx.settings.max_crawl_depth,
         )
         return (crawled if crawled else [seed], URLSource.crawl)
+
+    def _filter_already_scraped(self, urls: list[str]) -> list[str]:
+        """Remove URLs that were successfully scraped in any prior session."""
+        with open_session(self.ctx.settings.db_path) as db:
+            scraped = {
+                r.url for r in db.exec(
+                    select(DiscoveredURL).where(
+                        DiscoveredURL.scraped == True,  # noqa: E712
+                        DiscoveredURL.session_id != self.ctx.session_id,
+                    )
+                ).all()
+            }
+        before = len(urls)
+        filtered = [u for u in urls if u not in scraped]
+        skipped = before - len(filtered)
+        if skipped:
+            self.log.info(f"Skipped {skipped} already-scraped URL(s) from prior sessions")
+        return filtered
 
     def _save_to_db(self, urls: list[str], source_map: dict[str, str]) -> None:
         with open_session(self.ctx.settings.db_path) as db:

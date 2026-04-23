@@ -35,6 +35,7 @@ class PipelineContext:
     custom_system_prompt: str = ""
     n_per_chunk: int = 3
     ignore_robots: bool = False
+    skip_known: bool = False  # skip URLs already scraped in prior sessions
 
     # Quality control
     quality_threshold: float = 0.5   # min score to approve a sample
