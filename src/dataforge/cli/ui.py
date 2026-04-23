@@ -1,6 +1,7 @@
 """Rich UI components — panels, tables, progress, banners."""
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 from rich import box
@@ -19,9 +20,6 @@ from rich.progress import (
 )
 from rich.table import Table
 from rich.text import Text
-
-import sys
-import io
 
 # On Windows, reconfigure stdout with UTF-8 encoding to support emoji
 if sys.platform == "win32":
@@ -139,8 +137,8 @@ def review_panel(state: dict) -> None:
 
 def tip(stage: str) -> None:
     """Print the next rotating tip for a pipeline stage."""
-    from dataforge.cli.tips import STAGE_TIPS, GENERAL_TIPS
     from dataforge.cli import prefs
+    from dataforge.cli.tips import GENERAL_TIPS, STAGE_TIPS
 
     tips = STAGE_TIPS.get(stage, GENERAL_TIPS)
     idx = prefs.next_tip_index(stage, len(tips))
@@ -271,7 +269,6 @@ def view_chunks(rows: list[dict], max_rows: int = 50) -> None:
 
 def pipeline_overview_panel(current_stage: str | None = None, next_stage: str | None = None) -> None:
     """Print a full pipeline stage overview with descriptions."""
-    from rich.text import Text as RText
 
     STAGES = [
         ("discovery",  "1",  "Discovery",   "Crawls sitemaps and robots.txt to discover all URLs on the target site."),

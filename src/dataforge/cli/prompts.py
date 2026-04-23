@@ -5,12 +5,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import questionary
-from questionary import Style
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.styles import Style as PTStyle
+from questionary import Style
 
 _STYLE = Style([
     ("qmark",     "fg:cyan bold"),
@@ -88,6 +88,8 @@ async def ask_command(choices: list[str], aliases: dict[str, str] | None = None)
         value = raw.strip().lower()
         if not value:
             continue
+        if value in ("exit", "quit"):
+            raise SystemExit(0)
         # Resolve alias
         value = all_aliases.get(value, value)
         if value in choices:
@@ -97,7 +99,6 @@ async def ask_command(choices: list[str], aliases: dict[str, str] | None = None)
         if len(matches) == 1:
             return matches[0]
         # Unknown — show inline error and re-prompt
-        known = "  ".join(f"[cyan]{c}[/cyan]" for c in choices)
         print(f"\033[33m  Unknown command '{raw.strip()}'. Valid: {', '.join(choices)}\033[0m")
 
 
@@ -226,9 +227,11 @@ async def ask_output_dir(default: str = "./output") -> str | None:
 
 
 async def ask_session_name() -> str | None:
+    from datetime import datetime
+    default = datetime.now().strftime("dataset-%Y-%m-%d-%H%M")
     answer = await questionary.text(
         "Session name (for reference):",
-        default="my-dataset",
+        default=default,
         **_q(),
     ).ask_async()
     return answer
@@ -396,4 +399,4 @@ def _valid_url(v: str) -> bool:
 
 def read_url_file(path: Path) -> list[str]:
     lines = path.read_text(encoding="utf-8").splitlines()
-    return [l.strip() for l in lines if l.strip() and not l.startswith("#") and _valid_url(l.strip())]
+    return [line.strip() for line in lines if line.strip() and not line.startswith("#") and _valid_url(line.strip())]

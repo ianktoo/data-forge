@@ -175,7 +175,6 @@ class _URLReviewer:
             return f"Row {n} not on current page."
         url = page_urls[local]
         parsed = urlparse(url)
-        selected = "Yes" if url in self._selected else "No"
         ui.console.print(
             f"\n[bold]URL #{n}[/]\n"
             f"  Full URL:  [cyan]{url}[/]\n"
