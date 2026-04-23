@@ -168,7 +168,7 @@ Run `dataforge config` to set your provider and API key interactively.
 | `DATAFORGE_CHUNK_SIZE` | `512` | Tokens per chunk |
 | `DATAFORGE_CHUNK_OVERLAP` | `64` | Token overlap between chunks |
 | `DATAFORGE_LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
-| `DATAFORGE_OUTPUT_DIR` | `./output` | Session output directory |
+| `DATAFORGE_OUTPUT_DIR` | `./output` | Session output directory (logs also stored here in `logs/`) |
 | `DATAFORGE_DB_PATH` | `./dataforge.db` | SQLite database path |
 | `HUGGINGFACE_TOKEN` | — | HuggingFace Hub write token |
 | `KAGGLE_USERNAME` | — | Kaggle username |

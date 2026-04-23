@@ -24,7 +24,7 @@ _HELP_TEXT = (
     "[dim]x <a-b>[/dim]=range  "
     "[dim]all[/dim]/[dim]none[/dim]  "
     "[dim]i <#>[/dim]=inspect  "
-    "[dim]done[/dim]=proceed  [dim]?[/dim]=help"
+    "[dim]done[/dim]=proceed  [dim]back[/dim]=menu  [dim]?[/dim]=help"
 )
 
 _HELP_FULL = """\
@@ -43,7 +43,7 @@ URL Review — full command reference
   none                 Deselect all URLs in the current filtered view
   i <#>                Inspect URL — show full details for that row
   done                 Confirm selection and proceed to collection
-  q / quit             Cancel — go back to the main menu
+  back / b / q / quit  Cancel — go back to the main menu
   ?                    Show this help
 ────────────────────────────────────────────────────────────────────────────────"""
 
@@ -246,7 +246,7 @@ class _URLReviewer:
         # Done / quit
         if cmd in ("done", "d"):
             return "", True
-        if cmd in ("q", "quit"):
+        if cmd in ("q", "quit", "back", "b"):
             return "", None  # type: ignore[return-value]
 
         if cmd == "?":
@@ -279,8 +279,8 @@ async def run_url_review(urls: list[str]) -> list[str]:
         try:
             raw = await session.prompt_async("  review> ")
         except (KeyboardInterrupt, EOFError):
-            # Ctrl-C / Ctrl-D → treat as cancel
-            ui.info("Review cancelled.")
+            # Ctrl-C / Ctrl-D → treat as back to menu
+            ui.info("URL review cancelled — returning to menu.")
             return []
 
         msg, done = reviewer.handle(raw)

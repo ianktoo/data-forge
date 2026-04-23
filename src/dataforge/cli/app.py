@@ -622,10 +622,11 @@ async def _test_llm() -> None:
 
 @app.command()
 def update() -> None:
-    """Update DataForge to the latest version via pip."""
+    """Update DataForge to the latest version."""
     import subprocess
     import sys
-    from importlib.metadata import version as _pkg_version, PackageNotFoundError
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _pkg_version
 
     try:
         current_ver = _pkg_version("llm-web-crawler")
@@ -633,15 +634,44 @@ def update() -> None:
         current_ver = "unknown"
 
     ui.info(f"Current version: [bold]{current_ver}[/]")
-    ui.info("Checking for updates...")
-    result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--upgrade", "llm-web-crawler"],
-        capture_output=True,
-        text=True,
+
+    # Standalone executable — cannot self-update, direct user to releases page
+    if getattr(sys, "frozen", False):
+        ui.warn(
+            "Running as a standalone executable. "
+            "Download the latest release from: [cyan]https://github.com/ianktoo/data-forge/releases[/]"
+        )
+        return
+
+    ui.info("Checking for updates…")
+
+    def _try_update(cmd: list[str]) -> tuple[bool, str]:
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        return r.returncode == 0, r.stdout + r.stderr
+
+    # 1. Try uv tool upgrade (preferred for uv-installed tools)
+    ok, out = _try_update(["uv", "tool", "upgrade", "llm-web-crawler"])
+    if ok:
+        if "already" in out.lower() or "up-to-date" in out.lower():
+            ui.success(f"Already up to date (v{current_ver})")
+        else:
+            try:
+                new_ver = _pkg_version("llm-web-crawler")
+            except PackageNotFoundError:
+                new_ver = current_ver
+            ui.success(
+                f"Updated via uv: [dim]{current_ver}[/] → [bold green]{new_ver}[/]"
+                if new_ver != current_ver else f"Already up to date (v{current_ver})"
+            )
+        return
+
+    # 2. Fall back to pip
+    ok, out = _try_update(
+        [sys.executable, "-m", "pip", "install", "--upgrade", "llm-web-crawler"]
     )
-    if result.returncode == 0:
+    if ok:
         new_ver = current_ver
-        for line in result.stdout.splitlines():
+        for line in out.splitlines():
             if "Successfully installed" in line:
                 for token in line.split():
                     if token.lower().startswith("llm-web-crawler-"):
@@ -649,13 +679,13 @@ def update() -> None:
                         break
         if new_ver != current_ver and current_ver != "unknown":
             ui.success(f"Updated: [dim]{current_ver}[/] → [bold green]{new_ver}[/]")
-        elif "already" in result.stdout.lower() or new_ver == current_ver:
-            ui.success(f"Already up to date (v{current_ver})")
         else:
-            ui.success(f"Updated to v{new_ver}")
-    else:
-        ui.error("Update failed.")
-        console.print(result.stderr.strip(), style="dim red")
+            ui.success(f"Already up to date (v{current_ver})")
+        return
+
+    ui.error("Update failed. Try manually:")
+    ui.console.print("  uv tool upgrade llm-web-crawler", style="dim")
+    ui.console.print("  pip install --upgrade llm-web-crawler", style="dim")
 
 
 # ── plan command ─────────────────────────────────────────────────────────────
@@ -690,6 +720,7 @@ def _show_info() -> None:
         "Model":         s.llm_model,
         "Rate limit":    f"{s.rate_limit} req/s",
         "Output dir":    str(s.output_dir),
+        "Logs":          str(s.logs_dir()),
         "Database":      str(s.db_path),
         "HF token":      "set" if s.huggingface_token else "not set",
         "Kaggle":        "configured" if s.kaggle_username else "not configured",
@@ -1443,22 +1474,38 @@ async def _collect_urls() -> list[str] | None:
 
 
 async def _main_menu() -> str:
+    s = get_settings()
+    # Peek at session counts to drive context-sensitive hints
+    try:
+        with open_session(s.db_path) as db:
+            paused_count = len(db.exec(
+                select(PipelineSession).where(PipelineSession.status == SessionStatus.paused)
+            ).all())
+            total_sessions = len(db.exec(select(PipelineSession)).all())
+    except Exception:
+        paused_count, total_sessions = 0, 0
+
     _COMMANDS = ["new", "resume", "explore", "plan", "sessions", "config", "info", "update", "exit"]
-    _DESCRIPTIONS = {
-        "new":      "Start a new pipeline",
-        "resume":   "Resume a paused session",
-        "explore":  "Explore collected data from a session",
-        "plan":     "Show pipeline stages & current project status",
-        "sessions": "List all sessions",
-        "config":   "Configure LLM provider & keys",
-        "info":     "System & folder info",
-        "update":   "Update DataForge to latest",
-        "exit":     "Exit",
-    }
-    # Print command hints above the prompt
+
     ui.console.print("")
-    for cmd, desc in _DESCRIPTIONS.items():
-        ui.console.print(f"  [bold cyan]{cmd:<10}[/]  [dim]{desc}[/]")
+    entries = [
+        ("new",      "Start a new pipeline",                   True),
+        ("resume",   f"Resume a paused session"
+                     + (f"  [bold cyan]({paused_count} waiting)[/]" if paused_count else ""),
+                     True),
+        ("explore",  "Browse data collected in a session",     total_sessions > 0),
+        ("plan",     "Show pipeline stages & project status",  True),
+        ("sessions", "List all sessions",                      total_sessions > 0),
+        ("config",   "Configure LLM provider & API keys",      True),
+        ("info",     "System & folder info",                   True),
+        ("update",   "Update DataForge to latest version",     True),
+        ("exit",     "Exit",                                   True),
+    ]
+    for cmd, desc, active in entries:
+        if active:
+            ui.console.print(f"  [bold cyan]{cmd:<10}[/]  [dim]{desc}[/]")
+        else:
+            ui.console.print(f"  [dim]{cmd:<10}  {desc}[/]")
     ui.console.print("")
 
     result = await prompts.ask_command(_COMMANDS)
