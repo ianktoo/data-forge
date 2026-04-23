@@ -80,6 +80,30 @@ dataforge update   # update to the latest version
 - **BFS crawler fallback** — if no sitemap is found, crawls the site up to a configurable depth and page limit
 - **SPA support** — detects JavaScript-rendered pages (few links, rich body) and retries with Playwright if installed
 - Parallel discovery across multiple seed URLs
+- **Skip already-scraped URLs** — when re-running on the same domain, optionally exclude pages processed in previous sessions (great for incremental crawls)
+
+### Interactive URL Review
+After discovery, an interactive checklist lets you curate exactly which URLs proceed to collection — without re-running discovery.
+
+- **Filter** the list before review using:
+  - Plain substring: `blog` matches any URL containing "blog"
+  - Glob path: `/blog/*` matches `/blog/post-1`, `/blog/post-2`, …
+  - Regex: `re:\.html$` matches any URL ending in `.html`
+- **Per-URL selection** via a scrollable checkbox list
+- **Bulk operations** — select all, deselect all, then fine-tune individually
+- **Persist across resume** — your selection is saved to the database; pausing and resuming a session restores the same URL subset
+- Works cross-platform (Windows, macOS, Linux) — no curses or platform-specific terminal APIs
+
+#### Keyboard shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Space` | Toggle URL selection |
+| `a` | Select all visible URLs |
+| `n` | Deselect all |
+| `↑` / `↓` | Navigate the list |
+| `Enter` | Confirm selection and proceed |
+| `Ctrl-C` | Cancel and return to the filter step |
 
 ### Zero-trust input handling
 - All user-supplied URLs are sanitised before entering the pipeline
@@ -295,4 +319,22 @@ DataForge is built on the following open-source libraries. We thank their author
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE) for details.
+
+If you use DataForge-generated datasets in a publication or project, attribution is appreciated but not required:
+
+```
+Ian Too. DataForge (2026). https://github.com/ianktoo/data-forge
+```
+
+Or in BibTeX:
+
+```bibtex
+@software{dataforge2026,
+  author  = {Ian Too},
+  title   = {DataForge: LLM Data Pipeline},
+  year    = {2026},
+  url     = {https://github.com/ianktoo/data-forge},
+  license = {MIT}
+}
+```

@@ -1,6 +1,8 @@
 """Sitemap XML parser — handles sitemap index files and plain sitemaps."""
 from __future__ import annotations
 
+import fnmatch
+import re as _re
 from urllib.parse import urljoin, urlparse
 
 import xmltodict
@@ -85,11 +87,27 @@ async def parse_sitemap(client, sitemap_url: str, visited: set[str] | None = Non
 
 
 def filter_urls(urls: list[str], pattern: str | None, base_domain: str | None) -> list[str]:
-    """Filter URLs by optional substring pattern and optionally same domain."""
+    """Filter URLs by optional pattern and/or same domain.
+
+    Pattern modes (checked in order):
+    - ``re:<expr>``  — case-insensitive regex search against the full URL
+    - ``*`` or ``?`` — glob matched against the URL path component
+    - otherwise      — case-insensitive substring match against the full URL
+    """
     result = urls
     if base_domain:
         canonical = _strip_www(base_domain)
         result = [u for u in result if _strip_www(urlparse(u).netloc) == canonical]
     if pattern:
-        result = [u for u in result if pattern in u]
+        if pattern.startswith("re:"):
+            try:
+                rx = _re.compile(pattern[3:], _re.IGNORECASE)
+                result = [u for u in result if rx.search(u)]
+            except _re.error:
+                # Invalid regex — fall back to literal substring
+                result = [u for u in result if pattern[3:].lower() in u.lower()]
+        elif "*" in pattern or "?" in pattern:
+            result = [u for u in result if fnmatch.fnmatch(urlparse(u).path, pattern)]
+        else:
+            result = [u for u in result if pattern.lower() in u.lower()]
     return list(dict.fromkeys(result))  # deduplicate, preserve order

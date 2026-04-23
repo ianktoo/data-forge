@@ -250,20 +250,23 @@ async def ask_review_action() -> str:
 
 # ── URL selection ──────────────────────────────────────────────────────────────
 
-async def ask_url_filter(total: int) -> str:
+async def ask_url_filter_pattern(total: int) -> str:
+    """Ask for an optional filter pattern before showing the review checklist."""
     return await questionary.text(
-        f"Filter URLs by substring (Enter to keep all {total}):",
+        f"Filter {total} URLs before review (Enter to skip):",
+        instruction="  substring · /path/*  glob · re:<regex>",
         default="",
         **_q(),
-    ).ask_async()
+    ).ask_async() or ""
 
 
-async def ask_confirm_urls(selected: int, total: int) -> bool:
+async def ask_skip_known(domain: str) -> bool:
+    """Ask whether to exclude URLs already scraped in previous sessions."""
     return await questionary.confirm(
-        f"Proceed with {selected}/{total} URLs?",
-        default=True,
+        f"Skip URLs already scraped in a previous session for {domain}?",
+        default=False,
         **_q(),
-    ).ask_async()
+    ).ask_async() or False
 
 
 # ── Stage checkpoints ─────────────────────────────────────────────────────────

@@ -15,6 +15,7 @@ from sqlmodel import select
 
 from dataforge.agents import Orchestrator, PipelineContext
 from dataforge.agents.exporter import ExporterAgent
+from dataforge.collectors import filter_urls
 from dataforge.config import PROVIDER_INFO, get_settings
 from dataforge.storage import (
     DataFormat,
@@ -27,10 +28,12 @@ from dataforge.storage import (
     SyntheticSample,
     init_db,
     open_session,
+    persist_url_selection,
 )
 from dataforge.utils import get_logger, setup_logging, system_info
 
 from . import prompts, ui
+from .url_review import run_url_review
 
 def _typer_error_handler(error: Exception) -> None:
     """Called by Typer when an unknown subcommand is entered."""
@@ -931,6 +934,11 @@ async def _step_config(state: dict) -> StepResult:
             ui.warn("robots.txt enforcement disabled — ensure you have permission to scrape this site.")
         state["ignore_robots"] = ignore_robots
 
+        from urllib.parse import urlparse as _urlparse
+        seed_domain = _urlparse(state.get("seed_urls", [""])[0]).netloc or "this site"
+        skip_known = await prompts.ask_skip_known(seed_domain)
+        state["skip_known"] = skip_known
+
         threshold = await prompts.ask_quality_threshold()
         if threshold is None:
             return "back"
@@ -1042,6 +1050,7 @@ async def _interactive_pipeline() -> None:
             custom_system_prompt=state.get("custom_sys", ""),
             n_per_chunk=state["n_per_chunk"],
             ignore_robots=state.get("ignore_robots", False),
+            skip_known=state.get("skip_known", False),
             quality_threshold=state.get("quality_threshold", 0.5),
             generation_model=state.get("generation_model", ""),
             quality_model=state.get("quality_model", ""),
@@ -1200,39 +1209,36 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
         if stage != PipelineStage.discovery:
             return True
 
-        ui.success(f"Discovered {len(context.discovered_urls)} URLs")
+        total = len(context.discovered_urls)
+        ui.success(f"Discovered {total} URL{'s' if total != 1 else ''}")
 
-        if len(context.discovered_urls) == 0:
+        if total == 0:
             ui.warn("Discovery returned 0 URLs. Check that the site has a reachable sitemap or provide a direct sitemap URL.")
             return False
 
         ui.url_table(context.discovered_urls)
 
-        # Show language/locale groups if multiple variants exist
+        # Locale hint
         lang_groups = _detect_language_groups(context.discovered_urls)
         if len(lang_groups) >= 2:
-            ui.language_groups_panel(lang_groups, len(context.discovered_urls))
+            ui.language_groups_panel(lang_groups, total)
             ui.warn(
-                "Multiple language variants detected — use the URL filter below "
-                "to select a single locale (e.g. type '/en/' to keep only English URLs)."
+                "Multiple language variants detected — use the filter "
+                "(e.g. [bold]/en/[/]) in the review step to keep one locale."
             )
 
-        pattern = await prompts.ask_url_filter(len(context.discovered_urls))
-        if pattern:
-            from dataforge.collectors import filter_urls
-            from urllib.parse import urlparse
-            domain = urlparse(context.seed_urls[0]).netloc if context.seed_urls else None
-            filtered = filter_urls(context.discovered_urls, pattern or None, base_domain=None)
-            context.selected_urls = filtered
-            ui.info(f"Filtered to {len(filtered)} URLs")
-        else:
-            context.selected_urls = context.discovered_urls
+        selected = await run_url_review(context.discovered_urls)
 
-        confirmed = await prompts.ask_confirm_urls(len(context.selected_urls),
-                                                    len(context.discovered_urls))
-        if not confirmed:
-            ui.info("Cancelled")
+        if not selected:
+            ui.warn("No URLs selected — returning to menu.")
             return False
+
+        context.selected_urls = selected
+        ui.info(f"Selected [bold]{len(selected)}[/] / {total} URLs for collection.")
+
+        # Persist selection so resume re-hydrates correctly
+        with open_session(context.settings.db_path) as db:
+            persist_url_selection(db, context.session_id, set(selected))
 
         return await stage_hook(stage, context)
 

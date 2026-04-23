@@ -1,10 +1,10 @@
 """SQLite engine and session factory via SQLModel."""
 from __future__ import annotations
 
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from .models import (  # noqa: F401 — ensure models are registered
     DiscoveredURL,
@@ -40,3 +40,14 @@ def get_session(db_path: Path) -> Generator[Session, None, None]:
 
 def open_session(db_path: Path) -> Session:
     return Session(_get_engine(db_path))
+
+
+def persist_url_selection(db: Session, session_id: str, selected_urls: set[str]) -> None:
+    """Update DiscoveredURL.selected in DB to match the user's chosen subset."""
+    rows = db.exec(
+        select(DiscoveredURL).where(DiscoveredURL.session_id == session_id)
+    ).all()
+    for row in rows:
+        row.selected = row.url in selected_urls
+        db.add(row)
+    db.commit()

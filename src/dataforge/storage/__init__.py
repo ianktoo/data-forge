@@ -1,4 +1,4 @@
-from .database import init_db, open_session
+from .database import init_db, open_session, persist_url_selection
 from .models import (
     DataFormat,
     DiscoveredURL,
@@ -15,6 +15,7 @@ from .models import (
 __all__ = [
     "init_db",
     "open_session",
+    "persist_url_selection",
     "PipelineSession",
     "PipelineStage",
     "SessionStatus",
