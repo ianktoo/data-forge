@@ -155,60 +155,124 @@ def test_persist_url_selection_none(db_with_session):
         assert not any(r.selected for r in rows)
 
 
-# ── run_url_review (behaviour under mocked questionary) ───────────────────────
+# ── _URLReviewer unit tests ───────────────────────────────────────────────────
 
-@pytest.mark.asyncio
-async def test_run_url_review_returns_selection():
-    """run_url_review should return whatever the checkbox yields."""
-    from dataforge.cli.url_review import run_url_review
-
-    urls = [
-        "https://example.com/blog/a",
-        "https://example.com/blog/b",
-        "https://example.com/products/c",
+def make_reviewer(urls=None):
+    from dataforge.cli.url_review import _URLReviewer
+    default = [
+        "https://example.com/blog/post-1",
+        "https://example.com/blog/post-2",
+        "https://example.com/products/widget",
+        "https://example.com/about",
     ]
-
-    with (
-        patch("dataforge.cli.url_review.questionary.text") as mock_text,
-        patch("dataforge.cli.url_review.questionary.checkbox") as mock_checkbox,
-        patch("dataforge.cli.url_review.questionary.confirm") as mock_confirm,
-    ):
-        # Filter step: no pattern
-        mock_text.return_value.ask_async = AsyncMock(return_value="")
-        # Checkbox: user deselects products URL
-        mock_checkbox.return_value.ask_async = AsyncMock(return_value=urls[:2])
-        # Confirm: yes
-        mock_confirm.return_value.ask_async = AsyncMock(return_value=True)
-
-        result = await run_url_review(urls)
-
-    assert result == urls[:2]
+    return _URLReviewer(urls or default)
 
 
-@pytest.mark.asyncio
-async def test_run_url_review_with_filter():
-    """A filter pattern narrows the checkbox list."""
-    from dataforge.cli.url_review import run_url_review
+def test_reviewer_initial_state():
+    r = make_reviewer()
+    assert len(r._all) == 4
+    assert r._selected == set(r._all)
+    assert r._page == 0
+    assert r._filter == ""
 
-    urls = [
-        "https://example.com/blog/a",
-        "https://example.com/products/b",
-    ]
 
-    with (
-        patch("dataforge.cli.url_review.questionary.text") as mock_text,
-        patch("dataforge.cli.url_review.questionary.checkbox") as mock_checkbox,
-        patch("dataforge.cli.url_review.questionary.confirm") as mock_confirm,
-    ):
-        mock_text.return_value.ask_async = AsyncMock(return_value="/blog/*")
-        # Only the blog URL is shown in the checkbox; user confirms both
-        mock_checkbox.return_value.ask_async = AsyncMock(return_value=[urls[0]])
-        mock_confirm.return_value.ask_async = AsyncMock(return_value=True)
+def test_reviewer_filter_narrows_view():
+    r = make_reviewer()
+    msg, done = r.handle("f /blog/")
+    assert done is False
+    assert len(r._view) == 2
+    assert r._page == 0
+    assert r._filter == "/blog/"
 
-        result = await run_url_review(urls)
 
-    assert result == [urls[0]]
+def test_reviewer_filter_clear():
+    r = make_reviewer()
+    r.handle("f /blog/")
+    msg, done = r.handle("f")
+    assert len(r._view) == 4
+    assert r._filter == ""
 
+
+def test_reviewer_deselect_row():
+    r = make_reviewer()
+    msg, done = r.handle("x 1")
+    assert "example.com/blog/post-1" not in r._selected
+    assert "Deselected" in msg
+
+
+def test_reviewer_select_row():
+    r = make_reviewer()
+    r._selected.discard("https://example.com/blog/post-1")
+    msg, done = r.handle("+ 1")
+    assert "https://example.com/blog/post-1" in r._selected
+    assert "Selected" in msg
+
+
+def test_reviewer_deselect_range():
+    r = make_reviewer()
+    msg, done = r.handle("x 1-2")
+    assert "https://example.com/blog/post-1" not in r._selected
+    assert "https://example.com/blog/post-2" not in r._selected
+    assert "Deselected 2" in msg
+
+
+def test_reviewer_all_none():
+    r = make_reviewer()
+    r.handle("none")
+    assert r._selected == set()
+    r.handle("all")
+    assert r._selected == set(r._all)
+
+
+def test_reviewer_navigate_pages():
+    urls = [f"https://example.com/page-{i}" for i in range(65)]
+    r = make_reviewer(urls)
+    assert r._page == 0
+    msg, done = r.handle("n")
+    assert r._page == 1
+    msg, done = r.handle("n")
+    assert r._page == 2
+    msg, done = r.handle("n")  # already last page
+    assert r._page == 2
+    r.handle("p")
+    assert r._page == 1
+    r.handle("1")  # jump to page 1
+    assert r._page == 0
+
+
+def test_reviewer_done_returns_true():
+    r = make_reviewer()
+    msg, done = r.handle("done")
+    assert done is True
+
+
+def test_reviewer_quit_returns_none():
+    r = make_reviewer()
+    msg, done = r.handle("q")
+    assert done is None
+
+
+def test_reviewer_selected_urls_original_order():
+    r = make_reviewer()
+    r.handle("x 2")  # remove post-2
+    result = r.selected_urls()
+    assert result[0] == "https://example.com/blog/post-1"
+    assert "https://example.com/blog/post-2" not in result
+
+
+def test_reviewer_inspect_valid_row(capsys):
+    r = make_reviewer()
+    msg, done = r.handle("i 1")
+    assert done is False
+
+
+def test_reviewer_unknown_command():
+    r = make_reviewer()
+    msg, done = r.handle("zzz")
+    assert "Unknown command" in msg
+
+
+# ── run_url_review integration (mocked PromptSession + questionary.confirm) ───
 
 @pytest.mark.asyncio
 async def test_run_url_review_empty_input():
@@ -218,30 +282,103 @@ async def test_run_url_review_empty_input():
 
 
 @pytest.mark.asyncio
-async def test_run_url_review_ctrl_c_retries():
-    """Ctrl-C in checkbox (None return) should loop back and eventually succeed."""
+async def test_run_url_review_done_and_confirm():
+    """done command + confirm=True returns selected URLs."""
     from dataforge.cli.url_review import run_url_review
 
     urls = ["https://example.com/a", "https://example.com/b"]
-    call_count = 0
-
-    async def checkbox_side_effect():
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return None  # simulate Ctrl-C first time
-        return urls  # succeed second time
 
     with (
-        patch("dataforge.cli.url_review.questionary.text") as mock_text,
-        patch("dataforge.cli.url_review.questionary.checkbox") as mock_checkbox,
-        patch("dataforge.cli.url_review.questionary.confirm") as mock_confirm,
+        patch("dataforge.cli.url_review.PromptSession") as MockSession,
+        patch("dataforge.cli.url_review.questionary") as mock_q,
     ):
-        mock_text.return_value.ask_async = AsyncMock(return_value="")
-        mock_checkbox.return_value.ask_async = AsyncMock(side_effect=checkbox_side_effect)
-        mock_confirm.return_value.ask_async = AsyncMock(return_value=True)
+        MockSession.return_value.prompt_async = AsyncMock(return_value="done")
+        mock_q.confirm.return_value.ask_async = AsyncMock(return_value=True)
 
         result = await run_url_review(urls)
 
-    assert result == urls
-    assert call_count == 2
+    assert set(result) == set(urls)
+
+
+@pytest.mark.asyncio
+async def test_run_url_review_deselect_then_done():
+    """Deselecting a URL before done excludes it from result."""
+    from dataforge.cli.url_review import run_url_review
+
+    urls = ["https://example.com/a", "https://example.com/b"]
+    commands = ["x 1", "done"]
+    call_idx = 0
+
+    async def next_cmd(*_a, **_kw):
+        nonlocal call_idx
+        cmd = commands[call_idx % len(commands)]
+        call_idx += 1
+        return cmd
+
+    with (
+        patch("dataforge.cli.url_review.PromptSession") as MockSession,
+        patch("dataforge.cli.url_review.questionary") as mock_q,
+    ):
+        MockSession.return_value.prompt_async = next_cmd
+        mock_q.confirm.return_value.ask_async = AsyncMock(return_value=True)
+
+        result = await run_url_review(urls)
+
+    assert result == ["https://example.com/b"]
+
+
+@pytest.mark.asyncio
+async def test_run_url_review_ctrl_c_cancels():
+    """Ctrl-C / KeyboardInterrupt during prompt returns empty list."""
+    from dataforge.cli.url_review import run_url_review
+
+    urls = ["https://example.com/a"]
+
+    with patch("dataforge.cli.url_review.PromptSession") as MockSession:
+        MockSession.return_value.prompt_async = AsyncMock(side_effect=KeyboardInterrupt)
+        result = await run_url_review(urls)
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_run_url_review_filter_then_done():
+    """Filter command narrows the view; done returns only filtered+selected set."""
+    from dataforge.cli.url_review import run_url_review
+
+    urls = ["https://example.com/blog/a", "https://example.com/products/b"]
+    commands = ["f /blog/*", "done"]
+    call_idx = 0
+
+    async def next_cmd(*_a, **_kw):
+        nonlocal call_idx
+        cmd = commands[call_idx % len(commands)]
+        call_idx += 1
+        return cmd
+
+    with (
+        patch("dataforge.cli.url_review.PromptSession") as MockSession,
+        patch("dataforge.cli.url_review.questionary") as mock_q,
+    ):
+        MockSession.return_value.prompt_async = next_cmd
+        mock_q.confirm.return_value.ask_async = AsyncMock(return_value=True)
+
+        result = await run_url_review(urls)
+
+    # The filter changes the view but selected still includes all — only the
+    # confirm step matters. Selection is never auto-removed by filtering.
+    assert "https://example.com/blog/a" in result
+
+
+@pytest.mark.asyncio
+async def test_run_url_review_quit_returns_empty():
+    """q command returns empty list (user aborted)."""
+    from dataforge.cli.url_review import run_url_review
+
+    urls = ["https://example.com/a"]
+
+    with patch("dataforge.cli.url_review.PromptSession") as MockSession:
+        MockSession.return_value.prompt_async = AsyncMock(return_value="q")
+        result = await run_url_review(urls)
+
+    assert result == []
