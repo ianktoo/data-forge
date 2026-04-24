@@ -18,12 +18,18 @@ from .models import (  # noqa: F401 — ensure models are registered
 _engine = None
 
 
-def _get_engine(db_path: Path):
+def _get_engine(db_path: Path):  # type: ignore[no-untyped-def]
     global _engine
     if _engine is None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         url = f"sqlite:///{db_path}"
-        _engine = create_engine(url, connect_args={"check_same_thread": False})
+        _engine = create_engine(
+            url,
+            connect_args={"check_same_thread": False, "timeout": 30},
+        )
+        with _engine.connect() as conn:
+            conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+            conn.exec_driver_sql("PRAGMA synchronous=NORMAL")
         SQLModel.metadata.create_all(_engine)
     return _engine
 

@@ -462,6 +462,40 @@ def view(
     asyncio.run(_view_session(session_id, stage, limit=limit))
 
 
+async def _paged_view(rows: list, page_size: int, render_fn, label: str) -> None:
+    """Display rows page by page with n/p/q controls."""
+    from prompt_toolkit import PromptSession as _PS
+    total = len(rows)
+    if total == 0:
+        ui.info(f"No {label} found.")
+        return
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = 0
+    ps: _PS[str] = _PS()
+    while True:
+        start = page * page_size
+        page_rows = rows[start : start + page_size]
+        ui.console.print(
+            f"\n[dim]Page {page + 1}/{total_pages}  ({start + 1}–{min(start + page_size, total)} of {total} {label})[/]"
+        )
+        render_fn(page_rows, max_rows=page_size)
+        if total_pages == 1:
+            break
+        ui.console.print(
+            "[dim]  [n] next  [p] prev  [q] back[/]"
+        )
+        try:
+            cmd = (await ps.prompt_async("  ")).strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            break
+        if cmd in ("q", "b", "back", ""):
+            break
+        if cmd == "n" and page < total_pages - 1:
+            page += 1
+        elif cmd == "p" and page > 0:
+            page -= 1
+
+
 async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> None:
     from dataforge.storage import ExportRecord, ProcessedChunk, ScrapedPage
     s = get_settings()
@@ -518,16 +552,14 @@ async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> N
             rows_db = db.exec(select(DiscoveredURL).where(DiscoveredURL.session_id == sid)).all()
         rows = [{"url": r.url, "source": r.source, "selected": r.selected,
                  "http_status": r.http_status} for r in rows_db]
-        ui.info(f"Showing {min(limit, len(rows))} of {len(rows)} discovered URLs  [dim](use --limit to change)[/]")
-        ui.view_urls(rows, max_rows=limit)
+        await _paged_view(rows, limit, ui.view_urls, "discovered URLs")
 
     elif stage == "collection":
         with open_session(s.db_path) as db:
             rows_db = db.exec(select(ScrapedPage).where(ScrapedPage.session_id == sid)).all()
         rows = [{"url": r.url, "title": r.title, "word_count": r.word_count,
                  "scraped_at": r.scraped_at.strftime("%Y-%m-%d %H:%M")} for r in rows_db]
-        ui.info(f"Showing {min(limit, len(rows))} of {len(rows)} scraped pages  [dim](use --limit to change)[/]")
-        ui.view_pages(rows, max_rows=limit)
+        await _paged_view(rows, limit, ui.view_pages, "scraped pages")
 
     elif stage == "processing":
         with open_session(s.db_path) as db:
@@ -535,8 +567,7 @@ async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> N
         rows = [{"chunk_index": r.chunk_index, "token_count": r.token_count,
                  "content": r.content,
                  "source_url": r.parsed_meta().get("source_url", "")} for r in rows_db]
-        ui.info(f"Showing {min(limit, len(rows))} of {len(rows)} chunks  [dim](use --limit to change)[/]")
-        ui.view_chunks(rows, max_rows=limit)
+        await _paged_view(rows, limit, ui.view_chunks, "chunks")
 
     elif stage in ("generation", "quality"):
         with open_session(s.db_path) as db:
@@ -547,8 +578,7 @@ async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> N
         rows = [{"format": r.format, "quality_score": r.quality_score,
                  "approved": r.approved, "messages": r.messages()} for r in rows_db]
         title = "Approved Samples" if stage == "quality" else "Generated Samples"
-        ui.info(f"Showing {min(limit, len(rows))} of {len(rows)} samples  [dim](use --limit to change)[/]")
-        ui.view_samples(rows, title=title, max_rows=limit)
+        await _paged_view(rows, limit, lambda r, max_rows: ui.view_samples(r, title=title, max_rows=max_rows), "samples")
 
     else:
         ui.error(f"Unknown stage '{stage}'. Valid: discovery, collection, processing, generation, quality")
@@ -855,6 +885,20 @@ def _show_pipeline_plan() -> None:
     ui.pipeline_overview_panel(current_stage=current_stage, next_stage=next_stage)
 
 
+async def _browse_discovered_urls(session_id: str) -> None:
+    """Interactive paginated URL browser for a session's discovery stage."""
+    from .url_review import run_url_review
+    s = get_settings()
+    with open_session(s.db_path) as db:
+        rows = db.exec(select(DiscoveredURL).where(DiscoveredURL.session_id == session_id)).all()
+    urls = [r.url for r in rows]
+    if not urls:
+        ui.info("No URLs discovered yet for this session.")
+        return
+    ui.info(f"[dim]Browsing {len(urls)} discovered URLs — changes are not saved[/]")
+    await run_url_review(urls)  # read-only: return value discarded
+
+
 # ── Explore menu (interactive data browser) ────────────────────────────────────
 
 async def _explore_menu(limit: int = 5) -> None:
@@ -919,17 +963,20 @@ async def _explore_menu(limit: int = 5) -> None:
 
         if picked == "__limit__":
             raw = await questionary.text(
-                f"Enter number of records to show (current: {limit}):",
+                f"Enter number of records to show per page (current: {limit}):",
                 default=str(limit),
             ).ask_async()
             try:
                 limit = max(1, int(raw or limit))
-                ui.info(f"Sample limit set to [bold]{limit}[/]")
+                ui.info(f"Page size set to [bold]{limit}[/]")
             except ValueError:
                 ui.warn("Invalid number — keeping current limit")
             continue
 
-        await _view_session(session.id, picked, limit=limit)
+        if picked == "discovery":
+            await _browse_discovered_urls(session.id)
+        else:
+            await _view_session(session.id, picked, limit=limit)
 
 
 # ── Wizard step functions ─────────────────────────────────────────────────────

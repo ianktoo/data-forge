@@ -3,15 +3,14 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from enum import Enum
-from typing import Any, Optional
+from enum import StrEnum
+from typing import Any
 
 from sqlmodel import Field, SQLModel
 
-
 # ── Enums ─────────────────────────────────────────────────────────────────────
 
-class PipelineStage(str, Enum):
+class PipelineStage(StrEnum):
     discovery  = "discovery"
     collection = "collection"
     processing = "processing"
@@ -21,21 +20,21 @@ class PipelineStage(str, Enum):
     completed  = "completed"
 
 
-class SessionStatus(str, Enum):
+class SessionStatus(StrEnum):
     active    = "active"
     paused    = "paused"
     completed = "completed"
     failed    = "failed"
 
 
-class DataFormat(str, Enum):
+class DataFormat(StrEnum):
     qa           = "qa"
     instruction  = "instruction"
     conversation = "conversation"
     custom       = "custom"
 
 
-class URLSource(str, Enum):
+class URLSource(StrEnum):
     sitemap = "sitemap"
     manual  = "manual"
     file    = "file"
@@ -68,20 +67,20 @@ class PipelineSession(SQLModel, table=True):
 class DiscoveredURL(SQLModel, table=True):
     __tablename__ = "discovered_url"
 
-    id: Optional[int]   = Field(default=None, primary_key=True)
+    id: int | None   = Field(default=None, primary_key=True)
     session_id: str     = Field(index=True)
     url: str
     source: str         = Field(default=URLSource.manual)
     selected: bool      = Field(default=True)
     scraped: bool       = Field(default=False)
-    http_status: Optional[int] = None
+    http_status: int | None = None
     discovered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ScrapedPage(SQLModel, table=True):
     __tablename__ = "scraped_page"
 
-    id: Optional[int]   = Field(default=None, primary_key=True)
+    id: int | None   = Field(default=None, primary_key=True)
     session_id: str     = Field(index=True)
     url_id: int
     url: str
@@ -96,7 +95,7 @@ class ScrapedPage(SQLModel, table=True):
 class ProcessedChunk(SQLModel, table=True):
     __tablename__ = "processed_chunk"
 
-    id: Optional[int]   = Field(default=None, primary_key=True)
+    id: int | None   = Field(default=None, primary_key=True)
     session_id: str     = Field(index=True)
     page_id: int
     content: str
@@ -112,7 +111,7 @@ class ProcessedChunk(SQLModel, table=True):
 class SyntheticSample(SQLModel, table=True):
     __tablename__ = "synthetic_sample"
 
-    id: Optional[int]       = Field(default=None, primary_key=True)
+    id: int | None       = Field(default=None, primary_key=True)
     session_id: str         = Field(index=True)
     chunk_id: int
     format: str
@@ -129,7 +128,7 @@ class SyntheticSample(SQLModel, table=True):
 class ExportRecord(SQLModel, table=True):
     __tablename__ = "export_record"
 
-    id: Optional[int]   = Field(default=None, primary_key=True)
+    id: int | None   = Field(default=None, primary_key=True)
     session_id: str     = Field(index=True)
     destination: str    # local | huggingface | kaggle
     path_or_url: str

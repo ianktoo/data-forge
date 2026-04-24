@@ -1,11 +1,10 @@
 """Base agent class and shared PipelineContext."""
 from __future__ import annotations
 
-import json
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Awaitable
 
 from dataforge.config import Settings
 from dataforge.storage.models import DataFormat, PipelineStage

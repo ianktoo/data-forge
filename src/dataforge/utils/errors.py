@@ -1,9 +1,6 @@
 """Structured error types and Rich-formatted user-facing error display."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import ClassVar
-
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
@@ -82,7 +79,7 @@ _GUIDANCE: dict[str, tuple[str, list[str], list[str]]] = {
     "OLLAMA_UNREACHABLE": (
         "Ollama is not running",
         ["DataForge is configured to use Ollama (local), but cannot connect.",
-         f"Expected at: http://localhost:11434"],
+         "Expected at: http://localhost:11434"],
         ["1. Install Ollama: https://ollama.com",
          "2. Start it:  ollama serve",
          "3. Pull a model:  ollama pull llama3.2",

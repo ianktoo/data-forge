@@ -3,10 +3,8 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
-from dataforge.generators.templates import build_prompt
 from dataforge.generators.synthetic import _parse_response, _to_messages
+from dataforge.generators.templates import build_prompt
 
 
 def test_build_prompt_qa():

@@ -5,7 +5,7 @@ import json
 
 from sqlmodel import select
 
-from dataforge.generators import LLMClient, GeneratedSample, generate_batch
+from dataforge.generators import GeneratedSample, LLMClient, generate_batch
 from dataforge.processors.formatter import DataRecord
 from dataforge.storage import ProcessedChunk, SyntheticSample, open_session
 from dataforge.utils.errors import (

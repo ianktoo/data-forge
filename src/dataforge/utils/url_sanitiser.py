@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import urlparse, urlunparse, urlencode, parse_qsl, quote
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 # Schemes we accept; anything else is rejected
 _ALLOWED_SCHEMES = {"http", "https"}

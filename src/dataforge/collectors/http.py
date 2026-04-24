@@ -1,7 +1,6 @@
 """Async HTTPX client with retry, robots.txt respect, and rate limiting."""
 from __future__ import annotations
 
-import asyncio
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -50,7 +49,7 @@ class HTTPClient:
         self._ignore_robots = ignore_robots
         self._client: httpx.AsyncClient | None = None
 
-    async def __aenter__(self) -> "HTTPClient":
+    async def __aenter__(self) -> HTTPClient:
         self._client = httpx.AsyncClient(
             headers=_HEADERS,
             timeout=_TIMEOUT,

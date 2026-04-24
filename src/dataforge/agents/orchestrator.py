@@ -2,15 +2,13 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Callable, Awaitable
-
-from sqlmodel import select
 
 from dataforge.cli.preflight import check_stage
 from dataforge.storage import PipelineSession, PipelineStage, SessionStatus, open_session
 from dataforge.utils import get_logger
-from dataforge.utils.errors import NoContentError, show_warning
+from dataforge.utils.errors import show_warning
 
 from .base import BaseAgent, PipelineContext
 from .explorer import ExplorerAgent
@@ -18,7 +16,6 @@ from .exporter import ExporterAgent
 from .generator import GeneratorAgent
 from .processor import ProcessorAgent
 from .quality import QualityAgent
-from .reviewer import ReviewerAgent
 from .scraper import ScraperAgent
 
 log = get_logger("orchestrator")
@@ -64,7 +61,6 @@ class Orchestrator:
         self._review_min     = review_min_score
 
     async def run(self, start_from: str | None = None) -> PipelineContext:
-        s = self.ctx.settings
         self._init_session()
 
         stage = start_from or PipelineStage.discovery
