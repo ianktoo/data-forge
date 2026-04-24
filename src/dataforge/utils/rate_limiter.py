@@ -27,14 +27,15 @@ class _Bucket:
             elapsed = now - self.last
             self.last = now
             self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
+            effective_rate = max(self.rate, 1e-6)
             if self.tokens < 1:
-                wait = (1 - self.tokens) / self.rate
+                wait = (1 - self.tokens) / effective_rate
                 await asyncio.sleep(wait)
                 self.tokens = 0
             else:
                 self.tokens -= 1
             # jitter ±15 %
-            jitter = (1 / self.rate) * random.uniform(-0.15, 0.15)
+            jitter = (1 / effective_rate) * random.uniform(-0.15, 0.15)
             if jitter > 0:
                 await asyncio.sleep(jitter)
 

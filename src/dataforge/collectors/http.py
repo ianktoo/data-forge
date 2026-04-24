@@ -1,6 +1,7 @@
 """Async HTTPX client with retry, robots.txt respect, and rate limiting."""
 from __future__ import annotations
 
+from collections import OrderedDict
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -23,11 +24,13 @@ _HEADERS = {
 }
 
 _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
-_robots_cache: dict[str, RobotFileParser] = {}
+_ROBOTS_CACHE_MAX = 256
+_robots_cache: OrderedDict[str, RobotFileParser] = OrderedDict()
 
 
 async def _robots(client: httpx.AsyncClient, base_url: str) -> RobotFileParser:
     if base_url in _robots_cache:
+        _robots_cache.move_to_end(base_url)
         return _robots_cache[base_url]
     parser = RobotFileParser()
     robots_url = urljoin(base_url, "/robots.txt")
@@ -40,6 +43,8 @@ async def _robots(client: httpx.AsyncClient, base_url: str) -> RobotFileParser:
     except Exception:
         pass
     _robots_cache[base_url] = parser
+    if len(_robots_cache) > _ROBOTS_CACHE_MAX:
+        _robots_cache.popitem(last=False)
     return parser
 
 
@@ -89,6 +94,9 @@ class HTTPClient:
         """Return None on any error instead of raising."""
         try:
             return await self.get(url)
+        except PermissionError as exc:
+            log.debug(f"Blocked by robots.txt: {url} — {exc}")
+            return None
         except Exception as exc:
             log.warning(f"Failed {url}: {exc}")
             return None

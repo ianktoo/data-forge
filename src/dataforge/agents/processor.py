@@ -3,29 +3,19 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from pathlib import Path
 
 from sqlmodel import select
 
 from dataforge.processors import chunk, clean, format_records, is_content_rich, token_count
 from dataforge.storage import ProcessedChunk, ScrapedPage, open_session
+from dataforge.utils import concurrency_ceiling
 
 from .base import BaseAgent, PipelineContext
 
-_CPU_SEMAPHORE: asyncio.Semaphore | None = None
-
-
-def _cpu_semaphore() -> asyncio.Semaphore:
-    global _CPU_SEMAPHORE
-    if _CPU_SEMAPHORE is None:
-        workers = max(1, min(os.cpu_count() or 4, 8))
-        _CPU_SEMAPHORE = asyncio.Semaphore(workers)
-    return _CPU_SEMAPHORE
-
 
 def _process_page_sync(
-    raw_text: str,
+    cleaned: str,
     page_id: int,
     url: str,
     title: str | None,
@@ -37,11 +27,6 @@ def _process_page_sync(
     db_path: Path,
     processed_dir: Path,
 ) -> list[int]:
-    """Pure-CPU work: clean → chunk → store. Runs in a thread pool worker."""
-    cleaned = clean(raw_text)
-    if not is_content_rich(cleaned):
-        return []
-
     chunks = chunk(cleaned, size=chunk_size, overlap=chunk_overlap)
     tc = [token_count(c) for c in chunks]
     records = format_records(
@@ -54,6 +39,11 @@ def _process_page_sync(
         session_id=session_id,
         token_counts=tc,
     )
+
+    out_path = processed_dir / f"page_{page_id:05d}.jsonl"
+    with out_path.open("w", encoding="utf-8") as f:
+        for rec in records:
+            f.write(rec.to_jsonl() + "\n")
 
     db_chunks: list[ProcessedChunk] = []
     with open_session(db_path) as db:
@@ -72,11 +62,6 @@ def _process_page_sync(
         chunk_ids = [c.id for c in db_chunks if c.id is not None]
         db.commit()
 
-    out_path = processed_dir / f"page_{page_id:05d}.jsonl"
-    with out_path.open("w", encoding="utf-8") as f:
-        for rec in records:
-            f.write(rec.to_jsonl() + "\n")
-
     return chunk_ids
 
 
@@ -94,15 +79,23 @@ class ProcessorAgent(BaseAgent):
             ).all()
 
         self.log.info(f"Processing {len(pages)} scraped pages")
+        semaphore = asyncio.Semaphore(min(concurrency_ceiling(), len(pages) or 1))
 
         async def _process(page: ScrapedPage) -> list[int]:
-            if page.id is None or not page.raw_path or not Path(page.raw_path).exists():
+            if page.id is None or not page.raw_path:
                 return []
-            raw_text = Path(page.raw_path).read_text(encoding="utf-8")
-            async with _cpu_semaphore():
+            try:
+                raw_text = Path(page.raw_path).read_text(encoding="utf-8")
+            except FileNotFoundError:
+                return []
+            cleaned = clean(raw_text)
+            if not is_content_rich(cleaned):
+                self.log.debug(f"Skipping low-content page: {page.url}")
+                return []
+            async with semaphore:
                 return await asyncio.to_thread(
                     _process_page_sync,
-                    raw_text,
+                    cleaned,
                     page.id,
                     page.url,
                     page.title,

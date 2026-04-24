@@ -13,6 +13,11 @@ from .base import BaseAgent, PipelineContext
 _MIN_ANSWER_WORDS = 10
 _MIN_QUESTION_WORDS = 5
 
+_REFUSAL_RE = re.compile(
+    r"(I cannot|I'm unable|I can't|As an AI|I am an AI|I'm not able to)",
+    re.I,
+)
+
 
 class QualityAgent(BaseAgent):
     name = "quality"
@@ -26,7 +31,7 @@ class QualityAgent(BaseAgent):
 
         self.log.info(f"Evaluating {len(samples)} samples")
         seen_hashes: set[str] = set()
-        approved_ids: list[int] = []
+        updates: list[tuple[int, float, bool]] = []  # (id, score, approved)
 
         for sample in samples:
             msgs = sample.messages()
@@ -34,21 +39,26 @@ class QualityAgent(BaseAgent):
             fingerprint = self._fingerprint(msgs)
 
             if fingerprint in seen_hashes:
-                score *= 0.0  # duplicate
+                score = 0.0  # duplicate
             else:
                 seen_hashes.add(fingerprint)
 
             approved = score >= self.ctx.quality_threshold
-            with open_session(self.ctx.settings.db_path) as db:
-                s = db.get(SyntheticSample, sample.id)
+            if sample.id is not None:
+                updates.append((sample.id, score, approved))
+
+        # Batch all DB writes in a single session
+        approved_ids: list[int] = []
+        with open_session(self.ctx.settings.db_path) as db:
+            for sample_id, score, approved in updates:
+                s = db.get(SyntheticSample, sample_id)
                 if s:
                     s.quality_score = score
                     s.approved = approved
                     db.add(s)
-                    db.commit()
-
-            if approved:
-                approved_ids.append(sample.id)
+                    if approved:
+                        approved_ids.append(sample_id)
+            db.commit()
 
         self.ctx.approved_sample_ids = approved_ids
         rate = len(approved_ids) / max(len(samples), 1) * 100
@@ -67,8 +77,7 @@ class QualityAgent(BaseAgent):
                 scores.append(min(1.0, words / _MIN_QUESTION_WORDS))
             elif role == "assistant":
                 scores.append(min(1.0, words / _MIN_ANSWER_WORDS))
-                # Penalise refusals
-                if re.search(r"(I cannot|I'm unable|As an AI)", content, re.I):
+                if _REFUSAL_RE.search(content):
                     scores[-1] *= 0.1
         return sum(scores) / max(len(scores), 1)
 
