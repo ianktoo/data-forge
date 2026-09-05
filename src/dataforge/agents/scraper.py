@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from sqlmodel import select
@@ -12,13 +13,15 @@ from dataforge.utils import RateLimiter, concurrency_ceiling
 
 from .base import BaseAgent, PipelineContext
 
+ProgressCb = Callable[[int, int, str], Awaitable[None]]
+
 
 class ScraperAgent(BaseAgent):
     name = "scraper"
 
-    def __init__(self, context: PipelineContext, progress_cb=None) -> None:
+    def __init__(self, context: PipelineContext, progress_cb: ProgressCb | None = None) -> None:
         super().__init__(context)
-        self._progress_cb = progress_cb  # optional async callback(done, total, url)
+        self._progress_cb = progress_cb
 
     async def run(self) -> PipelineContext:
         urls = self.ctx.selected_urls or self.ctx.discovered_urls
@@ -27,9 +30,9 @@ class ScraperAgent(BaseAgent):
             return self.ctx
 
         raw_dir = self._stage_dir("raw")
-        limiter  = RateLimiter(self.ctx.settings.rate_limit)
-        concur   = min(concurrency_ceiling(), len(urls))
-        sem      = asyncio.Semaphore(concur)
+        limiter = RateLimiter(self.ctx.settings.rate_limit)
+        concur = min(concurrency_ceiling(), len(urls))
+        sem = asyncio.Semaphore(concur)
         self.log.info(f"Scraping {len(urls)} URLs (concurrency={concur})")
 
         done = 0

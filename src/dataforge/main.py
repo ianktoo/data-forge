@@ -1,5 +1,6 @@
 """Entry point — loaded by the 'dataforge' console script."""
 import sys
+
 from dataforge.cli.app import app
 
 if __name__ == "__main__":

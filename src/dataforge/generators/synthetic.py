@@ -3,15 +3,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import AsyncIterator
 
 from dataforge.processors.formatter import DataRecord
 from dataforge.utils import get_logger
 
 from .contracts import GenerationParseError, to_message_dict, to_message_list
-from .llm import LLMClient, LLMResponse
-from .templates import PromptPair, build_prompt
+from .llm import LLMClient
+from .templates import build_prompt
 
 log = get_logger("generator")
 
@@ -38,7 +38,7 @@ async def generate_from_chunk(
     n_per_chunk: int = 3,
     custom_system: str = "",
 ) -> list[GeneratedSample]:
-    from dataforge.config import model_supports_thinking, get_settings
+    from dataforge.config import get_settings, model_supports_thinking
     s = get_settings()
     if model_supports_thinking(s.llm_provider, s.llm_model):
         return await _generate_with_thinking(

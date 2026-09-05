@@ -1,6 +1,6 @@
 """DataForge — LLM data collection and synthetic fine-tuning pipeline."""
 
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import PackageNotFoundError, version
 
 try:
     __version__ = version("llm-web-crawler")
