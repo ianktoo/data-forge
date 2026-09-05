@@ -14,6 +14,7 @@ class Settings(BaseSettings):
         env_prefix="DATAFORGE_",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     # LLM
@@ -46,13 +47,6 @@ class Settings(BaseSettings):
     groq_api_key: str = Field("", alias="GROQ_API_KEY")
     together_api_key: str = Field("", alias="TOGETHER_API_KEY")
     ollama_base_url: str = Field("http://localhost:11434", alias="OLLAMA_BASE_URL")
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-        populate_by_name=True,
-    )
 
     @field_validator("output_dir", "db_path", mode="before")
     @classmethod
