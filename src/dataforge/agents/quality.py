@@ -62,6 +62,8 @@ class QualityAgent(BaseAgent):
         scores = []
         for msg in messages:
             content = msg.get("content", "")
+            if not isinstance(content, str):
+                content = str(content)
             words = len(content.split())
             role = msg.get("role", "")
             if role == "user":
@@ -74,5 +76,5 @@ class QualityAgent(BaseAgent):
         return sum(scores) / max(len(scores), 1)
 
     def _fingerprint(self, messages: list[dict]) -> str:
-        text = " ".join(m.get("content", "") for m in messages)[:200]
+        text = " ".join(str(m.get("content", "")) for m in messages)[:200]
         return hashlib.md5(text.encode()).hexdigest()
