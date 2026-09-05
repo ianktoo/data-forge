@@ -1,8 +1,6 @@
 """Tests for collectors — extractor and sitemap parser."""
 from __future__ import annotations
 
-import pytest
-
 from dataforge.collectors.extractor import extract
 from dataforge.collectors.sitemap import filter_urls
 from tests.conftest import SAMPLE_HTML

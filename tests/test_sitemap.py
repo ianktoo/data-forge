@@ -1,11 +1,11 @@
 """Unit tests for sitemap discovery and parsing logic."""
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
-from urllib.parse import urlparse
 
-from dataforge.collectors.sitemap import discover_sitemap_url, parse_sitemap, filter_urls
+import pytest
+
+from dataforge.collectors.sitemap import discover_sitemap_url, filter_urls, parse_sitemap
 
 # Sample XML for testing
 SAMPLE_SITEMAP_XML = """\

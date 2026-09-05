@@ -18,7 +18,7 @@ from .models import (  # noqa: F401 — ensure models are registered
 _engines: dict[str, "Engine"] = {}
 
 
-def _get_engine(db_path: Path):
+def _get_engine(db_path: Path):  # type: ignore[no-untyped-def]
     """Return the (cached) engine for this db_path.
 
     Cached per resolved path, not globally — a single global engine would
@@ -31,7 +31,13 @@ def _get_engine(db_path: Path):
     if engine is None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         url = f"sqlite:///{db_path}"
-        engine = create_engine(url, connect_args={"check_same_thread": False})
+        engine = create_engine(
+            url,
+            connect_args={"check_same_thread": False, "timeout": 30},
+        )
+        with engine.connect() as conn:
+            conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+            conn.exec_driver_sql("PRAGMA synchronous=NORMAL")
         SQLModel.metadata.create_all(engine)
         _engines[key] = engine
     return engine

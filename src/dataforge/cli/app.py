@@ -7,15 +7,16 @@ import os
 import re
 import uuid
 from pathlib import Path
-from typing import Literal, Optional
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from dataforge.agents import PipelineContext
 
 import typer
 from rich.console import Console
 from sqlmodel import select
 
-from dataforge.agents import Orchestrator, PipelineContext
-from dataforge.agents.exporter import ExporterAgent
-from dataforge.collectors import filter_urls
+# Storage and config are lightweight — import eagerly
 from dataforge.config import PROVIDER_INFO, get_settings
 from dataforge.storage import (
     DataFormat,
@@ -33,7 +34,9 @@ from dataforge.storage import (
 from dataforge.utils import get_logger, setup_logging, system_info
 
 from . import prompts, ui
-from .url_review import run_url_review
+
+# Heavy dependencies (litellm, httpx, tiktoken) are imported lazily inside the
+# functions that need them so startup time stays fast.
 
 def _typer_error_handler(error: Exception) -> None:
     """Called by Typer when an unknown subcommand is entered."""
@@ -49,10 +52,10 @@ def _typer_error_handler(error: Exception) -> None:
         bad = parts[1] if len(parts) >= 2 else ""
         closest = difflib.get_close_matches(bad, _VALID_COMMANDS, n=1, cutoff=0.5)
         hint = f"Did you mean [bold cyan]{closest[0]}[/]?" if closest else ""
+        from rich import box
         from rich.console import Console as RC
         from rich.panel import Panel
         from rich.text import Text
-        from rich import box
         c = RC(stderr=True)
         body = Text()
         body.append(f"'{bad}' is not a valid command.\n\n", style="white")
@@ -90,8 +93,8 @@ StepResult = Literal["next", "back", "back_to_urls", "back_to_config", "home", "
 
 
 def _bootstrap() -> None:
-    from dataforge.cli.preflight import check_env_file
     from dataforge.cli.dataforge_file import find_project_file, load_project
+    from dataforge.cli.preflight import check_env_file
     check_env_file()
     s = get_settings()
     # If a .dataforge project file exists (anywhere up the directory tree), use
@@ -113,7 +116,7 @@ def _bootstrap() -> None:
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    version: Optional[bool] = typer.Option(
+    version: bool | None = typer.Option(
         None, "--version", "-V",
         callback=_version_callback, is_eager=True,
         help="Show version and exit.",
@@ -198,11 +201,44 @@ async def _run_explore(url: str) -> None:
     ui.url_table(urls)
 
 
+# ── clear command ─────────────────────────────────────────────────────────────
+
+@app.command()
+def clear(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+) -> None:
+    """Delete the .dataforge project file to start fresh in this directory."""
+    _bootstrap()
+    asyncio.run(_clear_project(yes))
+
+
+async def _clear_project(yes: bool) -> None:
+    import questionary
+
+    from dataforge.cli.dataforge_file import find_project_file
+    cwd = Path.cwd()
+    pf = find_project_file(cwd)
+    if not pf or pf.parent != cwd:
+        ui.info("No .dataforge project file found in the current directory — nothing to clear.")
+        return
+    if not yes:
+        confirm = await questionary.confirm(
+            f"Delete .dataforge in {cwd}? (session data in the database is kept)",
+            default=False,
+            **prompts._q(),
+        ).ask_async()
+        if not confirm:
+            ui.info("Cancelled.")
+            return
+    pf.unlink()
+    ui.success("Cleared project file. Run [bold]dataforge[/] to start fresh.")
+
+
 # ── resume command ────────────────────────────────────────────────────────────
 
 @app.command()
 def resume(
-    session_id: Optional[str] = typer.Argument(
+    session_id: str | None = typer.Argument(
         None,
         help="Session ID (or prefix) to resume. Omit to auto-detect from .dataforge.",
     ),
@@ -290,6 +326,7 @@ async def _resume_session(session_id: str | None) -> None:
         ui.warn("Session already completed. Use 'dataforge export' to re-export.")
         return
 
+    from dataforge.agents import PipelineContext
     ctx = PipelineContext(
         session_id=session.id,
         session_name=session.name,
@@ -400,6 +437,8 @@ async def _export_session(session_id: str, approved_only: bool) -> None:
         export_kw["kaggle_slug"] = await prompts.ask_kaggle_slug(s.kaggle_username)
         export_kw["kaggle_title"] = session.name
 
+    from dataforge.agents import PipelineContext
+    from dataforge.agents.exporter import ExporterAgent
     ctx = PipelineContext(
         session_id=session.id,
         session_name=session.name,
@@ -419,7 +458,7 @@ async def _export_session(session_id: str, approved_only: bool) -> None:
 @app.command()
 def view(
     session_id: str = typer.Argument(..., help="Session ID (or prefix) to inspect"),
-    stage: Optional[str] = typer.Option(
+    stage: str | None = typer.Option(
         None, "--stage", "-s",
         help="Stage to view: discovery | collection | processing | generation | quality",
     ),
@@ -433,8 +472,42 @@ def view(
     asyncio.run(_view_session(session_id, stage, limit=limit))
 
 
+async def _paged_view(rows: list, page_size: int, render_fn, label: str) -> None:
+    """Display rows page by page with n/p/q controls."""
+    from prompt_toolkit import PromptSession as _PS
+    total = len(rows)
+    if total == 0:
+        ui.info(f"No {label} found.")
+        return
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = 0
+    ps: _PS[str] = _PS()
+    while True:
+        start = page * page_size
+        page_rows = rows[start : start + page_size]
+        ui.console.print(
+            f"\n[dim]Page {page + 1}/{total_pages}  ({start + 1}–{min(start + page_size, total)} of {total} {label})[/]"
+        )
+        render_fn(page_rows, max_rows=page_size)
+        if total_pages == 1:
+            break
+        ui.console.print(
+            "[dim]  [n] next  [p] prev  [q] back[/]"
+        )
+        try:
+            cmd = (await ps.prompt_async("  ")).strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            break
+        if cmd in ("q", "b", "back", ""):
+            break
+        if cmd == "n" and page < total_pages - 1:
+            page += 1
+        elif cmd == "p" and page > 0:
+            page -= 1
+
+
 async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> None:
-    from dataforge.storage import ScrapedPage, ProcessedChunk, ExportRecord
+    from dataforge.storage import ExportRecord, ProcessedChunk, ScrapedPage
     s = get_settings()
 
     # Resolve session (support prefix match)
@@ -489,16 +562,14 @@ async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> N
             rows_db = db.exec(select(DiscoveredURL).where(DiscoveredURL.session_id == sid)).all()
         rows = [{"url": r.url, "source": r.source, "selected": r.selected,
                  "http_status": r.http_status} for r in rows_db]
-        ui.info(f"Showing {min(limit, len(rows))} of {len(rows)} discovered URLs  [dim](use --limit to change)[/]")
-        ui.view_urls(rows, max_rows=limit)
+        await _paged_view(rows, limit, ui.view_urls, "discovered URLs")
 
     elif stage == "collection":
         with open_session(s.db_path) as db:
             rows_db = db.exec(select(ScrapedPage).where(ScrapedPage.session_id == sid)).all()
         rows = [{"url": r.url, "title": r.title, "word_count": r.word_count,
                  "scraped_at": r.scraped_at.strftime("%Y-%m-%d %H:%M")} for r in rows_db]
-        ui.info(f"Showing {min(limit, len(rows))} of {len(rows)} scraped pages  [dim](use --limit to change)[/]")
-        ui.view_pages(rows, max_rows=limit)
+        await _paged_view(rows, limit, ui.view_pages, "scraped pages")
 
     elif stage == "processing":
         with open_session(s.db_path) as db:
@@ -506,8 +577,7 @@ async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> N
         rows = [{"chunk_index": r.chunk_index, "token_count": r.token_count,
                  "content": r.content,
                  "source_url": r.parsed_meta().get("source_url", "")} for r in rows_db]
-        ui.info(f"Showing {min(limit, len(rows))} of {len(rows)} chunks  [dim](use --limit to change)[/]")
-        ui.view_chunks(rows, max_rows=limit)
+        await _paged_view(rows, limit, ui.view_chunks, "chunks")
 
     elif stage in ("generation", "quality"):
         with open_session(s.db_path) as db:
@@ -518,8 +588,7 @@ async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> N
         rows = [{"format": r.format, "quality_score": r.quality_score,
                  "approved": r.approved, "messages": r.messages()} for r in rows_db]
         title = "Approved Samples" if stage == "quality" else "Generated Samples"
-        ui.info(f"Showing {min(limit, len(rows))} of {len(rows)} samples  [dim](use --limit to change)[/]")
-        ui.view_samples(rows, title=title, max_rows=limit)
+        await _paged_view(rows, limit, lambda r, max_rows: ui.view_samples(r, title=title, max_rows=max_rows), "samples")
 
     else:
         ui.error(f"Unknown stage '{stage}'. Valid: discovery, collection, processing, generation, quality")
@@ -536,7 +605,6 @@ def config() -> None:
 
 async def _configure() -> None:
     ui.section("Configuration")
-    s = get_settings()
 
     provider = await prompts.ask_provider()
     info = PROVIDER_INFO[provider]
@@ -596,8 +664,8 @@ def _set_env_var(lines: list[str], key: str, value: str) -> list[str]:
 @app.command()
 def providers() -> None:
     """List available LLM providers and their models."""
-    from rich.table import Table
     from rich import box
+    from rich.table import Table
     t = Table(box=box.SIMPLE_HEAD, title="Available Providers")
     t.add_column("Provider")
     t.add_column("Models")
@@ -901,6 +969,20 @@ def _show_pipeline_plan() -> None:
     ui.pipeline_overview_panel(current_stage=current_stage, next_stage=next_stage)
 
 
+async def _browse_discovered_urls(session_id: str) -> None:
+    """Interactive paginated URL browser for a session's discovery stage."""
+    from .url_review import run_url_review
+    s = get_settings()
+    with open_session(s.db_path) as db:
+        rows = db.exec(select(DiscoveredURL).where(DiscoveredURL.session_id == session_id)).all()
+    urls = [r.url for r in rows]
+    if not urls:
+        ui.info("No URLs discovered yet for this session.")
+        return
+    ui.info(f"[dim]Browsing {len(urls)} discovered URLs — changes are not saved[/]")
+    await run_url_review(urls)  # read-only: return value discarded
+
+
 # ── Explore menu (interactive data browser) ────────────────────────────────────
 
 async def _explore_menu(limit: int = 5) -> None:
@@ -965,23 +1047,42 @@ async def _explore_menu(limit: int = 5) -> None:
 
         if picked == "__limit__":
             raw = await questionary.text(
-                f"Enter number of records to show (current: {limit}):",
+                f"Enter number of records to show per page (current: {limit}):",
                 default=str(limit),
             ).ask_async()
             try:
                 limit = max(1, int(raw or limit))
-                ui.info(f"Sample limit set to [bold]{limit}[/]")
+                ui.info(f"Page size set to [bold]{limit}[/]")
             except ValueError:
                 ui.warn("Invalid number — keeping current limit")
             continue
 
-        await _view_session(session.id, picked, limit=limit)
+        if picked == "discovery":
+            await _browse_discovered_urls(session.id)
+        else:
+            await _view_session(session.id, picked, limit=limit)
 
 
 # ── Wizard step functions ─────────────────────────────────────────────────────
 
 async def _step_urls(state: dict) -> StepResult:
     """Step 1: collect seed URLs. Populates state['seed_urls']."""
+    existing = state.get("seed_urls")
+    if existing:
+        import questionary
+        ui.info("Current URLs:")
+        for u in existing:
+            ui.console.print(f"  [dim]{u}[/]")
+        keep = await questionary.confirm(
+            "Keep these URLs and continue?",
+            default=True,
+            **prompts._q(),
+        ).ask_async()
+        if keep is None:
+            return "home"
+        if keep:
+            return "next"
+
     try:
         urls = await _collect_urls()
     except KeyboardInterrupt:
@@ -1155,6 +1256,7 @@ async def _interactive_pipeline() -> None:
         # Re-read settings in case output dir was updated during wizard
         s = get_settings()
         session_id = str(uuid.uuid4())
+        from dataforge.agents import PipelineContext
         ctx = PipelineContext(
             session_id=session_id,
             session_name=state["session_name"],
@@ -1172,7 +1274,7 @@ async def _interactive_pipeline() -> None:
         )
 
         # Write / update .dataforge project file so 'resume' always works
-        from dataforge.cli.dataforge_file import find_project_file, create_project, add_session
+        from dataforge.cli.dataforge_file import add_session, create_project, find_project_file
         cwd = Path.cwd()
         pf = find_project_file(cwd)
         if pf and pf.parent == cwd:
@@ -1390,6 +1492,7 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
                 "(e.g. [bold]/en/[/]) in the review step to keep one locale."
             )
 
+        from .url_review import run_url_review
         selected = await run_url_review(context.discovered_urls)
 
         if not selected:
@@ -1427,6 +1530,7 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
             ui.prompt_preview_panel(prompt.system, model)
         return True
 
+    from dataforge.agents import Orchestrator
     orch = Orchestrator(
         ctx,
         stage_hook=combined_hook,
@@ -1542,6 +1646,7 @@ async def _quick_export(ctx: PipelineContext, stage: str) -> None:
         export_kw["kaggle_slug"] = await prompts.ask_kaggle_slug(s.kaggle_username)
         export_kw["kaggle_title"] = ctx.session_name
 
+    from dataforge.agents.exporter import ExporterAgent
     agent = ExporterAgent(ctx, **export_kw)
     ctx_out = await agent.run()
     ui.info("Export complete!")
@@ -1606,8 +1711,8 @@ async def _collect_urls() -> list[str] | None:
 
 
 async def _main_menu() -> str:
+    import questionary
     s = get_settings()
-    # Peek at session counts to drive context-sensitive hints
     try:
         with open_session(s.db_path) as db:
             paused_count = len(db.exec(
@@ -1617,30 +1722,32 @@ async def _main_menu() -> str:
     except Exception:
         paused_count, total_sessions = 0, 0
 
-    _COMMANDS = ["new", "resume", "explore", "plan", "sessions", "config", "info", "update", "exit"]
+    resume_label = "Resume a paused session" + (f"  ({paused_count} waiting)" if paused_count else "")
 
-    ui.console.print("")
-    entries = [
-        ("new",      "Start a new pipeline",                   True),
-        ("resume",   f"Resume a paused session"
-                     + (f"  [bold cyan]({paused_count} waiting)[/]" if paused_count else ""),
-                     True),
-        ("explore",  "Browse data collected in a session",     total_sessions > 0),
-        ("plan",     "Show pipeline stages & project status",  True),
-        ("sessions", "List all sessions",                      total_sessions > 0),
-        ("config",   "Configure LLM provider & API keys",      True),
-        ("info",     "System & folder info",                   True),
-        ("update",   "Update DataForge to latest version",     True),
-        ("exit",     "Exit",                                   True),
+    choices = [
+        questionary.Choice("New pipeline",              value="new"),
+        questionary.Choice(resume_label,                value="resume"),
     ]
-    for cmd, desc, active in entries:
-        if active:
-            ui.console.print(f"  [bold cyan]{cmd:<10}[/]  [dim]{desc}[/]")
-        else:
-            ui.console.print(f"  [dim]{cmd:<10}  {desc}[/]")
-    ui.console.print("")
+    if total_sessions > 0:
+        choices += [
+            questionary.Choice("Explore sessions",          value="explore"),
+            questionary.Choice("List all sessions",         value="sessions"),
+        ]
+    choices += [
+        questionary.Choice("Plan / project status",     value="plan"),
+        questionary.Choice("Configure LLM provider",    value="config"),
+        questionary.Choice("System info",               value="info"),
+        questionary.Choice("Update DataForge",          value="update"),
+        questionary.Choice("Exit",                      value="exit"),
+    ]
 
-    result = await prompts.ask_command(_COMMANDS)
+    ui.console.print("")
+    result = await questionary.select(
+        "What would you like to do?",
+        choices=choices,
+        **prompts._q(),
+    ).ask_async()
+
     if result is None:
         raise typer.Exit()
     return result

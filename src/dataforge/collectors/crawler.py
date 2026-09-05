@@ -92,8 +92,8 @@ async def crawl(
         page = extract(html, url)
         # Sanitise extracted links before filtering — zero trust on page content
         clean_links = sanitise_many(page.links)
-        same_domain = [l for l in filter_urls(clean_links, url_pattern, base_domain)
-                       if is_page_url(l)]
+        same_domain = [u for u in filter_urls(clean_links, url_pattern, base_domain)
+                       if is_page_url(u)]
 
         # SPA detection: suspiciously few links on a content-rich page → try JS render
         if len(same_domain) < _SPA_LINK_THRESHOLD and len(page.text) > _SPA_MIN_BODY_LEN:
@@ -102,8 +102,8 @@ async def crawl(
             if rendered:
                 rendered_page = extract(rendered, url)
                 rendered_links = sanitise_many(rendered_page.links)
-                rendered_same = [l for l in filter_urls(rendered_links, url_pattern, base_domain)
-                                 if is_page_url(l)]
+                rendered_same = [u for u in filter_urls(rendered_links, url_pattern, base_domain)
+                                 if is_page_url(u)]
                 if len(rendered_same) > len(same_domain):
                     log.info(f"Playwright found {len(rendered_same)} links vs {len(same_domain)} from static fetch")
                     same_domain = rendered_same

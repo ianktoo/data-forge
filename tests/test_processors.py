@@ -1,12 +1,9 @@
 """Tests for processors — cleaner, chunker, formatter."""
 from __future__ import annotations
 
-import pytest
-
-from dataforge.processors.cleaner import clean, is_content_rich, word_count
 from dataforge.processors.chunker import chunk, token_count
+from dataforge.processors.cleaner import clean, is_content_rich, word_count
 from dataforge.processors.formatter import format_records
-
 
 SAMPLE_TEXT = """
 Fine-tuning large language models requires high-quality data.

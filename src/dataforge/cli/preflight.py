@@ -14,7 +14,6 @@ import httpx
 
 from dataforge.config import get_settings
 from dataforge.utils.errors import (
-    MissingCredentialError,
     show_error,
     show_skipped,
     show_warning,

@@ -1,14 +1,13 @@
 """Unit and integration tests for ExplorerAgent URL discovery."""
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from pathlib import Path
+
+import pytest
 
 from dataforge.agents import ExplorerAgent, PipelineContext
 from dataforge.config import get_settings
-from dataforge.storage import DataFormat, open_session, DiscoveredURL
-from dataforge.utils import RateLimiter
+from dataforge.storage import DataFormat, DiscoveredURL, open_session
 
 # Sample XML for testing
 SAMPLE_SITEMAP_XML = """\

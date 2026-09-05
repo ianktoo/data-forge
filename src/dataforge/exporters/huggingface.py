@@ -19,8 +19,7 @@ def push_to_hub(
 ) -> str:
     """Upload JSONL as a HuggingFace dataset. Returns the dataset URL."""
     try:
-        from datasets import Dataset, DatasetDict, load_dataset
-        from huggingface_hub import HfApi
+        from datasets import Dataset, DatasetDict
     except ImportError:
         raise RuntimeError("Install huggingface-hub and datasets: uv add huggingface-hub datasets")
 

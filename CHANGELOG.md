@@ -3,7 +3,12 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [2.1.1] - 2026-09-05
+## [2.3.1] - 2026-09-05
+
+> This is the first release cut after reconciling `master` with the
+> `feature/ux-overhaul` branch that `v2.2.0`/`v2.3.0` had actually shipped
+> from (see below) — `master` itself had drifted behind those releases.
+> Backfilled here for a complete history.
 
 ### Fixed
 
@@ -71,4 +76,47 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `LLMClient` accepts an independent `provider_override`, and credential-error
   messages now name the actually-selected provider rather than always the
   globally-configured one.
+
+## [2.3.0] - 2026-04-24
+
+### Changed
+
+- `settings.py`: merged duplicate `model_config` into a single definition
+  (independently re-discovered and re-fixed for `master` in `2.3.1` above,
+  since this branch's version of the fix never reached `master` until now).
+- `quality.py`: batch all DB writes for a run into one session instead of
+  one commit per sample; expanded the refusal-phrase regex; compiled it once
+  as `_REFUSAL_RE`.
+- `rate_limiter.py`: guard against division by zero (`effective_rate = max(rate, 1e-6)`).
+- `http.py`: LRU-capped robots.txt cache (256 entries); differentiate a
+  robots-disallowed fetch (`PermissionError`) from a genuine fetch failure.
+
+## [2.2.0] - 2026-04-24
+
+### Added
+
+- Main menu now uses arrow-key navigation (`questionary.select`) instead of
+  typed commands.
+- `dataforge clear`: deletes the `.dataforge` project file to start fresh in
+  a directory (session data in the database is kept).
+- Paginated browsing (`n`/`p`/`q`) for `dataforge view`'s discovered URLs,
+  scraped pages, chunks, and samples.
+- `ProcessorAgent` now processes pages concurrently (`asyncio.gather` +
+  `asyncio.to_thread`, capped at `min(cpu_count, 8)` workers).
+
+### Changed
+
+- Session names default to a timestamp (`dataset-YYYY-MM-DD-HHMM`) instead
+  of a UUID-style string.
+- The URL step shows previously-entered URLs and asks to keep/edit them,
+  instead of forcing re-entry every time.
+- Heavy dependencies (`litellm`, `httpx`, `tiktoken`) and `PipelineContext`/
+  `ExporterAgent` are now imported lazily at the call sites that need them,
+  instead of eagerly at module load, for faster CLI startup.
+- Batched per-page DB writes (collect → commit) instead of one commit per
+  page; `return_exceptions=True` so one bad page can't abort the whole run.
+- SQLite now runs in WAL journal mode with a 30s busy timeout, to handle
+  concurrent writers without "database is locked" errors.
+- ruff/mypy cleanup pass (unused imports, ambiguous names, `StrEnum`
+  migration, `str | None` coercions).
 
