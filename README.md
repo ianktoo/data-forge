@@ -252,7 +252,7 @@ uv run mypy src/
 
 ```bash
 # Bump version
-uv version patch   # or minor / major
+uv version --bump patch   # or minor / major
 
 # Commit, tag, push — CI handles the rest
 git add pyproject.toml uv.lock
