@@ -1270,6 +1270,49 @@ def _detect_language_groups(urls: list[str]) -> dict[str, int]:
     return counts
 
 
+async def _adjust_settings(context: PipelineContext) -> None:
+    """Mid-session settings menu — change the model or output dir between stages.
+
+    Agents are rebuilt fresh at the start of each stage and read
+    ``context.generation_model`` / ``context.quality_model`` /
+    ``context.settings.output_dir`` at that point, so a change made here
+    takes effect starting with the *next* stage.
+    """
+    s = context.settings
+    target = await prompts.ask_adjust_settings_target()
+    if target is None:
+        return
+
+    if target == "generation_model":
+        current = context.generation_model or s.llm_model
+        new_model = await prompts.ask_generation_model(current)
+        if new_model and new_model != current:
+            context.generation_model = new_model
+            ui.success(f"Generation model set to [bold]{new_model}[/] for the next stage onward.")
+
+    elif target == "quality_model":
+        current = context.quality_model or context.generation_model or s.llm_model
+        new_model = await prompts.ask_quality_model(current)
+        if new_model and new_model != current:
+            context.quality_model = new_model
+            ui.success(f"Quality model set to [bold]{new_model}[/] for the next stage onward.")
+
+    elif target == "output_dir":
+        current = str(s.output_dir.resolve())
+        chosen = await prompts.ask_output_dir(current)
+        if chosen:
+            new_dir = Path(chosen).expanduser().resolve()
+            if new_dir != s.output_dir:
+                # Deliberately NOT touching s.db_path — the running session's data
+                # lives in the existing database; only new artifacts (exports, logs)
+                # should follow the new output directory.
+                s.output_dir = new_dir
+                s.output_dir.mkdir(parents=True, exist_ok=True, mode=0o750)
+                s.logs_dir().mkdir(parents=True, exist_ok=True)
+                ui.success(f"Output directory set to [bold]{new_dir}[/] for new exports/artifacts.")
+                ui.info("The session database location is unchanged — existing session data stays where it is.")
+
+
 async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None) -> None:
     s = ctx.settings
     _stage_map = {
@@ -1294,14 +1337,19 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
         # Always offer export after collection+ stages
         if stage in (PipelineStage.collection, PipelineStage.processing,
                      PipelineStage.generation, PipelineStage.quality):
-            action = await prompts.ask_stage_action(name)
-            if action == "export":
-                await _quick_export(context, stage)
-                cont = await prompts.ask_confirm("Continue pipeline after export?")
-                return cont
-            if action == "pause":
-                ui.info(f"Session saved. Resume with: [bold]dataforge resume {context.session_id[:8]}[/]")
-                return False
+            while True:
+                action = await prompts.ask_stage_action(name)
+                if action == "adjust":
+                    await _adjust_settings(context)
+                    continue  # re-show the same menu so the user can continue/export/pause next
+                if action == "export":
+                    await _quick_export(context, stage)
+                    cont = await prompts.ask_confirm("Continue pipeline after export?")
+                    return cont
+                if action == "pause":
+                    ui.info(f"Session saved. Resume with: [bold]dataforge resume {context.session_id[:8]}[/]")
+                    return False
+                return True
         return True
 
     # URL selection hook (after discovery)
