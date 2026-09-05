@@ -599,23 +599,92 @@ def providers() -> None:
 
 # ── test-llm command ──────────────────────────────────────────────────────────
 
+_TEST_QUESTIONS = [
+    "What is the capital of France?",
+    "Name two prime numbers between 10 and 20.",
+    "In one sentence, what does photosynthesis do?",
+    "What year did the first human land on the Moon?",
+    "Spell the word 'necessary' correctly.",
+    "What is 17 multiplied by 6?",
+    "Name one gas that makes up most of Earth's atmosphere.",
+    "Who wrote the play 'Romeo and Juliet'?",
+]
+
+
+def _configured_providers() -> list[str]:
+    """Providers with a usable key (env, .env-loaded settings, or saved prefs) — plus Ollama, which needs none."""
+    from dataforge.cli import prefs as user_prefs
+    s = get_settings()
+    available = []
+    for name, info in PROVIDER_INFO.items():
+        if not info.requires_key:
+            available.append(name)
+            continue
+        has_key = bool(
+            os.getenv(info.key_env)
+            or getattr(s, info.key_env.lower(), "")
+            or user_prefs.get_api_key(info.key_env)
+        )
+        if has_key:
+            available.append(name)
+    return available
+
+
 @app.command(name="test-llm")
 def test_llm() -> None:
-    """Send a test prompt to the configured LLM provider."""
+    """Pick a configured model and ask it a random test question."""
     _bootstrap()
     asyncio.run(_test_llm())
 
 
 async def _test_llm() -> None:
+    import random
+
+    import questionary
+
     from dataforge.generators import LLMClient
-    s = get_settings()
-    ui.info(f"Testing {s.llm_provider} / {s.llm_model}...")
-    client = LLMClient()
-    ok = await client.test_connection()
-    if ok:
-        ui.success("LLM connection successful")
-    else:
-        ui.error("LLM connection failed — check your API key and model name")
+    from dataforge.utils.errors import LLMConnectionError, MissingCredentialError, show_error
+
+    available = _configured_providers()
+    if not available:
+        ui.warn(
+            "No LLM provider is configured yet.\n"
+            "Run 'dataforge config' to set one up (or 'dataforge config' → ollama for a local model)."
+        )
+        return
+
+    provider = await questionary.select(
+        "Which configured provider do you want to test?",
+        choices=available,
+    ).ask_async()
+    if not provider:
+        return
+
+    model = await prompts.ask_model(PROVIDER_INFO[provider].models)
+    if not model:
+        return
+
+    question = random.choice(_TEST_QUESTIONS)
+    ui.info(f"Asking {provider}/{model}:  \"{question}\"")
+
+    client = LLMClient(model_override=model, provider_override=provider)
+    try:
+        with console.status("[bold cyan]Waiting for response…[/]"):
+            resp = await client.complete([{"role": "user", "content": question}])
+    except MissingCredentialError as exc:
+        show_error(exc.credential)
+        return
+    except LLMConnectionError as exc:
+        show_error("LLM_CONNECTION", extra=str(exc))
+        return
+    except Exception as exc:
+        show_error("test-llm", extra=str(exc))
+        return
+
+    ui.llm_answer_panel(
+        provider, model, question, resp.content,
+        resp.prompt_tokens, resp.completion_tokens, resp.cost_usd,
+    )
 
 
 # ── update command ───────────────────────────────────────────────────────────

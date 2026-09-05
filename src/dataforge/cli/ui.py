@@ -384,6 +384,20 @@ def prompt_preview_panel(system_prompt: str, model: str) -> None:
     console.print(Panel(t, title="[bold]Generation Prompt Preview[/]", border_style="cyan"))
 
 
+def llm_answer_panel(provider: str, model: str, question: str, answer: str,
+                      prompt_tokens: int, completion_tokens: int, cost_usd: float) -> None:
+    """Show a test question/answer exchange with a configured model."""
+    t = Table.grid(padding=(0, 1))
+    t.add_column(style="bold cyan", min_width=10)
+    t.add_column()
+    t.add_row("Provider", provider)
+    t.add_row("Model", f"[bold]{model}[/]")
+    t.add_row("Question", question)
+    t.add_row("Answer", answer.strip() or "[dim](empty response)[/]")
+    t.add_row("Usage", f"[dim]{prompt_tokens}+{completion_tokens} tokens · ${cost_usd:.5f}[/]")
+    console.print(Panel(t, title="[bold green]✓ LLM Test[/]", border_style="green"))
+
+
 def view_samples(rows: list[dict], title: str = "Samples", max_rows: int = 30) -> None:
     """Table of synthetic samples."""
     t = Table(box=box.SIMPLE_HEAD, title=f"{title} ({len(rows)} total)")
