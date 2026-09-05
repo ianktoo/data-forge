@@ -276,8 +276,23 @@ async def ask_stage_action(stage: str) -> str:
         f"Stage '{stage}' complete. What next?",
         choices=[
             questionary.Choice("Continue to next stage", value="continue"),
+            questionary.Choice("Adjust settings (model / output dir)", value="adjust"),
             questionary.Choice("Export available data now", value="export"),
             questionary.Choice("Save and exit (resume later)", value="pause"),
+        ],
+        **_q(),
+    ).ask_async()
+
+
+async def ask_adjust_settings_target() -> str | None:
+    """Which mid-session setting to change. Returns None on cancel/back."""
+    return await questionary.select(
+        "Adjust which setting?",
+        choices=[
+            questionary.Choice("Generation model", value="generation_model"),
+            questionary.Choice("Quality model", value="quality_model"),
+            questionary.Choice("Output directory", value="output_dir"),
+            questionary.Choice("← Back", value=None),
         ],
         **_q(),
     ).ask_async()

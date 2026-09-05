@@ -170,6 +170,7 @@ Run `dataforge config` to set your provider and API key interactively.
 | `DATAFORGE_LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 | `DATAFORGE_OUTPUT_DIR` | `./output` | Session output directory (logs also stored here in `logs/`) |
 | `DATAFORGE_DB_PATH` | `./dataforge.db` | SQLite database path |
+| `DATAFORGE_AUTOSAVE` | `true` | Checkpoint progress to the session DB after every stage |
 | `HUGGINGFACE_TOKEN` | — | HuggingFace Hub write token |
 | `KAGGLE_USERNAME` | — | Kaggle username |
 | `KAGGLE_KEY` | — | Kaggle API key |
@@ -182,6 +183,45 @@ ollama pull llama3.2
 dataforge config   # choose ollama / llama3.2
 dataforge
 ```
+
+---
+
+## Upgrading
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list of changes. The one worth
+reading before you upgrade:
+
+### ⚠️ Your `.env` settings now actually take effect
+
+Previous versions had a bug where every `DATAFORGE_*` environment variable
+(model, output directory, rate limit, chunk size, log level, etc.) was
+silently ignored — the app always ran on its hardcoded defaults no matter
+what your `.env` file said. That's now fixed.
+
+**If you never noticed a difference, you have nothing to do.** But if you had
+a `.env` file with `DATAFORGE_LLM_MODEL`, `DATAFORGE_OUTPUT_DIR`,
+`DATAFORGE_RATE_LIMIT`, or similar settings that seemed to have no effect —
+they will now actually apply. Double-check your `.env` before your next run,
+in particular:
+
+- `DATAFORGE_LLM_MODEL` / `DATAFORGE_LLM_PROVIDER` — if these were left over
+  from an old experiment, the pipeline will now genuinely use them instead of
+  the built-in default (`openai` / `gpt-4o-mini`).
+- `DATAFORGE_OUTPUT_DIR` / `DATAFORGE_DB_PATH` — if set to something other
+  than `./output` / `./dataforge.db`, sessions will now be created there
+  instead of the defaults you may have gotten used to.
+
+Run `dataforge info` after upgrading to see exactly which provider, model,
+and paths are active.
+
+### New in this release
+
+- `dataforge test-llm` — pick any configured provider/model and ask it a
+  random test question, without running the full pipeline.
+- A between-stage **"Adjust settings"** menu option to change the generation
+  model, quality model, or output directory mid-session.
+- `DATAFORGE_AUTOSAVE` (default `true`) to control the after-every-stage
+  checkpoint explicitly.
 
 ---
 
@@ -212,7 +252,7 @@ uv run mypy src/
 
 ```bash
 # Bump version
-uv version patch   # or minor / major
+uv version --bump patch   # or minor / major
 
 # Commit, tag, push — CI handles the rest
 git add pyproject.toml uv.lock

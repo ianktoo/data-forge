@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import ClassVar
 
 from rich import box
@@ -130,6 +131,15 @@ _GUIDANCE: dict[str, tuple[str, list[str], list[str]]] = {
          "• Try providing URLs directly (text file or manual entry)",
          "• Run:  dataforge explore <url>  to debug discovery"],
     ),
+    "quality": (
+        "Quality scoring failed",
+        ["The quality stage crashed while scoring generated samples.",
+         "This usually means a generated sample had an unexpected shape "
+         "(e.g. the LLM returned structured content where plain text was expected)."],
+        ["• Resume to retry:  dataforge resume <session-id>",
+         "• Inspect the raw samples:  dataforge view <session-id> → generation",
+         "• If it keeps failing, try a different generation model:  dataforge config"],
+    ),
     "ENV_NOT_FOUND": (
         ".env file not found",
         ["No .env file was found in the current directory.",
@@ -153,18 +163,44 @@ _STAGE_NEEDS: dict[str, list[str]] = {
 
 # ── Display helpers ────────────────────────────────────────────────────────────
 
-def show_error(key: str, extra: str = "") -> None:
-    """Print a rich error panel for the given guidance key."""
-    title, body_lines, hint_lines = _GUIDANCE.get(key, (
-        f"Error: {key}",
-        [extra or "An unexpected error occurred."],
-        ["Check the logs in ./logs/ for details"],
-    ))
+def _tail_log(n: int = 5) -> tuple[Path | None, list[str]]:
+    """Return the debug log's path and its last ``n`` lines, if it exists."""
+    try:
+        from dataforge.config import get_settings
+        log_path = get_settings().logs_dir() / "debug.log"
+        if not log_path.exists():
+            return None, []
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        return log_path, lines[-n:]
+    except Exception:
+        return None, []
+
+
+def show_error(key: str, extra: str = "", stage: str = "") -> None:
+    """Print a rich error panel for the given guidance key.
+
+    ``stage`` is optional context (the pipeline stage that failed) used only
+    to title an unrecognized ``key``'s fallback panel more usefully.
+    """
+    fallback_title = f"Error during '{stage}'" if stage else f"Error: {key}"
+    guidance = _GUIDANCE.get(key)
+    if guidance is not None:
+        title, body_lines, hint_lines = guidance
+    else:
+        log_path, tail_lines = _tail_log()
+        hint_lines = []
+        if log_path:
+            hint_lines.append(f"Full log: {log_path}")
+            hint_lines.extend(f"  {line}" for line in tail_lines)
+        else:
+            hint_lines.append("Check the logs in ./output/logs/ for details")
+        title = fallback_title
+        body_lines = [extra or "An unexpected error occurred."]
 
     text = Text()
     for line in body_lines:
         text.append(line + "\n", style="white")
-    if extra:
+    if extra and guidance is not None:
         text.append(f"\nDetail: {extra}\n", style="dim")
 
     text.append("\nWhat to do:\n", style="bold yellow")

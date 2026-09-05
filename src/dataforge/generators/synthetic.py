@@ -9,6 +9,7 @@ from typing import AsyncIterator
 from dataforge.processors.formatter import DataRecord
 from dataforge.utils import get_logger
 
+from .contracts import GenerationParseError, to_message_dict, to_message_list
 from .llm import LLMClient, LLMResponse
 from .templates import PromptPair, build_prompt
 
@@ -55,19 +56,10 @@ async def generate_from_chunk(
     try:
         resp = await client.complete(messages)
         items = _parse_response(resp.content, format)
-        return [
-            GeneratedSample(
-                chunk_id=record.chunk_id,
-                format=format,
-                system_prompt=prompt.system,
-                messages=_to_messages(item, format),
-                raw_response=resp.content,
-            )
-            for item in items
-        ]
     except Exception as exc:
         log.warning(f"Generation failed for chunk {record.chunk_id}: {exc}")
         return []
+    return _items_to_samples(items, record.chunk_id, format, prompt.system, resp.content)
 
 
 async def _generate_with_thinking(
@@ -128,16 +120,7 @@ async def _generate_with_thinking(
                 return []
 
     items = _parse_response(resp.content, format)
-    return [
-        GeneratedSample(
-            chunk_id=record.chunk_id,
-            format=format,
-            system_prompt=prompt.system,
-            messages=_to_messages(item, format),
-            raw_response=resp.content,
-        )
-        for item in items
-    ]
+    return _items_to_samples(items, record.chunk_id, format, prompt.system, resp.content)
 
 
 async def generate_batch(
@@ -169,6 +152,36 @@ async def generate_batch(
 
 # ── Parsing helpers ────────────────────────────────────────────────────────────
 
+def _items_to_samples(
+    items: list[dict],
+    chunk_id: int,
+    format: str,
+    system_prompt: str,
+    raw_response: str,
+) -> list[GeneratedSample]:
+    """Validate each parsed item through the message contract.
+
+    A single malformed item (e.g. a nested object where plain text was
+    expected) is skipped and logged rather than discarding every other valid
+    sample produced for the same chunk.
+    """
+    samples: list[GeneratedSample] = []
+    for item in items:
+        try:
+            messages = _to_messages(item, format)
+        except GenerationParseError as exc:
+            log.warning(f"Skipping malformed sample for chunk {chunk_id}: {exc}")
+            continue
+        samples.append(GeneratedSample(
+            chunk_id=chunk_id,
+            format=format,
+            system_prompt=system_prompt,
+            messages=messages,
+            raw_response=raw_response,
+        ))
+    return samples
+
+
 def _parse_response(text: str, format: str) -> list[dict]:
     """Extract JSON array from LLM response, tolerating markdown fences."""
     text = text.strip()
@@ -194,19 +207,28 @@ def _parse_response(text: str, format: str) -> list[dict]:
 
 
 def _to_messages(item: dict, format: str) -> list[dict]:
+    """Build a validated message list from a raw parsed LLM item.
+
+    Every path goes through ``contracts.to_message_dict``/``to_message_list``
+    so a malformed field (e.g. a nested object where the model was asked for
+    plain text) is normalized here, at the generation boundary, instead of
+    surfacing as an unrelated crash in quality scoring or export.
+    """
     if format == "qa":
         return [
-            {"role": "user",      "content": item.get("question", "")},
-            {"role": "assistant", "content": item.get("answer", "")},
+            to_message_dict("user",      item.get("question", "")),
+            to_message_dict("assistant", item.get("answer", "")),
         ]
     if format == "instruction":
         user_content = item.get("instruction", "")
+        if not isinstance(user_content, str):
+            user_content = str(user_content)
         if item.get("input"):
             user_content += f"\n\nInput: {item['input']}"
         return [
-            {"role": "user",      "content": user_content},
-            {"role": "assistant", "content": item.get("output", "")},
+            to_message_dict("user",      user_content),
+            to_message_dict("assistant", item.get("output", "")),
         ]
     if format == "conversation":
-        return item.get("messages", [])
-    return [{"role": "user", "content": str(item)}]
+        return to_message_list(item.get("messages", []))
+    return [to_message_dict("user", str(item))]

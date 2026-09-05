@@ -232,23 +232,33 @@ async def _resume_session(session_id: str | None) -> None:
         with open_session(s.db_path) as db:
             all_s = db.exec(select(PipelineSession)).all()
         paused = [x for x in all_s if x.id in tracked_ids and x.status == SessionStatus.paused]
-        if not paused:
-            active = [x for x in all_s if x.id in tracked_ids and x.status == SessionStatus.active]
-            if active:
-                ui.warn("No paused sessions in this project — session is still active.")
-            else:
-                ui.info("No paused sessions found. Run 'dataforge pipeline' to start one.")
+        # A session left status=active with no process actually running it (crash,
+        # closed terminal, an interrupt outside the paths that mark it paused) is
+        # otherwise invisible here — the user would only find it via `dataforge
+        # sessions` + an explicit ID. Surface it as resumable, clearly labelled,
+        # rather than silently hiding it behind "session is still active".
+        stale_active = [x for x in all_s if x.id in tracked_ids and x.status == SessionStatus.active]
+        candidates = paused + stale_active
+        if not candidates:
+            ui.info("No paused sessions found. Run 'dataforge pipeline' to start one.")
             return
-        if len(paused) == 1:
-            session = paused[0]
+        if len(candidates) == 1:
+            session = candidates[0]
+            if session in stale_active:
+                ui.warn(
+                    f"Session '{session.name}' is marked active but nothing is running it "
+                    "(likely an interrupted run) — resuming from its last checkpoint."
+                )
         else:
             import questionary
+
+            def _label(x: PipelineSession) -> str:
+                flag = "  [yellow](active — likely interrupted)[/]" if x in stale_active else ""
+                return f"{x.name}  [{x.id[:8]}]  stage={x.stage}{flag}"
+
             choice = await questionary.select(
-                "Multiple paused sessions — select one to resume:",
-                choices=[
-                    questionary.Choice(f"{x.name}  [{x.id[:8]}]  stage={x.stage}", value=x.id)
-                    for x in paused
-                ],
+                "Multiple resumable sessions — select one:",
+                choices=[questionary.Choice(_label(x), value=x.id) for x in candidates],
             ).ask_async()
             with open_session(s.db_path) as db:
                 session = db.get(PipelineSession, choice)
@@ -599,23 +609,92 @@ def providers() -> None:
 
 # ── test-llm command ──────────────────────────────────────────────────────────
 
+_TEST_QUESTIONS = [
+    "What is the capital of France?",
+    "Name two prime numbers between 10 and 20.",
+    "In one sentence, what does photosynthesis do?",
+    "What year did the first human land on the Moon?",
+    "Spell the word 'necessary' correctly.",
+    "What is 17 multiplied by 6?",
+    "Name one gas that makes up most of Earth's atmosphere.",
+    "Who wrote the play 'Romeo and Juliet'?",
+]
+
+
+def _configured_providers() -> list[str]:
+    """Providers with a usable key (env, .env-loaded settings, or saved prefs) — plus Ollama, which needs none."""
+    from dataforge.cli import prefs as user_prefs
+    s = get_settings()
+    available = []
+    for name, info in PROVIDER_INFO.items():
+        if not info.requires_key:
+            available.append(name)
+            continue
+        has_key = bool(
+            os.getenv(info.key_env)
+            or getattr(s, info.key_env.lower(), "")
+            or user_prefs.get_api_key(info.key_env)
+        )
+        if has_key:
+            available.append(name)
+    return available
+
+
 @app.command(name="test-llm")
 def test_llm() -> None:
-    """Send a test prompt to the configured LLM provider."""
+    """Pick a configured model and ask it a random test question."""
     _bootstrap()
     asyncio.run(_test_llm())
 
 
 async def _test_llm() -> None:
+    import random
+
+    import questionary
+
     from dataforge.generators import LLMClient
-    s = get_settings()
-    ui.info(f"Testing {s.llm_provider} / {s.llm_model}...")
-    client = LLMClient()
-    ok = await client.test_connection()
-    if ok:
-        ui.success("LLM connection successful")
-    else:
-        ui.error("LLM connection failed — check your API key and model name")
+    from dataforge.utils.errors import LLMConnectionError, MissingCredentialError, show_error
+
+    available = _configured_providers()
+    if not available:
+        ui.warn(
+            "No LLM provider is configured yet.\n"
+            "Run 'dataforge config' to set one up (or 'dataforge config' → ollama for a local model)."
+        )
+        return
+
+    provider = await questionary.select(
+        "Which configured provider do you want to test?",
+        choices=available,
+    ).ask_async()
+    if not provider:
+        return
+
+    model = await prompts.ask_model(PROVIDER_INFO[provider].models)
+    if not model:
+        return
+
+    question = random.choice(_TEST_QUESTIONS)
+    ui.info(f"Asking {provider}/{model}:  \"{question}\"")
+
+    client = LLMClient(model_override=model, provider_override=provider)
+    try:
+        with console.status("[bold cyan]Waiting for response…[/]"):
+            resp = await client.complete([{"role": "user", "content": question}])
+    except MissingCredentialError as exc:
+        show_error(exc.credential)
+        return
+    except LLMConnectionError as exc:
+        show_error("LLM_CONNECTION", extra=str(exc))
+        return
+    except Exception as exc:
+        show_error("test-llm", extra=str(exc))
+        return
+
+    ui.llm_answer_panel(
+        provider, model, question, resp.content,
+        resp.prompt_tokens, resp.completion_tokens, resp.cost_usd,
+    )
 
 
 # ── update command ───────────────────────────────────────────────────────────
@@ -646,7 +725,12 @@ def update() -> None:
     ui.info("Checking for updates…")
 
     def _try_update(cmd: list[str]) -> tuple[bool, str]:
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True)
+        except FileNotFoundError:
+            # e.g. `uv` isn't on PATH for a pip-installed user — not an error,
+            # just means this update method isn't available; fall through.
+            return False, f"{cmd[0]} not found"
         return r.returncode == 0, r.stdout + r.stderr
 
     # 1. Try uv tool upgrade (preferred for uv-installed tools)
@@ -1201,6 +1285,49 @@ def _detect_language_groups(urls: list[str]) -> dict[str, int]:
     return counts
 
 
+async def _adjust_settings(context: PipelineContext) -> None:
+    """Mid-session settings menu — change the model or output dir between stages.
+
+    Agents are rebuilt fresh at the start of each stage and read
+    ``context.generation_model`` / ``context.quality_model`` /
+    ``context.settings.output_dir`` at that point, so a change made here
+    takes effect starting with the *next* stage.
+    """
+    s = context.settings
+    target = await prompts.ask_adjust_settings_target()
+    if target is None:
+        return
+
+    if target == "generation_model":
+        current = context.generation_model or s.llm_model
+        new_model = await prompts.ask_generation_model(current)
+        if new_model and new_model != current:
+            context.generation_model = new_model
+            ui.success(f"Generation model set to [bold]{new_model}[/] for the next stage onward.")
+
+    elif target == "quality_model":
+        current = context.quality_model or context.generation_model or s.llm_model
+        new_model = await prompts.ask_quality_model(current)
+        if new_model and new_model != current:
+            context.quality_model = new_model
+            ui.success(f"Quality model set to [bold]{new_model}[/] for the next stage onward.")
+
+    elif target == "output_dir":
+        current = str(s.output_dir.resolve())
+        chosen = await prompts.ask_output_dir(current)
+        if chosen:
+            new_dir = Path(chosen).expanduser().resolve()
+            if new_dir != s.output_dir:
+                # Deliberately NOT touching s.db_path — the running session's data
+                # lives in the existing database; only new artifacts (exports, logs)
+                # should follow the new output directory.
+                s.output_dir = new_dir
+                s.output_dir.mkdir(parents=True, exist_ok=True, mode=0o750)
+                s.logs_dir().mkdir(parents=True, exist_ok=True)
+                ui.success(f"Output directory set to [bold]{new_dir}[/] for new exports/artifacts.")
+                ui.info("The session database location is unchanged — existing session data stays where it is.")
+
+
 async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None) -> None:
     s = ctx.settings
     _stage_map = {
@@ -1225,14 +1352,19 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
         # Always offer export after collection+ stages
         if stage in (PipelineStage.collection, PipelineStage.processing,
                      PipelineStage.generation, PipelineStage.quality):
-            action = await prompts.ask_stage_action(name)
-            if action == "export":
-                await _quick_export(context, stage)
-                cont = await prompts.ask_confirm("Continue pipeline after export?")
-                return cont
-            if action == "pause":
-                ui.info(f"Session saved. Resume with: [bold]dataforge resume {context.session_id[:8]}[/]")
-                return False
+            while True:
+                action = await prompts.ask_stage_action(name)
+                if action == "adjust":
+                    await _adjust_settings(context)
+                    continue  # re-show the same menu so the user can continue/export/pause next
+                if action == "export":
+                    await _quick_export(context, stage)
+                    cont = await prompts.ask_confirm("Continue pipeline after export?")
+                    return cont
+                if action == "pause":
+                    ui.info(f"Session saved. Resume with: [bold]dataforge resume {context.session_id[:8]}[/]")
+                    return False
+                return True
         return True
 
     # URL selection hook (after discovery)

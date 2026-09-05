@@ -39,13 +39,14 @@ class UsageSummary:
 
 
 class LLMClient:
-    def __init__(self, model_override: str = "") -> None:
+    def __init__(self, model_override: str = "", provider_override: str = "") -> None:
         s = get_settings()
-        raw_model    = model_override or s.llm_model
-        self._model  = litellm_model(s.llm_provider, raw_model)
-        self._temp   = s.llm_temperature
-        self._max_tk = s.llm_max_tokens
-        self.usage   = UsageSummary()
+        self._provider = provider_override or s.llm_provider
+        raw_model      = model_override or s.llm_model
+        self._model    = litellm_model(self._provider, raw_model)
+        self._temp     = s.llm_temperature
+        self._max_tk   = s.llm_max_tokens
+        self.usage     = UsageSummary()
 
     @retry(
         stop=stop_after_attempt(3),
@@ -95,9 +96,8 @@ class LLMClient:
                     "google": "GEMINI_API_KEY",
                     "groq": "GROQ_API_KEY", "together": "TOGETHER_API_KEY",
                 }
-                s = get_settings()
-                key = _KEY_MAP.get(s.llm_provider, "API key")
-                raise MissingCredentialError(key, s.llm_provider) from exc
+                key = _KEY_MAP.get(self._provider, "API key")
+                raise MissingCredentialError(key, self._provider) from exc
             if "connect" in msg or "timeout" in msg or "unreachable" in msg:
                 from dataforge.utils.errors import LLMConnectionError
                 raise LLMConnectionError(str(exc)) from exc
@@ -220,8 +220,8 @@ class LLMClient:
                     "google": "GEMINI_API_KEY",
                     "groq": "GROQ_API_KEY", "together": "TOGETHER_API_KEY",
                 }
-                key = _KEY_MAP.get(s.llm_provider, "API key")
-                raise MissingCredentialError(key, s.llm_provider) from exc
+                key = _KEY_MAP.get(self._provider, "API key")
+                raise MissingCredentialError(key, self._provider) from exc
             if "connect" in msg or "timeout" in msg or "unreachable" in msg:
                 from dataforge.utils.errors import LLMConnectionError
                 raise LLMConnectionError(str(exc)) from exc

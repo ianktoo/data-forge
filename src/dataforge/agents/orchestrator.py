@@ -10,7 +10,7 @@ from sqlmodel import select
 from dataforge.cli.preflight import check_stage
 from dataforge.storage import PipelineSession, PipelineStage, SessionStatus, open_session
 from dataforge.utils import get_logger
-from dataforge.utils.errors import NoContentError, show_warning
+from dataforge.utils.errors import LLMConnectionError, show_error, show_warning
 
 from .base import BaseAgent, PipelineContext
 from .explorer import ExplorerAgent
@@ -23,14 +23,16 @@ from .scraper import ScraperAgent
 
 log = get_logger("orchestrator")
 
-# stage_name → next_stage
+# stage_name → next_stage (plain strings throughout so log/error formatting
+# and DB round-trips — where PipelineSession.stage is stored as a bare str —
+# stay consistent instead of drifting between "quality" and "PipelineStage.quality")
 _STAGE_FLOW: dict[str, str] = {
-    PipelineStage.discovery:  PipelineStage.collection,
-    PipelineStage.collection: PipelineStage.processing,
-    PipelineStage.processing: PipelineStage.generation,
-    PipelineStage.generation: PipelineStage.quality,
-    PipelineStage.quality:    PipelineStage.export,
-    PipelineStage.export:     PipelineStage.completed,
+    PipelineStage.discovery.value:  PipelineStage.collection.value,
+    PipelineStage.collection.value: PipelineStage.processing.value,
+    PipelineStage.processing.value: PipelineStage.generation.value,
+    PipelineStage.generation.value: PipelineStage.quality.value,
+    PipelineStage.quality.value:    PipelineStage.export.value,
+    PipelineStage.export.value:     PipelineStage.completed.value,
 }
 
 # Checkpoint hook: called after each stage with (stage, context)
@@ -67,7 +69,7 @@ class Orchestrator:
         s = self.ctx.settings
         self._init_session()
 
-        stage = start_from or PipelineStage.discovery
+        stage = start_from or PipelineStage.discovery.value
 
         while stage != PipelineStage.completed:
             log.info(f"▶ Stage: {stage}")
@@ -109,9 +111,8 @@ class Orchestrator:
                 log.error(f"Stage '{stage}' failed: {exc}", exc_info=True)
                 self.ctx.add_error(f"Stage '{stage}' error: {exc}")
                 self._update_session_status(SessionStatus.paused)
-                from dataforge.utils.errors import show_error
-                show_error("LLM_CONNECTION" if "llm" in stage else stage,
-                           extra=str(exc))
+                error_key = "LLM_CONNECTION" if isinstance(exc, LLMConnectionError) else stage
+                show_error(error_key, extra=str(exc), stage=stage)
                 return self.ctx
 
             self._checkpoint()
@@ -123,7 +124,23 @@ class Orchestrator:
                 return self.ctx
 
             if self._hook:
-                proceed = await self._hook(stage, self.ctx)
+                # The hook runs interactive prompts (continue/export/pause/adjust) —
+                # an interrupt or error here must be handled the same way as one
+                # during agent.run(), or the session is left status=active in the
+                # DB with no process actually running it (invisible to `dataforge
+                # resume`'s auto-detect, which only looks for status=paused).
+                try:
+                    proceed = await self._hook(stage, self.ctx)
+                except KeyboardInterrupt:
+                    log.info(f"Interrupted after stage '{stage}' — marking session paused")
+                    self._update_session_status(SessionStatus.paused)
+                    return self.ctx
+                except Exception as exc:
+                    log.error(f"Stage-hook after '{stage}' failed: {exc}", exc_info=True)
+                    self.ctx.add_error(f"Stage-hook error after '{stage}': {exc}")
+                    self._update_session_status(SessionStatus.paused)
+                    show_error(stage, extra=str(exc), stage=stage)
+                    return self.ctx
                 if not proceed:
                     log.info(f"Pipeline paused at stage: {stage}")
                     self._update_session_status(SessionStatus.paused)
@@ -175,7 +192,13 @@ class Orchestrator:
         Uses a max-merge strategy: keeps the higher of the existing vs new count
         for each key, so a resumed pipeline with a partially-populated context
         never zeros out counts saved by earlier stages.
+
+        Gated on ``settings.autosave`` (default True) — the per-record DB writes
+        each agent already does (scraped pages, chunks, samples) are unaffected;
+        this only controls the summary checkpoint used to display/report progress.
         """
+        if not self.ctx.settings.autosave:
+            return
         with open_session(self.ctx.settings.db_path) as db:
             session = db.get(PipelineSession, self.ctx.session_id)
             if session:
