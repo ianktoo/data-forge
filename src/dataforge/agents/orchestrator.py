@@ -124,7 +124,23 @@ class Orchestrator:
                 return self.ctx
 
             if self._hook:
-                proceed = await self._hook(stage, self.ctx)
+                # The hook runs interactive prompts (continue/export/pause/adjust) —
+                # an interrupt or error here must be handled the same way as one
+                # during agent.run(), or the session is left status=active in the
+                # DB with no process actually running it (invisible to `dataforge
+                # resume`'s auto-detect, which only looks for status=paused).
+                try:
+                    proceed = await self._hook(stage, self.ctx)
+                except KeyboardInterrupt:
+                    log.info(f"Interrupted after stage '{stage}' — marking session paused")
+                    self._update_session_status(SessionStatus.paused)
+                    return self.ctx
+                except Exception as exc:
+                    log.error(f"Stage-hook after '{stage}' failed: {exc}", exc_info=True)
+                    self.ctx.add_error(f"Stage-hook error after '{stage}': {exc}")
+                    self._update_session_status(SessionStatus.paused)
+                    show_error(stage, extra=str(exc), stage=stage)
+                    return self.ctx
                 if not proceed:
                     log.info(f"Pipeline paused at stage: {stage}")
                     self._update_session_status(SessionStatus.paused)
@@ -176,7 +192,13 @@ class Orchestrator:
         Uses a max-merge strategy: keeps the higher of the existing vs new count
         for each key, so a resumed pipeline with a partially-populated context
         never zeros out counts saved by earlier stages.
+
+        Gated on ``settings.autosave`` (default True) — the per-record DB writes
+        each agent already does (scraped pages, chunks, samples) are unaffected;
+        this only controls the summary checkpoint used to display/report progress.
         """
+        if not self.ctx.settings.autosave:
+            return
         with open_session(self.ctx.settings.db_path) as db:
             session = db.get(PipelineSession, self.ctx.session_id)
             if session:

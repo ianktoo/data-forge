@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     output_dir: Path = Path("./output")
     db_path: Path = Path("./dataforge.db")
     ignore_robots: bool = Field(False, description="Skip robots.txt enforcement")
+    autosave: bool = Field(
+        True,
+        description="Persist a progress checkpoint to the session DB after every stage",
+    )
 
     # Export
     huggingface_token: str = ""

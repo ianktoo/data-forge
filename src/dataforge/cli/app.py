@@ -232,23 +232,33 @@ async def _resume_session(session_id: str | None) -> None:
         with open_session(s.db_path) as db:
             all_s = db.exec(select(PipelineSession)).all()
         paused = [x for x in all_s if x.id in tracked_ids and x.status == SessionStatus.paused]
-        if not paused:
-            active = [x for x in all_s if x.id in tracked_ids and x.status == SessionStatus.active]
-            if active:
-                ui.warn("No paused sessions in this project — session is still active.")
-            else:
-                ui.info("No paused sessions found. Run 'dataforge pipeline' to start one.")
+        # A session left status=active with no process actually running it (crash,
+        # closed terminal, an interrupt outside the paths that mark it paused) is
+        # otherwise invisible here — the user would only find it via `dataforge
+        # sessions` + an explicit ID. Surface it as resumable, clearly labelled,
+        # rather than silently hiding it behind "session is still active".
+        stale_active = [x for x in all_s if x.id in tracked_ids and x.status == SessionStatus.active]
+        candidates = paused + stale_active
+        if not candidates:
+            ui.info("No paused sessions found. Run 'dataforge pipeline' to start one.")
             return
-        if len(paused) == 1:
-            session = paused[0]
+        if len(candidates) == 1:
+            session = candidates[0]
+            if session in stale_active:
+                ui.warn(
+                    f"Session '{session.name}' is marked active but nothing is running it "
+                    "(likely an interrupted run) — resuming from its last checkpoint."
+                )
         else:
             import questionary
+
+            def _label(x: PipelineSession) -> str:
+                flag = "  [yellow](active — likely interrupted)[/]" if x in stale_active else ""
+                return f"{x.name}  [{x.id[:8]}]  stage={x.stage}{flag}"
+
             choice = await questionary.select(
-                "Multiple paused sessions — select one to resume:",
-                choices=[
-                    questionary.Choice(f"{x.name}  [{x.id[:8]}]  stage={x.stage}", value=x.id)
-                    for x in paused
-                ],
+                "Multiple resumable sessions — select one:",
+                choices=[questionary.Choice(_label(x), value=x.id) for x in candidates],
             ).ask_async()
             with open_session(s.db_path) as db:
                 session = db.get(PipelineSession, choice)

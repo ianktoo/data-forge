@@ -15,17 +15,26 @@ from .models import (  # noqa: F401 — ensure models are registered
     SyntheticSample,
 )
 
-_engine = None
+_engines: dict[str, "Engine"] = {}
 
 
 def _get_engine(db_path: Path):
-    global _engine
-    if _engine is None:
+    """Return the (cached) engine for this db_path.
+
+    Cached per resolved path, not globally — a single global engine would
+    silently keep serving the *first* db_path ever requested even after a
+    caller asked for a different one (e.g. a session's own DB vs. a
+    differently-configured one in the same process).
+    """
+    key = str(db_path.resolve())
+    engine = _engines.get(key)
+    if engine is None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         url = f"sqlite:///{db_path}"
-        _engine = create_engine(url, connect_args={"check_same_thread": False})
-        SQLModel.metadata.create_all(_engine)
-    return _engine
+        engine = create_engine(url, connect_args={"check_same_thread": False})
+        SQLModel.metadata.create_all(engine)
+        _engines[key] = engine
+    return engine
 
 
 def init_db(db_path: Path) -> None:
