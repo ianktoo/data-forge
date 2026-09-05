@@ -725,7 +725,12 @@ def update() -> None:
     ui.info("Checking for updates…")
 
     def _try_update(cmd: list[str]) -> tuple[bool, str]:
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True)
+        except FileNotFoundError:
+            # e.g. `uv` isn't on PATH for a pip-installed user — not an error,
+            # just means this update method isn't available; fall through.
+            return False, f"{cmd[0]} not found"
         return r.returncode == 0, r.stdout + r.stderr
 
     # 1. Try uv tool upgrade (preferred for uv-installed tools)
