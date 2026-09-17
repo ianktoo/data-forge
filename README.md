@@ -1,8 +1,84 @@
 # DataForge
 
-An interactive CLI pipeline that turns websites into fine-tuning datasets for LLMs.
-Discovers URLs, scrapes content, chunks it, generates synthetic Q&A / instruction / conversation
-samples, scores them for quality, and exports to HuggingFace Hub, Kaggle, or local files.
+**Turn any website into a fine-tuning dataset — in one command.**
+
+[![PyPI](https://img.shields.io/pypi/v/llm-web-crawler)](https://pypi.org/project/llm-web-crawler/)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+Fine-tuning needs data, and good domain data is trapped in documentation sites,
+knowledge bases and public archives. Getting it out usually means writing a
+throwaway scraper, a chunker, a prompt loop and an exporter — then doing it
+again for the next domain.
+
+DataForge is that pipeline, already built:
+
+```
+sitemap ──▶ crawl ──▶ clean + chunk ──▶ LLM generates Q&A ──▶ score ──▶ JSONL / Parquet / HF Hub
+```
+
+```bash
+pip install llm-web-crawler
+dataforge init-recipe fema.yaml   # write a starter config
+dataforge run fema.yaml           # crawl, generate, score, export — unattended
+```
+
+You get a versioned, deduplicated, quality-scored dataset in ChatML JSONL,
+Parquet and CSV, ready for Unsloth, Axolotl, TRL or HuggingFace `datasets`.
+
+### Why DataForge
+
+| | |
+|---|---|
+| **Configuration as code** | A YAML recipe captures every decision. Commit it, review it in a PR, re-run it in CI — the same input produces the same dataset. |
+| **Unattended by default** | `dataforge run` needs no prompts. Cron it, or drive it interactively with `dataforge` when exploring a new site. |
+| **Streaming pipeline** | Generation starts on the first page instead of waiting for the last one, so the LLM and the crawler work at the same time. |
+| **Resumable, not restartable** | Every page, chunk and sample is checkpointed to SQLite. Interrupt a 5,000-page crawl and resume exactly where it stopped — nothing is re-fetched or re-billed. |
+| **Any model** | OpenAI, Anthropic, Groq, Together, or fully local via Ollama — so sensitive content never has to leave your machine. |
+| **Polite by construction** | `robots.txt` honoured, per-domain rate limiting, URL sanitisation, and PII/copyright guidance built into the docs. |
+
+---
+
+## A worked example
+
+Building a U.S. disaster-preparedness dataset from FEMA and Ready.gov. The
+full recipe ships with the project at
+[`examples/fema-ready.yaml`](examples/fema-ready.yaml):
+
+```yaml
+version: 1
+name: fema-ready-preparedness
+stream: true                     # overlap crawling and generation
+
+source:
+  urls:
+    - https://www.ready.gov/sitemap.xml
+    - https://www.fema.gov/sitemap.xml
+  include: ['/hazard', '/plan', '/kit', '/disaster']
+  exclude: ['/es/', '/press-release', '.pdf']
+  max_urls: 250
+
+generation:
+  format: qa
+  goal: >
+    Accurate Q&A about U.S. disaster preparedness, grounded strictly in
+    official FEMA and Ready.gov guidance.
+  n_per_chunk: 3
+
+quality:
+  threshold: 0.5
+
+export:
+  targets: [local]
+```
+
+```bash
+dataforge run examples/fema-ready.yaml --dry-run   # validate + preview the plan
+dataforge run examples/fema-ready.yaml             # execute
+```
+
+Two sitemaps become a few hundred curated pages, a few thousand chunks, and a
+scored, deduplicated Q&A dataset — without answering a single prompt.
 
 ---
 
@@ -61,18 +137,140 @@ Download pre-built binaries for your platform from [GitHub Releases](https://git
 
 ## Quick start
 
+DataForge has two modes. Use the wizard to explore a new site, then freeze
+what worked into a recipe and run it unattended from then on.
+
+**Unattended — configuration as code**
+
 ```bash
-dataforge          # interactive guided pipeline
-dataforge explore <url>   # preview URL discovery without running the full pipeline
-dataforge config   # set your LLM provider and API key
-dataforge sessions # list past sessions
-dataforge resume <id>     # resume a paused session
-dataforge update   # update to the latest version
+dataforge init-recipe my.yaml       # write an annotated starter recipe
+dataforge run my.yaml --dry-run     # validate and print the plan, run nothing
+dataforge run my.yaml               # execute end-to-end, no prompts
+```
+
+**Interactive — guided wizard**
+
+```bash
+dataforge                  # full interactive pipeline with per-stage review
+dataforge explore <url>    # preview URL discovery without running the pipeline
+```
+
+**Everything else**
+
+```bash
+dataforge config           # set your LLM provider and API key
+dataforge sessions         # list past sessions
+dataforge resume <id>      # resume a paused session
+dataforge view <id> --stage generation   # inspect what was produced
+dataforge export <id>      # re-export an existing session
+dataforge update           # update to the latest version
 ```
 
 ---
 
 ## Features
+
+### Recipes — configuration as code
+Every answer the wizard would ask for lives in one YAML file, so a dataset build
+is reproducible, reviewable and automatable.
+
+```bash
+dataforge init-recipe my.yaml     # annotated starter file
+dataforge run my.yaml --dry-run   # validate schema + print the resolved plan
+dataforge run my.yaml             # execute
+```
+
+- **Validated on load** — a typo, an out-of-range threshold or a missing
+  `hf_repo_id` is reported with its exact field path *before* the crawl starts,
+  not three hours in.
+- **URL scoping without a wizard** — `include` / `exclude` substring filters and
+  `max_urls` replace the interactive review step. Keep one locale, drop press
+  releases, cap cost.
+- **Split the URL list out** — point `source.url_file` at a plain text file
+  (resolved relative to the recipe) and commit the two together.
+- **Layered config** — a recipe only overrides the keys it declares; everything
+  else still comes from `.env` and your global settings.
+- **CI-friendly exit codes** — `0` ok, `2` invalid recipe, `3` no URLs survived
+  the filters, `4` paused, `5` finished with zero approved samples.
+
+### Leak-free train / validation / test splits
+A synthetic dataset built from scraped pages is not independently distributed:
+`n_per_chunk` samples come from one chunk, and several chunks come from one
+page, so every sample tracing back to a page is a paraphrase of the same source
+text.
+
+**Splitting that randomly inflates your eval score.** Near-duplicates of the
+same passage land on both sides, and the model answers eval questions from text
+it memorised during training.
+
+```yaml
+export:
+  split:
+    train: 0.8
+    validation: 0.1
+    test: 0.1
+    group_by: page     # every sample from one page stays in one split
+    seed: 42
+```
+
+This writes `dataset_train.*`, `dataset_validation.*` and `dataset_test.*` in
+each format, assigning whole groups so no source page spans two splits — and
+verifies that property before writing, rather than assuming it.
+
+Every export carries `page_id`, `chunk_id`, `chunk_index` and `source_url`
+alongside the messages, **whether or not you split here**. That lineage is what
+makes a correct split possible later; without it, a downstream `train_test_split`
+has no way to avoid leaking.
+
+### Resilient collection
+Real sites fail in specific ways, and DataForge distinguishes them rather than
+treating every non-200 the same:
+
+- **Transient statuses retry** — `429`, `500`, `502`, `503` and `504` are retried
+  up to three times with exponential backoff, because the server is saying
+  "later", not "no".
+- **`Retry-After` is honoured** when present (delta-seconds or HTTP-date),
+  capped at 120s so one URL cannot stall a run.
+- **Permanent statuses do not retry** — a `404` or `403` is taken at its word,
+  which keeps the crawl budget for pages that exist.
+- **`robots.txt` `Crawl-delay` is enforced.** If a site asks for one request
+  every 15 seconds (FEMA.gov does), the limiter drops to that rate automatically.
+  It only ever slows down — a permissive `Crawl-delay` never overrides a stricter
+  `rate_limit` you configured.
+- **Failures are isolated and resumable.** A page that fails is logged, counted
+  and skipped; the rest of the crawl continues. Because a URL is only marked
+  scraped after a successful fetch, `dataforge resume` retries exactly the ones
+  that failed.
+- **Non-HTML resources are filtered** from crawl candidates before a request is
+  ever made (PDFs, images, archives).
+
+### Streaming pipeline
+By default the stages run strictly one after another, which means nothing is
+generated until the last URL has been fetched — on a large site the LLM idles
+through the entire crawl. Set `stream: true` (the default in a recipe) and
+collection, processing and generation run as concurrent worker pools:
+
+```
+urls ─▶ [scrape pool] ─▶ pages ─▶ [chunk pool] ─▶ chunks ─▶ [LLM pool] ─▶ samples
+```
+
+- A page that finishes downloading is chunked immediately, and its chunks enter
+  generation while the crawler is still working.
+- **Bounded queues** apply backpressure, so a fast crawler cannot exhaust memory
+  ahead of a slower LLM.
+- **Independent pool sizes** — scraping is rate-limit bound, generation is
+  cost/token bound. Tune them separately via `DATAFORGE_STREAM_GENERATE_WORKERS`.
+- **Failure isolation** — a dead URL, an unparsable page or one bad LLM response
+  is logged and skipped; the pools keep running.
+- **Graceful degradation** — if generation fails fatally (missing key, provider
+  down), scraping and chunking still finish, so nothing is lost and a resume
+  only has to generate.
+- **Idempotent resume** — resuming replays only what is genuinely unfinished:
+  URLs never fetched, pages never chunked, chunks never generated. No page is
+  downloaded twice and no LLM call is paid for twice.
+
+Quality scoring and export stay batch stages, because deduplication has to see
+the whole sample set.
 
 ### URL Discovery
 - Automatically finds and parses XML sitemaps (including sitemap indexes)
@@ -171,9 +369,61 @@ Run `dataforge config` to set your provider and API key interactively.
 | `DATAFORGE_OUTPUT_DIR` | `./output` | Session output directory (logs also stored here in `logs/`) |
 | `DATAFORGE_DB_PATH` | `./dataforge.db` | SQLite database path |
 | `DATAFORGE_AUTOSAVE` | `true` | Checkpoint progress to the session DB after every stage |
+| `DATAFORGE_STREAM_PIPELINE` | `false` | Fuse collection+processing+generation into one concurrent stage (a recipe's `stream:` key overrides this) |
+| `DATAFORGE_STREAM_GENERATE_WORKERS` | `3` | Concurrent LLM generation workers in streaming mode |
+| `DATAFORGE_STREAM_QUEUE_SIZE` | `100` | Items buffered between streaming stages (backpressure) |
 | `HUGGINGFACE_TOKEN` | — | HuggingFace Hub write token |
 | `KAGGLE_USERNAME` | — | Kaggle username |
 | `KAGGLE_KEY` | — | Kaggle API key |
+
+### Recipe reference
+
+Only `name` and one of `source.urls` / `source.url_file` are required. Every
+other key falls back to your `.env` and global settings, so a working recipe
+can be four lines long.
+
+| Key | Default | Description |
+|---|---|---|
+| `version` | `1` | Recipe schema version |
+| `name` | *required* | Session name |
+| `stream` | `true` | Overlap collection/processing/generation |
+| `output_dir` | *(global)* | Where exports and logs are written |
+| `source.urls` | `[]` | Seed or sitemap URLs |
+| `source.url_file` | `""` | Text file of URLs, one per line, `#` for comments — resolved relative to the recipe |
+| `source.language` | `""` | Keep only one language. `en` keeps root-level pages and drops locale-prefixed ones (`/es/…`, `/fr/…`); `es` inverts it. Empty = keep all |
+| `source.include` | `[]` | Keep only URLs matching any pattern — plain substring, or regex with an `re:` prefix |
+| `source.exclude` | `[]` | Drop URLs matching any pattern (same syntax). Applied after `include` |
+| `source.max_urls` | `0` | Cap URLs after filtering (`0` = no cap) |
+| `source.ignore_robots` | `false` | Disable `robots.txt` enforcement (only with permission) |
+| `source.skip_known` | `false` | Skip URLs already scraped in an earlier session |
+| `crawl.rate_limit` | *(global)* | Requests/second/domain |
+| `crawl.max_pages` | *(global)* | Max pages scraped this session |
+| `crawl.max_crawl_pages` | *(global)* | Max pages found by the BFS fallback crawler |
+| `crawl.max_crawl_depth` | *(global)* | Max link depth for the BFS crawler |
+| `generation.format` | `qa` | `qa` / `instruction` / `conversation` / `custom` |
+| `generation.goal` | `""` | Plain-language description of the dataset's purpose |
+| `generation.n_per_chunk` | `3` | Samples generated per chunk (1–20) |
+| `generation.model` | *(global)* | Override the LLM used for generation |
+| `generation.system_prompt` | `""` | Custom system prompt (required when `format: custom`) |
+| `generation.chunk_size` | *(global)* | Tokens per chunk |
+| `generation.chunk_overlap` | *(global)* | Token overlap between chunks |
+| `quality.threshold` | `0.5` | Minimum score (0.0–1.0) for a sample to be approved |
+| `quality.model` | *(global)* | Override the LLM used for quality review |
+| `export.targets` | `[local]` | Any of `local`, `huggingface`, `kaggle` |
+| `export.approved_only` | `true` | Export only samples that passed the threshold |
+| `export.hf_repo_id` | `""` | Required when targeting `huggingface` |
+| `export.hf_private` | `true` | Create the HF dataset as private |
+| `export.kaggle_slug` | `""` | Required when targeting `kaggle` |
+| `export.kaggle_title` | `""` | Kaggle dataset title |
+| `export.split` | *(none)* | Omit for one dataset file; set to emit train/validation/test |
+| `export.split.train` / `.validation` / `.test` | `0.8` / `0.1` / `0.1` | Target shares — must sum to 1.0 |
+| `export.split.group_by` | `page` | `page` / `url` / `chunk` / `none` — what must not span splits |
+| `export.split.seed` | `42` | Same seed gives the same split |
+
+Unknown keys are rejected with the offending path, so a typo like
+`generation.formt` fails immediately rather than being silently ignored.
+
+---
 
 ### Using Ollama (fully local, no API key)
 
@@ -216,6 +466,12 @@ and paths are active.
 
 ### New in this release
 
+- **`dataforge run <recipe.yaml>`** — run a whole pipeline from a YAML file
+  with no prompts. `dataforge init-recipe` writes an annotated starter, and
+  `--dry-run` validates it without spending a request.
+- **Streaming pipeline** (`stream: true`) — collection, processing and
+  generation run concurrently instead of one after another, so generation
+  begins on the first page rather than the last.
 - `dataforge test-llm` — pick any configured provider/model and ask it a
   random test question, without running the full pipeline.
 - A between-stage **"Adjust settings"** menu option to change the generation
@@ -227,11 +483,28 @@ and paths are active.
 
 ## Pipeline stages
 
+**Batch mode** (default for the interactive wizard) — each stage completes
+before the next begins, with a review checkpoint between them:
+
 ```
 Discovery → Collection → Processing → Generation → Quality → Export
 ```
 
-Each stage is pausable and resumable. The session state is persisted to SQLite after every stage.
+**Streaming mode** (`stream: true`, the default in a recipe) — the three
+middle stages are fused into one concurrent phase:
+
+```
+Discovery → ┌─────────── Streaming ───────────┐ → Quality → Export
+            │ scrape ⇄ chunk ⇄ generate       │
+            └─────────────────────────────────┘
+```
+
+Both modes are pausable and resumable. Session state is checkpointed to SQLite,
+and every page, chunk and sample is persisted as it is produced — so `Ctrl-C`
+mid-run costs you nothing but the item in flight.
+
+Sessions are interchangeable between modes: a run paused in batch mode can be
+resumed with streaming enabled and vice versa.
 
 ---
 
@@ -273,8 +546,8 @@ GitHub Actions will:
 ```
 data-forge/
 ├── src/dataforge/
-│   ├── agents/          # pipeline stage agents (explorer, scraper, processor, …)
-│   ├── cli/             # typer app, prompts, UI, prefs, tips
+│   ├── agents/          # pipeline stage agents + streaming pipeline
+│   ├── cli/             # typer app, prompts, UI, recipes, headless runner
 │   ├── collectors/      # HTTP client, sitemap parser, BFS crawler, HTML extractor
 │   ├── config/          # pydantic-settings, provider registry
 │   ├── exporters/       # local, HuggingFace, Kaggle
@@ -282,6 +555,7 @@ data-forge/
 │   ├── processors/      # chunker, cleaner, formatter
 │   ├── storage/         # SQLModel models, database session
 │   └── utils/           # logger, rate limiter, URL sanitiser, errors
+├── examples/            # ready-to-run recipe files
 ├── tests/
 ├── .github/workflows/
 │   ├── build-executables.yml
@@ -340,6 +614,7 @@ DataForge is built on the following open-source libraries. We thank their author
 | [aiofiles](https://pypi.org/project/aiofiles/) | Async file I/O | Apache-2.0 |
 | [pyarrow](https://pypi.org/project/pyarrow/) | Apache Arrow / Parquet format support | Apache-2.0 |
 | [jinja2](https://pypi.org/project/jinja2/) | Prompt template engine | BSD-3-Clause |
+| [pyyaml](https://pypi.org/project/PyYAML/) | Recipe file parsing | MIT |
 | [keyring](https://pypi.org/project/keyring/) | OS keychain integration for API key storage | MIT |
 
 ### Dev and build dependencies

@@ -49,6 +49,11 @@ def format_records(
             metadata={
                 "page_id": page_id,
                 "chunk_index": i,
+                # source_url and title are duplicated into metadata on purpose:
+                # only this dict is persisted to ProcessedChunk.metadata_json,
+                # so anything left out here is lost to every later stage.
+                "source_url": url,
+                "title": title,
                 "author": author,
                 "date": date,
                 "session_id": session_id,

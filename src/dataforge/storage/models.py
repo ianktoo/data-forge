@@ -13,6 +13,7 @@ from sqlmodel import Field, SQLModel
 class PipelineStage(StrEnum):
     discovery  = "discovery"
     collection = "collection"
+    streaming  = "streaming"   # fused collection+processing+generation
     processing = "processing"
     generation = "generation"
     quality    = "quality"

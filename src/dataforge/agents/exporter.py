@@ -7,7 +7,13 @@ from sqlmodel import select
 
 from dataforge.cli.preflight import check_export_target
 from dataforge.exporters.local import export_all_formats
-from dataforge.storage import ExportRecord, SyntheticSample, open_session
+from dataforge.storage import (
+    ExportRecord,
+    ProcessedChunk,
+    ScrapedPage,
+    SyntheticSample,
+    open_session,
+)
 from dataforge.utils.errors import show_warning
 
 from .base import BaseAgent, PipelineContext
@@ -27,6 +33,9 @@ class ExporterAgent(BaseAgent):
         hf_private: bool = True,
         kaggle_slug: str = "",
         kaggle_title: str = "",
+        split_ratios: dict[str, float] | None = None,
+        split_group_by: str = "page",
+        split_seed: int = 42,
     ) -> None:
         super().__init__(context)
         self._stage = stage_snapshot
@@ -36,6 +45,9 @@ class ExporterAgent(BaseAgent):
         self._hf_priv  = hf_private
         self._kg_slug  = kaggle_slug
         self._kg_title = kaggle_title
+        self._split_ratios   = split_ratios
+        self._split_group_by = split_group_by
+        self._split_seed     = split_seed
 
     async def run(self) -> PipelineContext:
         s = self.ctx.settings
@@ -47,12 +59,15 @@ class ExporterAgent(BaseAgent):
         export_dir = self.ctx.session_dir() / "exports" / datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         self.log.info(f"Exporting {len(records)} samples → {export_dir}")
 
-        paths = export_all_formats(
-            records, export_dir,
-            name="dataset",
-            include_unsloth=True,
-            system_prompt=self.ctx.custom_system_prompt,
-        )
+        if self._split_ratios:
+            paths = self._export_splits(records, export_dir)
+        else:
+            paths = export_all_formats(
+                records, export_dir,
+                name="dataset",
+                include_unsloth=True,
+                system_prompt=self.ctx.custom_system_prompt,
+            )
 
         self._record_export("local", str(export_dir), "jsonl+parquet+csv", len(records))
 
@@ -87,7 +102,47 @@ class ExporterAgent(BaseAgent):
         self.log.info("Export complete")
         return self.ctx
 
+    def _export_splits(self, records: list[dict], export_dir) -> dict:
+        """Write dataset_train / _validation / _test, grouped to prevent leakage."""
+        from dataforge.exporters.split import assert_no_group_leakage, split_records
+
+        splits = split_records(
+            records,
+            ratios=self._split_ratios or {},
+            group_by=self._split_group_by,
+            seed=self._split_seed,
+        )
+        # The guarantee this feature exists for — verify, do not assume.
+        assert_no_group_leakage(splits, self._split_group_by)
+
+        paths: dict = {}
+        for name, subset in splits.items():
+            if not subset:
+                self.log.warning(f"Split '{name}' is empty — too few source groups")
+                continue
+            sub = export_all_formats(
+                subset, export_dir,
+                name=f"dataset_{name}",
+                include_unsloth=True,
+                system_prompt=self.ctx.custom_system_prompt,
+            )
+            paths.update({f"{name}_{k}": v for k, v in sub.items()})
+            self.log.info(f"  {name}: {len(subset)} samples")
+
+        # HuggingFace upload pushes a single file; give it the train split.
+        paths.setdefault("jsonl", paths.get("train_jsonl", export_dir / "dataset_train.jsonl"))
+        return paths
+
     def _load_samples(self) -> list[dict]:
+        """Load approved samples with their source lineage attached.
+
+        ``page_id`` and ``source_url`` are exported deliberately: several
+        samples are generated per chunk and several chunks per page, so every
+        sample from one page is a paraphrase of the same source text. Splitting
+        such a dataset randomly leaks that text across train and eval and
+        inflates the score. Grouping by page is the only correct split, and it
+        is impossible once this lineage is dropped.
+        """
         with open_session(self.ctx.settings.db_path) as db:
             q = select(SyntheticSample).where(
                 SyntheticSample.session_id == self.ctx.session_id
@@ -96,17 +151,44 @@ class ExporterAgent(BaseAgent):
                 q = q.where(SyntheticSample.approved == True)  # noqa: E712
             samples = db.exec(q).all()
 
-        return [
-            {
+            chunk_ids = {s.chunk_id for s in samples if s.chunk_id is not None}
+            lineage: dict[int, tuple[int, str, int]] = {}
+            if chunk_ids:
+                chunks = db.exec(
+                    select(ProcessedChunk).where(ProcessedChunk.id.in_(chunk_ids))  # type: ignore[union-attr]
+                ).all()
+                page_ids = {c.page_id for c in chunks}
+                page_urls = {
+                    p.id: p.url
+                    for p in db.exec(
+                        select(ScrapedPage).where(ScrapedPage.id.in_(page_ids))  # type: ignore[union-attr]
+                    ).all()
+                    if p.id is not None
+                }
+                for c in chunks:
+                    if c.id is not None:
+                        # ScrapedPage.url is authoritative; chunk metadata is a
+                        # fallback for sessions written before it carried the URL.
+                        url = page_urls.get(c.page_id) or c.parsed_meta().get("source_url", "")
+                        lineage[c.id] = (c.page_id, str(url), c.chunk_index)
+
+        records = []
+        for s in samples:
+            page_id, source_url, chunk_index = lineage.get(s.chunk_id, (0, "", 0))
+            records.append({
                 "id": s.id,
                 "format": s.format,
                 "system": s.system_prompt,
                 "messages": s.messages(),
                 "quality_score": s.quality_score,
                 "session_id": s.session_id,
-            }
-            for s in samples
-        ]
+                # Source lineage — keep these to split the dataset correctly.
+                "chunk_id": s.chunk_id if s.chunk_id is not None else 0,
+                "page_id": page_id,
+                "chunk_index": chunk_index,
+                "source_url": source_url,
+            })
+        return records
 
     def _record_export(self, dest: str, path_or_url: str, fmt: str, count: int) -> None:
         with open_session(self.ctx.settings.db_path) as db:

@@ -356,6 +356,47 @@ async def _resume_session(session_id: str | None) -> None:
 
 # ── sessions command ──────────────────────────────────────────────────────────
 
+@app.command(name="run")
+def run_cmd(
+    recipe: str = typer.Argument(..., help="Path to a YAML recipe file"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Validate the recipe and print the plan without running"
+    ),
+) -> None:
+    """Run a pipeline end-to-end from a YAML recipe — no prompts.
+
+    Configuration as code: every wizard answer lives in the file, so the run is
+    reproducible, reviewable in a PR, and safe to launch from CI or cron.
+
+    Exit codes: 0 ok | 2 invalid recipe | 3 no URLs after filters |
+    4 paused | 5 completed with zero approved samples.
+    """
+    from .headless import run_recipe
+
+    code = asyncio.run(run_recipe(recipe, dry_run=dry_run))
+    if code != 0:
+        raise typer.Exit(code)
+
+
+@app.command(name="init-recipe")
+def init_recipe(
+    path: str = typer.Argument("dataforge.yaml", help="Where to write the example recipe"),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing file"),
+) -> None:
+    """Write a fully annotated example recipe you can edit and run."""
+    from .recipe import RecipeError, write_example_recipe
+
+    try:
+        written = write_example_recipe(path, force=force)
+    except RecipeError as exc:
+        ui.error(str(exc))
+        raise typer.Exit(2) from exc
+
+    ui.success(f"Example recipe written to [bold]{written}[/]")
+    ui.info("Edit it, then run:  [bold]dataforge run " + str(written) + "[/]")
+    ui.info("Validate without running:  [bold]dataforge run " + str(written) + " --dry-run[/]")
+
+
 @app.command()
 def sessions() -> None:
     """List all pipeline sessions."""

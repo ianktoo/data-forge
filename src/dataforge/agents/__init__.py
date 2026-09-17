@@ -6,6 +6,7 @@ from .orchestrator import Orchestrator
 from .processor import ProcessorAgent
 from .quality import QualityAgent
 from .scraper import ScraperAgent
+from .streaming import StreamingAgent
 
 __all__ = [
     "BaseAgent",
@@ -13,6 +14,7 @@ __all__ = [
     "Orchestrator",
     "ExplorerAgent",
     "ScraperAgent",
+    "StreamingAgent",
     "ProcessorAgent",
     "GeneratorAgent",
     "QualityAgent",

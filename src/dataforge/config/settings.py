@@ -29,6 +29,18 @@ class Settings(BaseSettings):
     max_crawl_pages: int = Field(50, description="Max pages discovered by BFS crawler (sitemap fallback)")
     max_crawl_depth: int = Field(3, description="Max link depth for BFS crawler")
     chunk_size: int = Field(512, description="Tokens per chunk")
+
+    # Streaming pipeline — overlap collection/processing/generation instead of
+    # running them strictly one after another.
+    stream_pipeline: bool = Field(
+        False, description="Fuse collection+processing+generation into one concurrent stage"
+    )
+    stream_generate_workers: int = Field(
+        3, description="Concurrent LLM generation workers in streaming mode"
+    )
+    stream_queue_size: int = Field(
+        100, description="Max items buffered between streaming stages (backpressure)"
+    )
     chunk_overlap: int = Field(64, description="Token overlap between chunks")
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     output_dir: Path = Path("./output")
