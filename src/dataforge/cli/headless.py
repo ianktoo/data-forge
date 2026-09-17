@@ -70,6 +70,8 @@ async def run_recipe(recipe_path: str | Path, *, dry_run: bool = False) -> int:
         ignore_robots=recipe.source.ignore_robots,
         skip_known=recipe.source.skip_known,
         quality_threshold=recipe.quality.threshold,
+        quality_llm_judge=recipe.quality.llm_judge,
+        quality_min_judge_score=recipe.quality.min_judge_score,
         generation_model=recipe.generation.model,
         quality_model=recipe.quality.model,
     )
@@ -195,7 +197,8 @@ def _print_plan(recipe: Recipe, seed_urls: list[str], s) -> None:
         f"Format:      {recipe.generation.format}  ({recipe.generation.n_per_chunk} per chunk)",
         f"Model:       {recipe.generation.model or s.llm_model}",
         f"Rate limit:  {s.rate_limit} req/s",
-        f"Threshold:   {recipe.quality.threshold}",
+        f"Threshold:   {recipe.quality.threshold}"
+        + (f"  + LLM judge (min {recipe.quality.min_judge_score}/5)" if recipe.quality.llm_judge else "  (heuristic only)"),
         f"Export:      {', '.join(recipe.export.targets)}",
         f"Output:      {s.output_dir}",
     ]

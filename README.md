@@ -325,8 +325,30 @@ After discovery, an interactive checklist lets you curate exactly which URLs pro
 - Custom system prompt support
 
 ### Quality
-- LLM-based quality scoring (1–5)
-- Configurable approval threshold
+Every sample passes through layered filters, cheapest first:
+
+- **Heuristic pre-filter** — answer/question length and refusal detection against
+  `quality.threshold`. Free, but on its own it passes almost any real answer.
+- **Source-reference filter** — rejects samples that talk about "the document",
+  "the passage" or what "the guidance says" instead of the subject. A model
+  trained on those learns to cite sources it will never see. Free, always on.
+- **Deduplication** across the whole session.
+- **LLM judge** (`quality.llm_judge`, on by default in recipes) — reads each
+  sample next to the chunk it was generated from and rejects anything wrong,
+  unsupported by that text, or scoring below `min_judge_score` (1–5). One call
+  per chunk, roughly doubling LLM cost.
+- **Fails closed** — a sample the judge cannot score (bad output, API error,
+  missing key) is rejected, never approved, and the run says how many.
+
+The quality stage logs a rejection breakdown (`refers to the source`,
+`not grounded in source`, `judge score 3 < 4`, …) so you can see what the
+filter is actually removing.
+
+The judge is dependable on clear failures such as wrong facts, claims missing
+from the source, and source references. It is less consistent on *vague but
+true* answers near the threshold, which can land on either side of a 4 between
+runs. Set `min_judge_score: 5` if you would rather lose some good samples than
+keep borderline ones.
 
 ### Export
 - HuggingFace Hub (public or private datasets)
@@ -408,7 +430,9 @@ can be four lines long.
 | `generation.chunk_size` | *(global)* | Tokens per chunk |
 | `generation.chunk_overlap` | *(global)* | Token overlap between chunks |
 | `quality.threshold` | `0.5` | Minimum score (0.0–1.0) for a sample to be approved |
-| `quality.model` | *(global)* | Override the LLM used for quality review |
+| `quality.model` | *(generation model)* | Override the LLM used by the judge |
+| `quality.llm_judge` | `true` | Check each sample against its source chunk with an LLM; fails closed |
+| `quality.min_judge_score` | `4` | Judge score (1–5) required to keep a sample |
 | `export.targets` | `[local]` | Any of `local`, `huggingface`, `kaggle` |
 | `export.approved_only` | `true` | Export only samples that passed the threshold |
 | `export.hf_repo_id` | `""` | Required when targeting `huggingface` |

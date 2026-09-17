@@ -160,7 +160,9 @@ def _recipe(tmp_path, site: str, **over) -> str:
             "exclude": ["/es/", "/press-release"],
         },
         "generation": {"format": "qa", "goal": "flood preparedness", "n_per_chunk": 1},
-        "quality": {"threshold": 0.3},
+        # Judge off: these fixtures fake generation offline, and the judge would
+        # otherwise call the real LLM API. It has its own offline tests.
+        "quality": {"threshold": 0.3, "llm_judge": False},
         "export": {"targets": ["local"]},
         **over,
     }
@@ -225,7 +227,6 @@ async def test_split_export_writes_train_val_test_without_leakage(
     tmp_path, site, isolated_settings, fake_llm
 ):
     """A recipe with export.split emits separate files, grouped by source page."""
-    import yaml
 
     from dataforge.exporters.split import assert_no_group_leakage
 

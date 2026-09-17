@@ -65,7 +65,9 @@ class LLMClient:
             resp = await litellm.acompletion(
                 model=self._model,
                 messages=messages,
-                temperature=temperature or self._temp,
+                # `is None`, not `or`: temperature=0.0 is a real request
+                # (the quality judge needs deterministic scoring).
+                temperature=self._temp if temperature is None else temperature,
                 max_tokens=max_tokens or self._max_tk,
             )
             usage = resp.usage or {}
@@ -127,7 +129,7 @@ class LLMClient:
         kwargs: dict[str, Any] = {
             "model":       self._model,
             "messages":    messages,
-            "temperature": temperature or self._temp,
+            "temperature": self._temp if temperature is None else temperature,
             "max_tokens":  req_max_tokens,
             "stream":      True,
         }

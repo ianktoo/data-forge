@@ -146,6 +146,14 @@ class QualityConfig(BaseModel):
 
     threshold: float = Field(0.5, ge=0.0, le=1.0)
     model: str = Field("", description="Override the LLM used for quality review")
+    llm_judge: bool = Field(
+        True,
+        description=(
+            "Check every sample against its source chunk with an LLM. Without it "
+            "only length heuristics apply, which pass almost any real answer."
+        ),
+    )
+    min_judge_score: int = Field(4, ge=1, le=5, description="Judge score (1-5) needed to keep a sample")
 
 
 class SplitConfig(BaseModel):
@@ -468,8 +476,18 @@ generation:
   chunk_overlap: 64
 
 quality:
-  threshold: 0.5               # 0.0-1.0 - minimum score for a sample to be approved
-  # model: openai/gpt-4o-mini
+  # Cheap length/refusal heuristic, 0.0-1.0. On its own it passes almost any
+  # real answer, so treat it as a pre-filter, not the quality bar.
+  threshold: 0.5
+
+  # The actual quality bar. An LLM reads each sample next to the chunk it came
+  # from and rejects anything not supported by that text, anything that talks
+  # about "the document" instead of the subject, or anything scoring below
+  # min_judge_score. Costs about one extra call per chunk - roughly the same
+  # again as generation. Samples it cannot score are rejected, never passed.
+  llm_judge: true
+  min_judge_score: 4           # 1-5
+  # model: openai/gpt-4o-mini  # judge model; defaults to the generation model
 
 export:
   targets: [local]             # local | huggingface | kaggle (any combination)
