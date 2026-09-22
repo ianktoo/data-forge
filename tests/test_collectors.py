@@ -78,3 +78,25 @@ def test_filter_urls_regex():
 def test_filter_urls_substring_case_insensitive():
     urls = ["https://example.com/BLOG/post", "https://example.com/other"]
     assert filter_urls(urls, "blog", None) == ["https://example.com/BLOG/post"]
+
+
+def test_relative_links_resolve_against_the_page_not_the_site_root():
+    from dataforge.collectors.extractor import extract
+
+    html = (
+        "<html><body><main><p>" + "text " * 50 + "</p>"
+        '<a href="introduction.html">a</a> <a href="../genindex.html">b</a> '
+        '<a href="/library/">c</a></main></body></html>'
+    )
+    links = extract(html, "https://docs.python.org/3/tutorial/").links
+    assert "https://docs.python.org/3/tutorial/introduction.html" in links
+    assert "https://docs.python.org/3/genindex.html" in links
+    assert "https://docs.python.org/library/" in links
+
+
+def test_base_href_is_honoured():
+    from dataforge.collectors.extractor import extract
+
+    html = ('<html><head><base href="https://example.com/docs/v2/"></head><body><main>'
+            '<p>' + "text " * 50 + '</p><a href="page.html">p</a></main></body></html>')
+    assert extract(html, "https://example.com/other/").links == ["https://example.com/docs/v2/page.html"]

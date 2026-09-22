@@ -8,7 +8,6 @@ import respx
 from dataforge.collectors.http import (
     HTTPClient,
     RetryableHTTPError,
-    _crawl_delay_applied,
     _parse_retry_after,
     _robots_cache,
 )
@@ -20,10 +19,8 @@ ROBOTS_OPEN = "User-agent: *\nAllow: /\n"
 @pytest.fixture(autouse=True)
 def _clear_caches():
     _robots_cache.clear()
-    _crawl_delay_applied.clear()
     yield
     _robots_cache.clear()
-    _crawl_delay_applied.clear()
 
 
 @pytest.fixture
@@ -229,3 +226,53 @@ async def test_no_crawl_delay_leaves_the_default_rate(limiter):
         await c.get("https://plain.test/page")
 
     assert limiter._buckets["plain.test"].rate == pytest.approx(1000.0)
+
+
+@respx.mock
+async def test_crawl_delay_reaches_every_stage_limiter():
+    """Regression: discovery and scraping build separate limiters. The delay was
+    tracked process-wide, so only the first limiter (discovery) ever got it and
+    the scrape stage crawled USCIS (Crawl-delay: 10) at the default rate."""
+    respx.get("https://slow.test/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nCrawl-delay: 10\nAllow: /\n")
+    )
+    respx.get("https://slow.test/page").mock(
+        return_value=httpx.Response(200, html="<html><body><p>hi</p></body></html>")
+    )
+    discovery, scraping = RateLimiter(default_rps=1000.0), RateLimiter(default_rps=1000.0)
+    for lim in (discovery, scraping):
+        async with HTTPClient(lim) as c:
+            await c.get("https://slow.test/page")
+    assert discovery._buckets["slow.test"].rate == pytest.approx(0.1)
+    assert scraping._buckets["slow.test"].rate == pytest.approx(0.1)
+
+
+# -- Rate limiter timing -----------------------------------------------------
+
+
+async def test_sustained_rate_matches_the_configured_rate():
+    """Regression: time spent sleeping was credited again as refill time, so
+    every other request went through free and crawls ran at ~2x the rate."""
+    import time
+
+    rps = 10.0
+    lim = RateLimiter(default_rps=rps)
+    for _ in range(int(rps) + 1):      # drain the initial burst
+        await lim.wait("https://x.test/")
+    t0 = time.monotonic()
+    n = 15
+    for _ in range(n):
+        await lim.wait("https://x.test/")
+    elapsed = time.monotonic() - t0
+    # Ideal is n/rps = 1.5s. The old bug gave about half that; allow for coarse
+    # (~16 ms) timers on Windows.
+    assert elapsed >= 0.7 * n / rps, f"{n} requests in {elapsed:.3f}s at {rps} rps"
+
+
+def test_crawl_delay_bucket_bursts_one_request_only():
+    """A Crawl-delay (rate < 1 req/s) allows one request, then one per delay."""
+    lim = RateLimiter(default_rps=2.0)
+    lim.set_domain_limit("slow.test", 0.1)          # Crawl-delay: 10
+    bucket = lim._buckets["slow.test"]
+    assert bucket.capacity == 1.0
+    assert lim._buckets["fast.test"].capacity == 2.0   # >= 1 rps: one second's worth

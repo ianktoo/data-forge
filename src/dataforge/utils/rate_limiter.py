@@ -32,6 +32,10 @@ class _Bucket:
                 wait = (1 - self.tokens) / effective_rate
                 await asyncio.sleep(wait)
                 self.tokens = 0
+                # The sleep already paid for this token; restart the clock after
+                # it, or the next call counts the sleep as refill time and goes
+                # through free (which ran crawls at ~2x the configured rate).
+                self.last = time.monotonic()
             else:
                 self.tokens -= 1
             # jitter ±15 %
@@ -48,11 +52,20 @@ class RateLimiter:
         self.default_rps = default_rps   # read-only view for callers tightening a domain
         self._buckets: dict[str, _Bucket] = defaultdict(self._make_bucket)
 
+        # Domains whose robots.txt Crawl-delay has been applied to *this* limiter.
+        self.crawl_delay_domains: set[str] = set()
+
+    @staticmethod
+    def _capacity(rps: float) -> float:
+        # Burst of at most one second's worth, and never less than one request,
+        # so a Crawl-delay of 10s (0.1 rps) means one request, then one per 10s.
+        return max(1.0, rps)
+
     def _make_bucket(self) -> _Bucket:
-        return _Bucket(rate=self._default_rps, capacity=self._default_rps * 2)
+        return _Bucket(rate=self._default_rps, capacity=self._capacity(self._default_rps))
 
     def set_domain_limit(self, domain: str, rps: float) -> None:
-        self._buckets[domain] = _Bucket(rate=rps, capacity=rps * 2)
+        self._buckets[domain] = _Bucket(rate=rps, capacity=self._capacity(rps))
 
     async def wait(self, url: str) -> None:
         domain = urlparse(url).netloc

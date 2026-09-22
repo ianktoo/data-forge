@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 from markdownify import markdownify
@@ -54,7 +54,10 @@ def extract(html: str, url: str) -> PageContent:
     )
 
     # ── Links (absolute) ──────────────────────────────────────────────────────
-    base = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
+    # Resolve against the page's own URL (or its <base href>), not the site
+    # root: from /3/tutorial/, "../genindex.html" is /3/genindex.html.
+    base_tag = soup.find("base", href=True)
+    base = urljoin(url, base_tag["href"]) if base_tag else url
     links = [
         urljoin(base, a["href"])
         for a in main.find_all("a", href=True)

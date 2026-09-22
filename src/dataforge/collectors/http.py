@@ -39,8 +39,6 @@ _MAX_RETRY_AFTER = 120.0   # cap an absurd Retry-After so one URL cannot stall a
 _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 _ROBOTS_CACHE_MAX = 256
 _robots_cache: OrderedDict[str, RobotFileParser] = OrderedDict()
-# Domains whose robots.txt Crawl-delay has already been applied to the limiter.
-_crawl_delay_applied: set[str] = set()
 
 
 class RetryableHTTPError(Exception):
@@ -153,9 +151,12 @@ class HTTPClient:
         asking for one request every 15 seconds (FEMA does) was still crawled at
         the configured default. Only ever slows down, never speeds up.
         """
-        if domain in _crawl_delay_applied:
+        # Tracked on the limiter, not per process: each stage (discovery,
+        # scraping, streaming) builds its own limiter, and a process-wide flag
+        # meant only the first one ever received the delay.
+        if domain in self._limiter.crawl_delay_domains:
             return
-        _crawl_delay_applied.add(domain)
+        self._limiter.crawl_delay_domains.add(domain)
         try:
             delay = robots.crawl_delay("DataForge") or robots.crawl_delay("*")
         except Exception:

@@ -1,7 +1,10 @@
 """Turn a benchmark run into per-site metrics, a Markdown table and LaTeX tables.
 
-    uv run python -m evals.pipeline.aggregate                       # latest pipeline_run_*.json
-    uv run python -m evals.pipeline.aggregate evals/results/pipeline_run_<ts>.json
+    uv run python -m evals.pipeline.aggregate                        # all pipeline_run_*.json
+    uv run python -m evals.pipeline.aggregate evals/results/pipeline_run_<ts>.json ...
+
+With several run files, each site's most recent completed run is used, so one
+site can be re-run on its own (run_benchmark --site <id>) without redoing the rest.
 
 Every number is computed from what the run left on disk (the site's database,
 run_summary.json and the export files); nothing is re-scored. Writes
@@ -162,22 +165,32 @@ def latex(rows: list[dict], sites_cfg: dict) -> str:
     return "\n".join(out)
 
 
+def _latest_per_site(run_files: list[Path]) -> dict:
+    """Merge run files: for each site, the most recent entry (a completed run beats a skip)."""
+    merged: dict[str, dict] = {}
+    for f in sorted(run_files):
+        for entry in json.loads(f.read_text(encoding="utf-8"))["sites"]:
+            if "run" in entry or entry["id"] not in merged or "run" not in merged[entry["id"]]:
+                merged[entry["id"]] = entry
+    return {"sites": list(merged.values()), "run_files": [str(f) for f in sorted(run_files)]}
+
+
 def main() -> int:
-    if len(sys.argv) > 1:
-        run_file = Path(sys.argv[1])
-    else:
-        runs = sorted(RESULTS.glob("pipeline_run_*.json"))
-        if not runs:
-            print("no pipeline_run_*.json in evals/results; run run_benchmark first", file=sys.stderr)
-            return 1
-        run_file = runs[-1]
-    data = json.loads(run_file.read_text(encoding="utf-8"))
+    run_files = [Path(a) for a in sys.argv[1:]] or sorted(RESULTS.glob("pipeline_run_*.json"))
+    if not run_files:
+        print("no pipeline_run_*.json in evals/results; run run_benchmark first", file=sys.stderr)
+        return 1
+    data = _latest_per_site(run_files)
+    run_file = sorted(run_files)[-1]
+    sites_cfg = yaml.safe_load((HERE / "sites.yaml").read_text(encoding="utf-8"))
+    # A site moved to `excluded` after the run is reported there, not as a skipped row.
+    excluded = {ex["id"] for ex in sites_cfg.get("excluded", [])}
+    data["sites"] = [e for e in data["sites"] if e["id"] not in excluded]
     for entry in data["sites"]:
         if entry.get("run", {}).get("run_summary"):
             entry["metrics"] = site_metrics(entry["run"])
 
     stamp = run_file.stem.removeprefix("pipeline_run_")
-    sites_cfg = yaml.safe_load((HERE / "sites.yaml").read_text(encoding="utf-8"))
     (RESULTS / f"pipeline_metrics_{stamp}.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
     (RESULTS / f"pipeline_metrics_{stamp}.md").write_text(markdown(data["sites"]), encoding="utf-8")
     (RESULTS / f"pipeline_tables_{stamp}.tex").write_text(latex(data["sites"], sites_cfg), encoding="utf-8")
