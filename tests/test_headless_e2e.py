@@ -201,8 +201,16 @@ async def test_full_headless_run_produces_an_export(
         f"{sum(not s.approved for s in samples)}/{len(samples)} samples rejected"
     )
 
-    exports = list(isolated_settings.output_dir.rglob("*.jsonl"))
-    assert exports, "no JSONL export was written"
+    # rglob("*.jsonl") also matches dataset_unsloth.jsonl, which has a
+    # different schema ({"conversations": [...]}, no "messages" key — see
+    # issue #19) and whose glob ordering isn't guaranteed across platforms.
+    # Pick the primary export explicitly rather than relying on order.
+    exports = [
+        p
+        for p in isolated_settings.output_dir.rglob("*.jsonl")
+        if not p.stem.endswith("_unsloth")
+    ]
+    assert exports, "no primary JSONL export was written"
 
     rows = [
         json.loads(line)
