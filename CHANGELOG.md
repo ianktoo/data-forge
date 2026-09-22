@@ -65,6 +65,13 @@ and crawl-politeness fixes the benchmark uncovered. No breaking changes.
   `https://github.com/ianktoo/data-forge`, so site operators can identify it.
 
 ### Changed
+- `docs/TECHNICAL.tex`: new section "Empirical evaluation" with the benchmark
+  results (setup, an access-and-terms table over the 14 sites considered,
+  per-site results, the six defects the benchmark exposed, and what the
+  results do not show), corrections where earlier sections described
+  `Crawl-delay` enforcement as already holding, an updated abstract and
+  conclusion, and an AI-assistance acknowledgment. Cites 17 U.S.C. 105 and
+  Kenya's Copyright Act (ss. 25, 31).
 - `docs/TECHNICAL.tex`: new section "Agent integration via the Model Context
   Protocol" (agent guide, the MCP server's tools and server-side guards, expected
   benefits stated as unmeasured, current gaps), citing the MCP announcement,

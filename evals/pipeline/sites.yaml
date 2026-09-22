@@ -73,6 +73,78 @@ sites:
 # Considered and excluded. Kept here so the paper's access table is generated
 # from the same source as the runs.
 excluded:
+  - id: kplc
+    topic: Electricity utility (Kenya Power)
+    url: https://www.kplc.co.ke/
+    reason: >
+      robots.txt says "Allow all crawlers"; footer "(c) 2026 - Kenya Power. All
+      rights reserved." An "AI Terms and Conditions 2026" PDF is linked from
+      /data-privacy but could not be located automatically; its title ("Terms &
+      Conditions for Use of AI Systems") suggests it covers Kenya Power's own AI
+      tools. No reuse or licence statement was found. Excluded: reserved rights
+      with no grant, and Kenyan government works are, as we understand the
+      Copyright Act, owned by the Government rather than public domain (unlike
+      U.S. federal works). Permission from the site owner would be needed.
+    checked_on: 2026-09-22
+
+  - id: kebs
+    topic: Standards (Kenya Bureau of Standards)
+    url: https://www.kebs.org/
+    reason: >
+      No robots.txt (404); footer "Copyright". No reuse or licence statement was
+      found. Excluded: reserved rights with no grant, and Kenyan government works
+      are, as we understand the Copyright Act, owned by the Government rather than
+      public domain (unlike U.S. federal works). Permission from the site owner
+      would be needed.
+    checked_on: 2026-09-22
+
+  - id: moh
+    topic: Public health (Ministry of Health, Kenya)
+    url: https://www.health.go.ke/
+    reason: >
+      Footer "Copyright 2022 | Ministry of Health | All Rights Reserved." TLS
+      chains to a root missing from certifi (fixed via the OS trust store). No
+      reuse or licence statement was found. Excluded: reserved rights with no
+      grant, and Kenyan government works are, as we understand the Copyright Act,
+      owned by the Government rather than public domain (unlike U.S. federal
+      works). Permission from the site owner would be needed.
+    checked_on: 2026-09-22
+
+  - id: uonbi
+    topic: University of Nairobi
+    url: https://www.uonbi.ac.ke/
+    reason: >
+      Footer "(c) University of Nairobi. All Rights Reserved."; only a data
+      privacy statement. Server sends an incomplete TLS chain. No reuse or licence
+      statement was found. Excluded: reserved rights with no grant, and Kenyan
+      government works are, as we understand the Copyright Act, owned by the
+      Government rather than public domain (unlike U.S. federal works). Permission
+      from the site owner would be needed.
+    checked_on: 2026-09-22
+
+  - id: jkuat
+    topic: Jomo Kenyatta University of Agriculture and Technology
+    url: https://www.jkuat.ac.ke/
+    reason: >
+      Footer "JKUAT (c) 2024. All Rights Reserved". Server sends an incomplete TLS
+      chain. No reuse or licence statement was found. Excluded: reserved rights
+      with no grant, and Kenyan government works are, as we understand the
+      Copyright Act, owned by the Government rather than public domain (unlike
+      U.S. federal works). Permission from the site owner would be needed.
+    checked_on: 2026-09-22
+
+  - id: strathmore
+    topic: Strathmore University
+    url: https://strathmore.edu/
+    reason: >
+      /legal-notice has no reuse terms; footer "All Rights Reserved". Server sends
+      an incomplete TLS chain. No reuse or licence statement was found. Excluded:
+      reserved rights with no grant, and Kenyan government works are, as we
+      understand the Copyright Act, owned by the Government rather than public
+      domain (unlike U.S. federal works). Permission from the site owner would be
+      needed.
+    checked_on: 2026-09-22
+
   - id: kra
     topic: Tax administration (Kenya Revenue Authority)
     url: https://www.kra.go.ke/

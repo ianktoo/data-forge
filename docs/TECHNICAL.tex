@@ -5,6 +5,7 @@
 \usepackage{hyperref}
 \usepackage{graphicx}
 \usepackage{booktabs}
+\usepackage{array}
 \usepackage{listings}
 \usepackage{xcolor}
 \usepackage{enumitem}
@@ -56,8 +57,15 @@ indirect knobs like page count; and --- the concern motivating this
 document --- dataset splitting is group-aware, so that near-duplicate
 paraphrases generated from the same source page cannot appear on both
 sides of a train/test boundary and silently inflate held-out evaluation
-scores. We describe the system's architecture, the reasoning behind each
-design decision, situate the resulting synthetic, fine-tuning-oriented
+scores. We describe the system's architecture and the reasoning behind
+each design decision, and evaluate it end to end on four websites: 831
+samples for \$0.12, with page-disjoint splits on every site. The same
+benchmark exposed six defects that unit tests had missed, including a
+declared \texttt{Crawl-delay} that was not enforced while scraping; all
+are fixed and reported. Of fourteen sites considered, ten were excluded
+after a review of their terms and access policies, although
+\texttt{robots.txt} alone would have permitted at least six of them. We also describe agent access through the Model Context
+Protocol, situate the resulting synthetic, fine-tuning-oriented
 dataset relative to retrieval-augmented generation as a complementary
 route to reducing hallucination, discuss the responsible-use
 considerations inherent to an unattended web-scraping and synthetic-data
@@ -188,7 +196,9 @@ that \emph{not all non-200 responses mean the same thing}:
     effective rate limit automatically; it can only make a crawl
     \emph{slower} than the configured rate, never faster, so an
     operator's explicit rate-limit ceiling is never silently overridden
-    upward.
+    upward. The delay applies for the whole run, across every stage that
+    makes requests; before version~2.4.0 it did not, and the benchmark of
+    Section~\ref{sec:eval-defects} is what showed it.
 \end{itemize}
 
 A page is marked scraped only after a successful fetch, so a resumed
@@ -442,6 +452,248 @@ row-level shuffle is not yet implemented; it is tracked as an open item
 (Section~\ref{sec:limitations}, project issue \#20) rather than
 presented as shipped.
 
+\section{Empirical evaluation}
+\label{sec:eval}
+
+The preceding sections describe what DataForge is designed to do. This
+section reports what it did when run end to end against real websites:
+what it fetched, generated, approved and rejected, what that cost and how
+long it took, whether the split leaked pages, and which of the design
+claims above did not hold until the benchmark exposed them. It does not
+measure the quality of a model fine-tuned on the output, and it does not
+yet validate the LLM judge against human labels
+(Section~\ref{sec:eval-limits}).
+
+\subsection{Setup}
+\label{sec:eval-setup}
+We selected sites that differ in structure and domain, then crawled only
+those that passed a terms review (Section~\ref{sec:eval-access}). Four
+remained:
+\begin{itemize}[leftmargin=1.5em]
+  \item \textbf{Ready.gov} (U.S. disaster preparedness): a flat sitemap
+    of 372 URLs, no \texttt{Crawl-delay}.
+  \item \textbf{USCIS} (U.S. immigration): a sitemap index expanding to
+    19{,}623 URLs, with \texttt{Crawl-delay: 10}.
+  \item \textbf{The Python tutorial} (technical documentation): the
+    site's sitemap lists only eight version landing pages, so discovery
+    must fall back to a breadth-first crawl from the seed
+    \texttt{/3/tutorial/}.
+  \item \textbf{iantoo.space} (a small personal site, 8 sitemap URLs),
+    owned by the author and crawled with the owner's consent.
+\end{itemize}
+Every run used the same recipe settings apart from scoping: at most 20
+URLs (\texttt{source.max\_urls}), a \$1.00 spending cap
+(\texttt{generation.max\_cost\_usd}), three samples per chunk, 512-token chunks with 64-token overlap, the LLM
+judge enabled at \texttt{min\_judge\_score: 4}, streaming mode, and an
+80/10/10 split grouped by page with seed 42. Generation and judging both
+used \texttt{gpt-4o-mini} through LiteLLM. Runs were made on 2026-09-22 on
+Windows~11 with Python~3.11, from commit \texttt{73593bf} (the first three
+sites) and \texttt{4cc258b} (iantoo.space; it differs only in TLS
+trust-store handling and the benchmark's own preflight check). The recipes,
+the site list with its terms reviews, and the scripts that produced every
+number below are in the repository under \texttt{evals/pipeline/}; each
+run also writes a \texttt{run\_summary.json} (timing per stage, LLM calls,
+cost, budget, errors) so the figures can be recomputed from disk.
+
+\subsection{Access and terms}
+\label{sec:eval-access}
+The benchmark runner refuses to crawl a site until a person has recorded a
+terms review, and runs a preflight that fetches \texttt{robots.txt} and the
+seed page with DataForge's own User-Agent and skips any site that serves a
+bot challenge or redirects to another host. Fourteen sites were considered;
+Table~\ref{tab:access} summarizes the outcome.
+
+\begin{table}[h]
+  \centering
+  \small
+  \caption{Sites considered for the benchmark and why each was included or
+  excluded. Quotations are from each site's own terms or policy pages,
+  retrieved 2026-09-22.}
+  \label{tab:access}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{3.1cm}
+                     >{\raggedright\arraybackslash}p{2.4cm}
+                     >{\raggedright\arraybackslash}p{8.6cm}@{}}
+    \toprule
+    Site & Outcome & Basis \\
+    \midrule
+    USCIS & Included & ``Information presented on this WWW site is
+      considered public information and may be distributed or copied.'' \\
+    Ready.gov (FEMA) & Included & FEMA: ``Most material on FEMA.gov is free
+      of copyright and may be copied and distributed without permission'';
+      the page lists Ready.gov as a FEMA domain but does not extend these
+      terms to it explicitly. \\
+    Python docs & Included & Documentation under the PSF License Version~2. \\
+    iantoo.space & Included & Owner's consent. \\
+    \midrule
+    KRA (Kenya) & Excluded: prohibited & Terms restrict ``data mining, data
+      harvesting, data extracting or any other similar activity''; yet
+      \texttt{robots.txt} returns 404, which by convention permits crawling. \\
+    eCFR & Excluded: blocked & \texttt{robots.txt} allows the page, but
+      requests are redirected to a bot block stating that ``programmatic
+      access \ldots\ is limited to access to our extensive developer APIs.'' \\
+    Kenya Power & Excluded: no grant & \texttt{robots.txt}: ``Allow all
+      crawlers''; footer: ``All rights reserved.'' \\
+    KEBS, Ministry of Health, Univ.\ of Nairobi, JKUAT, Strathmore (Kenya)
+      & Excluded: no grant & Copyright or ``All Rights Reserved'' notices;
+      no reuse statement found. \\
+    FAA & Excluded: unclear & No reuse statement; the only policy text is a
+      government-system banner: ``provided for U.S. Government-authorized
+      use only.'' \\
+    CDC & Excluded: not reviewed & \texttt{robots.txt} returned 403 to a
+      generic User-Agent but 200 to DataForge's minutes later. \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Two observations follow. First, \texttt{robots.txt} and the terms that
+actually govern reuse disagreed in both directions: KRA has no
+\texttt{robots.txt} at all but prohibits data extraction in its terms;
+eCFR's \texttt{robots.txt} permits the page while the site blocks
+automated clients and points them to an API; and Kenya Power explicitly
+invites all crawlers while reserving all rights in the content. A crawler
+that treats \texttt{robots.txt} compliance as permission would have
+crawled all three. Second, the outcome tracked jurisdiction. The U.S.
+federal sites publish text that is public domain by statute
+\cite{usc17sec105} and, in two cases, say so explicitly; every Kenyan site
+we examined reserved its rights, and Kenyan law has no public-domain
+exception for government works: copyright in works commissioned by the
+Government vests in the Government, and works made by employees in the
+course of their employment pass to the employer
+(ss.~25(1), 31(1)(b) and 31(2) of \cite{kenyacopyright2001}). A dataset built only from sites
+that grant reuse is therefore geographically skewed by construction, which
+matters for any domain, such as public services, where the relevant
+guidance is national.
+
+\subsection{Pipeline results}
+\label{sec:eval-results}
+
+\begin{table}[h]
+  \centering
+  \small
+  \caption{Benchmark results per site (each capped at 20 URLs and
+  \$1.00). ``Approved'' is the LLM judge's verdict, not a human one; see
+  Section~\ref{sec:eval-limits}.}
+  \label{tab:bench}
+  \begin{tabular}{@{}l r r r r r r r@{}}
+    \toprule
+    Site & Pages & Chunks & Samples & Approved & LLM calls & Cost (USD) & Wall (s) \\
+    \midrule
+    Ready.gov       & 20 &  64 & 192 & 189 (98.4\%) & 128 & 0.0248 &  91 \\
+    USCIS           & 20 &  53 & 159 & 152 (95.6\%) & 106 & 0.0222 & 296 \\
+    Python tutorial & 17 & 153 & 456 & 447 (98.0\%) & 305 & 0.0663 & 258 \\
+    iantoo.space    &  6 &   8 &  24 &  23 (95.8\%) &  16 & 0.0031 &  14 \\
+    \midrule
+    Total           & 63 & 278 & 831 & 811 (97.6\%) & 555 & 0.1164 & 659 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Table~\ref{tab:bench} gives the per-site results. All four runs completed
+with no errors and no budget-skipped calls; the most expensive run used
+6.6\% of its \$1.00 cap. Cost per approved sample was between
+\$0.00013 and \$0.00015 on every site, so cost scaled with the amount of
+text rather than with the site: the Python tutorial's pages are long (a
+median of 2{,}152 words, against 831 for Ready.gov and 576 for USCIS),
+giving 153 chunks from 17 pages. Every page was fetched successfully on
+every site. On the Python tutorial the crawl fallback reached 40 pages, of
+which the recipe's \texttt{/3/tutorial/} filter kept 17.
+
+Where the time went depended on which resource bound the run. USCIS spent
+212.7 of its 296 seconds in the streaming stage, close to the 200-second
+floor that 20 pages at one request per 10 seconds imposes, and a further
+54.2 seconds in discovery fetching its sitemap index and five sub-sitemaps
+at the same spacing: the run was bound by the site's declared crawl delay,
+as it should be. The Python tutorial, with no crawl delay and nine times
+as many chunks as pages, was bound by the LLM instead: 142.5 seconds
+streaming and 83.8 seconds in the judge. Ready.gov fell between the two.
+
+The quality stage rejected 20 of 831 samples (2.4\%): 15 for referring to
+``the source'' or ``the document'' rather than the subject, 3 for a judge
+score below the threshold, and 2 as exact duplicates. None was rejected as
+ungrounded and none as a near-duplicate paraphrase. Every export's
+training, validation and test files were page-disjoint, as the group-aware
+split guarantees, but at this scale the test split of each site held only
+one or two pages.
+
+\subsection{Defects the benchmark exposed}
+\label{sec:eval-defects}
+The unit tests for each component passed before the benchmark was run.
+The end-to-end runs nonetheless exposed six defects, all fixed in version
+2.4.0, each with a regression test that fails on the previous code:
+
+\begin{enumerate}[leftmargin=1.5em]
+  \item \textbf{\texttt{Crawl-delay} was not applied while scraping.}
+    DataForge logged ``limiting to 0.100 req/s'' for USCIS, then fetched
+    all 20 pages in about four seconds. The flag recording that a domain's
+    delay had been applied was process-wide, so the delay reached only the
+    first rate limiter created (discovery's); the scraping stage built its
+    own limiter and ran at the default rate.
+  \item \textbf{The rate limiter ran at about twice its configured rate.}
+    The token bucket recorded the time before sleeping, so the next call
+    counted the sleep as refill and went through free; it also allowed an
+    initial burst of twice the per-second rate.
+  \item \textbf{Stage boundaries and jitter shortened individual gaps.}
+    With the first two fixed, the median gap to USCIS was 9.99~seconds,
+    but the first scrape request followed the last sitemap request by
+    3.95~seconds (each stage still had its own limiter), and random jitter
+    counted as refill let single gaps fall to 8.6~seconds. After the fix
+    (one limiter per run; jitter can only lengthen a gap), the 26 requests
+    to USCIS had a minimum gap of 9.73~seconds and a median of
+    10.16~seconds, measured between response log timestamps, so variation
+    in response latency accounts for the residual shortfall.
+  \item \textbf{A shallow sitemap suppressed crawling.} Given the seed
+    \texttt{/3/tutorial/}, discovery found the site's sitemap, returned its
+    eight unrelated version roots, and dropped the seed; the site could
+    not be crawled at all. Discovery now falls back to a crawl from the
+    seed when the sitemap lists nothing under the seed's path.
+  \item \textbf{Relative links resolved against the site root.} From
+    \texttt{/3/tutorial/}, the link \texttt{../genindex.html} was resolved
+    to \texttt{/genindex.html} rather than \texttt{/3/genindex.html}, so
+    the crawler left the section it was asked to cover.
+  \item \textbf{Valid sites failed TLS verification.} Four of the Kenyan
+    sites could not be fetched with Python's default certificate bundle: three send an incomplete
+    certificate chain and one chains to a root absent from the
+    \texttt{certifi} bundle, although browsers accept all four. DataForge
+    now verifies against the operating system's trust store; verification
+    is never disabled, and self-signed and expired certificates are still
+    rejected. (These sites were then excluded on terms, not on access.)
+\end{enumerate}
+
+The first three matter most, because Section~2.2 describes
+\texttt{Crawl-delay} enforcement as a design property, and it was true of
+the component in isolation but not of the assembled pipeline until
+version~2.4.0. Politeness guarantees have to be measured end to end, with
+timing, against a site that declares them.
+
+\subsection{What these results do not show}
+\label{sec:eval-limits}
+\begin{itemize}[leftmargin=1.5em]
+  \item \textbf{The approval rate is not evidence of quality.} The same
+    model generated and judged every sample, and LLM judges are known to
+    favour output resembling their own \cite{zheng2023judging}. An
+    approval rate of 97.6\% says that the judge rarely objected, not that
+    the samples are correct. The repository includes a blind audit
+    (\texttt{evals/pipeline/audit.py}) that draws equal numbers of approved
+    and rejected samples per site for a person to label without seeing the
+    judge's verdict, from which judge precision and rejection precision
+    can be computed. Those labels had not been collected at the time of
+    writing; we will report them in a later version rather than infer
+    quality from the judge alone.
+  \item \textbf{The scale is small.} Twenty URLs per site is enough to
+    show where time and cost go and to expose the defects above, but not
+    to give confidence intervals, and a test split of one or two pages is
+    too small to evaluate a model on.
+  \item \textbf{URL selection was not random.} \texttt{max\_urls} keeps
+    the first N URLs in sitemap order.
+  \item \textbf{One model, one run per site, one platform.} Results
+    depend on \texttt{gpt-4o-mini}; operating-system trust stores differ,
+    and on Linux the store does not fetch missing intermediate
+    certificates, so the TLS fix may not help there.
+  \item \textbf{No downstream evaluation.} Whether a model fine-tuned on
+    this output answers held-out questions better is a separate
+    experiment (\texttt{evals/harness/}), not reported here.
+\end{itemize}
+
 \section{Agent integration via the Model Context Protocol}
 \label{sec:mcp}
 
@@ -658,7 +910,13 @@ disabling politeness a deliberate, auditable act in a committed recipe
 file rather than an accidental one. This is a technical control, not a
 legal or ethical one: \texttt{robots.txt} compliance does not by itself
 establish that scraping a given site is permitted under its Terms of
-Service, and DataForge does not attempt to interpret ToS text. Rate
+Service, and DataForge does not attempt to interpret ToS text. The
+benchmark made this concrete (Section~\ref{sec:eval-access}): one site
+with no \texttt{robots.txt} prohibits data extraction in its terms,
+another permits the page in \texttt{robots.txt} but blocks automated
+clients, and a third invites all crawlers while reserving all rights. The
+benchmark therefore gates each site on a recorded human terms review, and
+the agent integration of Section~\ref{sec:mcp} carries the same rule. Rate
 limiting defaults to a conservative 2 requests/second/domain; nothing
 prevents an operator from configuring a much higher rate against a site
 with no declared \texttt{Crawl-delay}; this remains an explicit
@@ -720,7 +978,10 @@ these risks explicitly alongside the system's capabilities.
 The LLM judge is a single model call scoring groundedness on a 1--5
 scale; it does not currently ensemble multiple judges or models, which
 would likely improve reliability near the threshold at proportionally
-higher cost. The BFS fallback crawler and SPA (JavaScript-rendered page)
+higher cost. Its agreement with human judgement is not yet measured: the
+blind audit of Section~\ref{sec:eval-limits} is built but its labels are
+pending, and in the benchmark the same model generated and judged every
+sample. The BFS fallback crawler and SPA (JavaScript-rendered page)
 detection are heuristic rather than guaranteed to find all in-scope
 content on sites without a sitemap. Group-aware splitting addresses
 leakage from the generation stage's own repeated sampling per chunk, but
@@ -774,7 +1035,11 @@ collection with generation, bounding unattended LLM spend explicitly,
 catching near-duplicate paraphrases rather than only exact matches, and
 refusing to let a random split leak near-duplicate content across train
 and test --- is also the behavior that produces a defensible dataset and
-a trustworthy evaluation number from it. Fine-tuning on that dataset is,
+a trustworthy evaluation number from it. The benchmark of
+Section~\ref{sec:eval} adds a caution: three of the six defects it found
+concerned politeness, a property that held for the rate limiter in
+isolation and failed in the assembled pipeline until it was measured end
+to end, against a site that declares a crawl delay. Fine-tuning on that dataset is,
 as Section~\ref{sec:rag} discusses, one half of reducing hallucination
 rather than the whole of it, and the same corpus the pipeline builds
 along the way is positioned to serve the other half (retrieval) as
@@ -782,6 +1047,15 @@ naturally as it serves fine-tuning. None of this removes the operator's
 responsibility for what is collected and published in the first place
 (Section~\ref{sec:misuse}); it narrows the space of failures that would
 otherwise have to be caught by hand.
+
+\section*{Acknowledgments}
+Parts of the DataForge code and of the text of this report were drafted
+with the assistance of an AI coding assistant (Claude, by Anthropic), used
+under the author's direction. The author reviewed and edited all of it and
+takes full responsibility for the content. The figures in
+Section~\ref{sec:eval} are taken from the output of the scripts in
+\texttt{evals/pipeline/}, which compute them from the recorded benchmark
+data, and can be regenerated from it.
 
 \begin{thebibliography}{99}
 
@@ -881,6 +1155,15 @@ Model Context Protocol.
 Anthropic.
 \newblock Connect Claude Code to tools via MCP.
 \newblock \url{https://code.claude.com/docs/en/mcp}, accessed 2026-09-22.
+
+\bibitem{usc17sec105}
+United States Code, Title 17, Section 105.
+\newblock Subject matter of copyright: United States Government works.
+
+\bibitem{kenyacopyright2001}
+Republic of Kenya.
+\newblock Copyright Act, No.~12 of 2001 (Cap.~130), Revised Edition 2022.
+\newblock \url{https://copyright.go.ke/sites/default/files/downloads/CopyrightAct12of2001.pdf}, accessed 2026-09-22.
 
 \end{thebibliography}
 
