@@ -1,0 +1,28 @@
+# Benchmark recipe: small unmanned aircraft / Part 107 (FAA). Many /uas links
+# are PDFs or Word files, which DataForge skips; only HTML pages are used.
+version: 1
+name: bench-faa-uas
+stream: true
+output_dir: ./output/benchmark/faa-uas
+source:
+  urls: [https://www.faa.gov/sitemap.xml]
+  language: en
+  include: [/uas/]
+  exclude: [/sites/, /media/]
+  max_urls: 20
+  skip_known: false
+generation:
+  format: qa
+  goal: >
+    Accurate question-and-answer pairs about operating small drones in the U.S.
+    under FAA rules (Part 107 and recreational flying), grounded strictly in
+    official FAA guidance.
+  n_per_chunk: 3
+  max_cost_usd: 1.00
+quality:
+  llm_judge: true
+  min_judge_score: 4
+export:
+  targets: [local]
+  approved_only: true
+  split: {train: 0.8, validation: 0.1, test: 0.1, group_by: page, seed: 42}

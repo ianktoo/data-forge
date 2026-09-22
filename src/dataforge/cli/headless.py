@@ -7,7 +7,10 @@ launch from cron, a Makefile, or a CI job.
 """
 from __future__ import annotations
 
+import json
+import time
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dataforge.agents import PipelineContext
@@ -96,9 +99,19 @@ async def _drive(ctx: PipelineContext, recipe: Recipe, start_from: str | None = 
     from dataforge.agents import Orchestrator
 
     no_urls = False
+    started_at = datetime.now(UTC)
+    t0 = time.monotonic()
+    # stage -> [start, end] in monotonic seconds, for run_summary.json
+    stage_times: dict[str, list[float]] = {}
+
+    async def pre_stage_hook(stage: str, context: PipelineContext) -> bool:
+        stage_times[str(stage)] = [time.monotonic(), 0.0]
+        return True
 
     async def stage_hook(stage: str, context: PipelineContext) -> bool:
         nonlocal no_urls
+        if str(stage) in stage_times:
+            stage_times[str(stage)][1] = time.monotonic()
         if stage == PipelineStage.discovery:
             total = len(context.discovered_urls)
             selected = recipe.filter_urls(context.discovered_urls)
@@ -123,6 +136,7 @@ async def _drive(ctx: PipelineContext, recipe: Recipe, start_from: str | None = 
     orch = Orchestrator(
         ctx,
         stage_hook=stage_hook,
+        pre_stage_hook=pre_stage_hook,
         stream_progress_cb=_stream_progress(),
         scraper_progress_cb=_count_progress("Scraping"),
         generator_progress_cb=_count_progress("Generating"),
@@ -132,11 +146,15 @@ async def _drive(ctx: PipelineContext, recipe: Recipe, start_from: str | None = 
 
     ctx = await orch.run(start_from=start_from)
 
+    def finish(code: int) -> int:
+        _write_run_summary(ctx, recipe, code, started_at, time.monotonic() - t0, stage_times)
+        return code
+
     if no_urls:
-        return EXIT_NO_URLS
+        return finish(EXIT_NO_URLS)
     if ctx.pause_requested:
         ui.warn(f"Paused. Resume with: dataforge resume {ctx.session_id[:8]}")
-        return EXIT_PAUSED
+        return finish(EXIT_PAUSED)
 
     if ctx.export_records:
         ui.export_summary(ctx.export_records)
@@ -163,7 +181,55 @@ async def _drive(ctx: PipelineContext, recipe: Recipe, start_from: str | None = 
     if ctx.errors:
         ui.warn(f"{len(ctx.errors)} non-fatal error(s) recorded — see the session log.")
 
-    return EXIT_OK if approved else EXIT_NO_SAMPLES
+    return finish(EXIT_OK if approved else EXIT_NO_SAMPLES)
+
+
+def _write_run_summary(
+    ctx: PipelineContext,
+    recipe: Recipe,
+    exit_code: int,
+    started_at: datetime,
+    wall_seconds: float,
+    stage_times: dict[str, list[float]],
+) -> None:
+    """Persist what the end-of-run lines print (timing, LLM usage, budget) to
+    <session_dir>/run_summary.json, so benchmarks and agents can read it after
+    the process exits. A resumed run overwrites it with the resumed leg's numbers.
+    """
+    from dataforge import __version__
+
+    budget = ctx.get_budget()
+    summary = {
+        "session_id": ctx.session_id,
+        "recipe_name": recipe.name,
+        "dataforge_version": __version__,
+        "exit_code": exit_code,
+        "started_at": started_at.isoformat(),
+        "wall_seconds": round(wall_seconds, 2),
+        "stage_seconds": {
+            stage: round(end - start, 2) for stage, (start, end) in stage_times.items() if end
+        },
+        "stream": recipe.stream,
+        "generation_model": ctx.generation_model or ctx.settings.llm_model,
+        "quality_model": ctx.quality_model or ctx.generation_model or ctx.settings.llm_model,
+        "approved_samples": len(ctx.approved_sample_ids),
+        "llm_usage": ctx.llm_usage,
+        "budget": {
+            "max_calls": budget.max_calls,
+            "max_cost_usd": budget.max_cost_usd,
+            "calls": budget.call_count,
+            "spent_usd": round(budget.spent_usd, 6),
+            "skipped_calls": budget.skipped,
+        },
+        "error_count": len(ctx.errors),
+        "errors": ctx.errors[:20],
+    }
+    try:
+        path = ctx.session_dir() / "run_summary.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    except OSError as exc:
+        log.warning(f"Could not write run_summary.json: {exc}")
 
 
 # -- Progress (line-based, safe for non-TTY logs) ----------------------------

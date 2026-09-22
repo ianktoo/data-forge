@@ -65,6 +65,12 @@ output/
 dist/
 build/
 
+# CREA dataset/eval artifacts: run outputs, not source -- dataset/gold/ ships via HF Hub, not git;
+# evals/results/ are timestamped run reports, regenerated each eval run.
+dataset/archive/
+evals/results/*.json
+!evals/results/.gitkeep
+
 # Sourcemaps
 *.map
 *.js.map

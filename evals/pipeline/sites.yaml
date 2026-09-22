@@ -1,0 +1,79 @@
+# Benchmark sites and their access / terms review.
+#
+# run_benchmark.py refuses to crawl a site whose `terms_review.reviewed_on` is
+# empty. Passing robots.txt is not permission: a person must read the site's
+# terms or website policies and record the date and outcome here. The robots.txt
+# snapshot and bot-block check are recorded automatically at run time.
+#
+# Checked 2026-09-22 by automated fetch (robots.txt, sitemap, policy pages).
+# That check is NOT a terms review; it only tells the reviewer where to look.
+
+sites:
+  - id: ready-gov
+    topic: Disaster preparedness
+    recipe: recipes/ready-gov.yaml
+    terms_url: https://www.fema.gov/about/privacy-policy   # linked from Ready.gov's footer; ready.gov/website-policies is 404, and fema.gov returns 403 to automated fetches, so open it in a browser
+    content_status: U.S. federal government work; text generally public domain (17 U.S.C. 105)
+    automated_check: "robots.txt allows content pages; no Crawl-delay"
+    terms_review:
+      reviewed_by: ""
+      reviewed_on: ""          # YYYY-MM-DD, filled in by the reviewer
+      outcome: ""              # e.g. "text reuse permitted; images excluded"
+
+  - id: uscis
+    topic: Immigration (green card, naturalization)
+    recipe: recipes/uscis.yaml
+    terms_url: https://www.uscis.gov/website-policies
+    content_status: U.S. federal government work; policy notes some images are licensed and NOT public domain (text only is used)
+    automated_check: "robots.txt Crawl-delay: 10 (enforced); disallows data-hub exports"
+    terms_review:
+      reviewed_by: ""
+      reviewed_on: ""
+      outcome: ""
+
+  - id: faa-uas
+    topic: Small drones / 14 CFR Part 107
+    recipe: recipes/faa-uas.yaml
+    terms_url: https://www.faa.gov/web_policies
+    content_status: U.S. federal government work; policy page text could not be extracted automatically, so read it manually
+    automated_check: "robots.txt allows /uas/; many /uas/ links are PDF/DOCX (skipped by DataForge)"
+    terms_review:
+      reviewed_by: ""
+      reviewed_on: ""
+      outcome: ""
+
+  - id: python-docs
+    topic: Technical documentation (Python tutorial)
+    recipe: recipes/python-docs.yaml
+    terms_url: https://docs.python.org/3/license.html
+    content_status: Documentation under the PSF License Version 2; code examples under Zero-Clause BSD
+    automated_check: "robots.txt allows /3/; sitemap lists only version landing pages (crawl fallback)"
+    terms_review:
+      reviewed_by: ""
+      reviewed_on: ""
+      outcome: ""
+
+# Considered and excluded. Kept here so the paper's access table is generated
+# from the same source as the runs.
+excluded:
+  - id: ecfr
+    topic: 14 CFR Part 107 (regulation text)
+    url: https://www.ecfr.gov/current/title-14/chapter-I/subchapter-F/part-107
+    reason: >
+      robots.txt allows the page, but a plain HTTP request is redirected to
+      unblock.federalregister.gov, which states that "programmatic access to
+      these sites is limited to access to our extensive developer APIs".
+      Use the eCFR API instead; DataForge has no API source adapter yet.
+    checked_on: 2026-09-22
+
+  - id: cdc
+    topic: Public health guidance
+    url: https://www.cdc.gov/
+    reason: >
+      Access depends on the client: robots.txt returned 403 Access Denied to a
+      generic "Mozilla/5.0 (...)" User-Agent, but 200 to DataForge's own
+      User-Agent a few minutes later (edge bot protection). Not excluded for a
+      block, but because results that depend on an edge heuristic are not
+      reproducible, and its terms were not reviewed. Could be added after a
+      terms review.
+    checked_on: 2026-09-22

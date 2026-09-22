@@ -1,0 +1,27 @@
+# Benchmark recipe: disaster preparedness (Ready.gov). Kept small and capped;
+# see evals/pipeline/README.md. Filters mirror examples/ready-gov.yaml.
+version: 1
+name: bench-ready-gov
+stream: true
+output_dir: ./output/benchmark/ready-gov
+source:
+  urls: [https://www.ready.gov/sitemap.xml]
+  language: en
+  exclude: [/node/, /sites/default/files/, /press-release, re:toolkit, re:webinar,
+            re:social-media, re:-old$, /calendar, /accessibility, /privacy, "re:^https?://[^/]+/$"]
+  max_urls: 20
+  skip_known: false
+generation:
+  format: qa
+  goal: >
+    Accurate question-and-answer pairs about U.S. disaster preparedness,
+    grounded strictly in official Ready.gov guidance.
+  n_per_chunk: 3
+  max_cost_usd: 1.00
+quality:
+  llm_judge: true
+  min_judge_score: 4
+export:
+  targets: [local]
+  approved_only: true
+  split: {train: 0.8, validation: 0.1, test: 0.1, group_by: page, seed: 42}

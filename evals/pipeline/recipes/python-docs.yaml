@@ -1,0 +1,29 @@
+# Benchmark recipe: technical documentation (Python tutorial). The site's
+# sitemap lists only version landing pages, so discovery crawls from the seed
+# instead (the weak-sitemap case).
+version: 1
+name: bench-python-docs
+stream: true
+output_dir: ./output/benchmark/python-docs
+source:
+  urls: [https://docs.python.org/3/tutorial/]
+  include: [/3/tutorial/]
+  max_urls: 20
+  skip_known: false
+crawl:
+  max_crawl_pages: 40
+  max_crawl_depth: 2
+generation:
+  format: qa
+  goal: >
+    Accurate question-and-answer pairs that teach Python programming concepts,
+    grounded strictly in the official Python tutorial.
+  n_per_chunk: 3
+  max_cost_usd: 1.00
+quality:
+  llm_judge: true
+  min_judge_score: 4
+export:
+  targets: [local]
+  approved_only: true
+  split: {train: 0.8, validation: 0.1, test: 0.1, group_by: page, seed: 42}
