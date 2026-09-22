@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import re
+import sys
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -93,21 +94,31 @@ def _version_callback(value: bool) -> None:
 StepResult = Literal["next", "back", "back_to_urls", "back_to_config", "home", "exit"]
 
 
-def _bootstrap() -> None:
+def _apply_project_file(s, cwd: Path) -> None:
+    """Point *s* at the database and output folder a .dataforge project file
+    records, so every command (run, sessions, stats, view, resume) uses the
+    same ones from any CWD. An explicitly set DATAFORGE_DB_PATH or
+    DATAFORGE_OUTPUT_DIR still wins, which is how the benchmark isolates sites.
+    """
     from dataforge.cli.dataforge_file import find_project_file, load_project
+    pf = find_project_file(cwd)
+    if not pf:
+        return
+    try:
+        proj = load_project(pf)
+        if not os.getenv("DATAFORGE_DB_PATH"):
+            s.db_path = Path(proj["db_path"])
+        if not os.getenv("DATAFORGE_OUTPUT_DIR"):
+            s.output_dir = Path(proj["output_dir"])
+    except Exception:
+        pass  # Malformed file: ignore and fall back to defaults
+
+
+def _bootstrap() -> None:
     from dataforge.cli.preflight import check_env_file
     check_env_file()
     s = get_settings()
-    # If a .dataforge project file exists (anywhere up the directory tree), use
-    # the absolute paths it records so 'resume', 'sessions', etc. work from any CWD.
-    pf = find_project_file(Path.cwd())
-    if pf:
-        try:
-            proj = load_project(pf)
-            s.db_path    = Path(proj["db_path"])
-            s.output_dir = Path(proj["output_dir"])
-        except Exception:
-            pass  # Malformed file — ignore and fall back to defaults
+    _apply_project_file(s, Path.cwd())
     setup_logging(s.logs_dir(), s.log_level)
     init_db(s.db_path)
 
@@ -308,7 +319,7 @@ async def _resume_session(session_id: str | None) -> None:
                 if len(matches) == 1:
                     session = matches[0]
                 elif len(matches) > 1:
-                    ui.error("Ambiguous session ID prefix — be more specific")
+                    ui.error("Ambiguous session ID prefix; be more specific")
                     return
                 else:
                     ui.error(
@@ -374,6 +385,10 @@ def run_cmd(
     """
     from .headless import run_recipe
 
+    # Same database, output folder and logging as every other command.
+    # Without this, run wrote to ./dataforge.db while sessions/stats/view read
+    # the .dataforge project file's database, and logged DEBUG in colour.
+    _bootstrap()
     code = asyncio.run(run_recipe(recipe, dry_run=dry_run))
     if code != 0:
         raise typer.Exit(code)
@@ -514,6 +529,25 @@ def view(
     asyncio.run(_view_session(session_id, stage, limit=limit))
 
 
+async def _show_rows(sid: str, stage: str, rows: list, limit: int, render_fn, label: str) -> None:
+    """--json: the first *limit* rows as JSON, never a pager (the MCP server and
+    scripts read this). Otherwise the interactive pager, or just the first page
+    when there is no terminal to page in."""
+    if _JSON_OUTPUT:
+        typer.echo(json.dumps(
+            {"session_id": sid, "stage": stage, "total": len(rows), "rows": rows[:limit]},
+            indent=2, default=str,
+        ))
+        return
+    if not sys.stdin.isatty():
+        if rows:
+            render_fn(rows[:limit], max_rows=limit)
+        else:
+            ui.info(f"No {label} found.")
+        return
+    await _paged_view(rows, limit, render_fn, label)
+
+
 async def _paged_view(rows: list, page_size: int, render_fn, label: str) -> None:
     """Display rows page by page with n/p/q controls."""
     from prompt_toolkit import PromptSession as _PS
@@ -563,10 +597,19 @@ def _resolve_session(db_path: Path, session_id: str) -> PipelineSession | None:
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
-            ui.error("Ambiguous session ID prefix — be more specific")
+            _report_error("Ambiguous session ID prefix; be more specific")
             return None
-        ui.error(f"Session '{session_id}' not found")
+        _report_error(f"Session '{session_id}' not found in {db_path}")
         return None
+
+
+def _report_error(msg: str) -> None:
+    """Print an error for a human, or as JSON on stdout under --json so a
+    caller parsing the output (the MCP server, a script) gets the reason."""
+    if _JSON_OUTPUT:
+        typer.echo(json.dumps({"error": msg}))
+    else:
+        ui.error(msg)
 
 
 async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> None:
@@ -575,10 +618,11 @@ async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> N
 
     session = _resolve_session(s.db_path, session_id)
     if not session:
-        return
+        raise typer.Exit(code=1)
 
     sid = session.id
-    ui.info(f"Session [bold]{session.name}[/]  [{sid[:8]}]  stage=[cyan]{session.stage}[/]  status={session.status}")
+    if not _JSON_OUTPUT:
+        ui.info(f"Session [bold]{session.name}[/]  [{sid[:8]}]  stage=[cyan]{session.stage}[/]  status={session.status}")
 
     if not stage:
         # Summary: count each stage
@@ -614,14 +658,14 @@ async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> N
             rows_db = db.exec(select(DiscoveredURL).where(DiscoveredURL.session_id == sid)).all()
         rows = [{"url": r.url, "source": r.source, "selected": r.selected,
                  "http_status": r.http_status} for r in rows_db]
-        await _paged_view(rows, limit, ui.view_urls, "discovered URLs")
+        await _show_rows(sid, stage, rows, limit, ui.view_urls, "discovered URLs")
 
     elif stage == "collection":
         with open_session(s.db_path) as db:
             rows_db = db.exec(select(ScrapedPage).where(ScrapedPage.session_id == sid)).all()
         rows = [{"url": r.url, "title": r.title, "word_count": r.word_count,
                  "scraped_at": r.scraped_at.strftime("%Y-%m-%d %H:%M")} for r in rows_db]
-        await _paged_view(rows, limit, ui.view_pages, "scraped pages")
+        await _show_rows(sid, stage, rows, limit, ui.view_pages, "scraped pages")
 
     elif stage == "processing":
         with open_session(s.db_path) as db:
@@ -629,7 +673,7 @@ async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> N
         rows = [{"chunk_index": r.chunk_index, "token_count": r.token_count,
                  "content": r.content,
                  "source_url": r.parsed_meta().get("source_url", "")} for r in rows_db]
-        await _paged_view(rows, limit, ui.view_chunks, "chunks")
+        await _show_rows(sid, stage, rows, limit, ui.view_chunks, "chunks")
 
     elif stage in ("generation", "quality"):
         with open_session(s.db_path) as db:
@@ -637,13 +681,17 @@ async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> N
             if stage == "quality":
                 query = query.where(SyntheticSample.approved == True)  # noqa: E712
             rows_db = db.exec(query).all()
-        rows = [{"format": r.format, "quality_score": r.quality_score,
-                 "approved": r.approved, "messages": r.messages()} for r in rows_db]
+        rows = [{"id": r.id, "chunk_id": r.chunk_id, "format": r.format,
+                 "quality_score": r.quality_score, "approved": r.approved,
+                 "rejection_reason": r.rejection_reason, "messages": r.messages()}
+                for r in rows_db]
         title = "Approved Samples" if stage == "quality" else "Generated Samples"
-        await _paged_view(rows, limit, lambda r, max_rows: ui.view_samples(r, title=title, max_rows=max_rows), "samples")
+        await _show_rows(sid, stage, rows, limit,
+                         lambda r, max_rows: ui.view_samples(r, title=title, max_rows=max_rows), "samples")
 
     else:
-        ui.error(f"Unknown stage '{stage}'. Valid: discovery, collection, processing, generation, quality")
+        _report_error(f"Unknown stage '{stage}'. Valid: discovery, collection, processing, generation, quality")
+        raise typer.Exit(code=1)
 
 
 # ── stats command ─────────────────────────────────────────────────────────────
