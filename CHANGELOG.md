@@ -3,6 +3,19 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Documentation
+- `CITATION.cff`: citation metadata (GitHub shows a "Cite this repository"
+  button). The software is cited as MIT, version 2.4.1; the preferred citation
+  is the technical note (Zenodo, DOI 10.5281/zenodo.22906072, CC BY 4.0).
+- README citation section: cites the technical note with its DOI (plain text
+  and a BibTeX `@techreport` entry) instead of the old software-only entry.
+- `docs/TECHNICAL.tex`: author shown as Ian K. Too, with affiliation (William
+  Jessup University) and ORCID, matching `CITATION.cff`.
+- `evals/pipeline/README.md`: site counts corrected (four benchmark sites, ten
+  excluded).
+
 ## [2.4.1] - 2026-09-22
 
 Fixes from the first pipeline run driven through the MCP server

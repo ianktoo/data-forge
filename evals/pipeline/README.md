@@ -7,10 +7,14 @@ separate from `evals/harness/`, which scores a *model* trained on the dataset.
 
 ## Sites
 
-`sites.yaml` lists the three benchmark sites and three that were considered and
-excluded, with the reason: FAA (unclear terms), eCFR (blocks automated access,
-asks for its API) and CDC (access depends on the client; terms not reviewed). Each run is capped at 20 URLs and
-`max_cost_usd: 1.00` (`recipes/`).
+`sites.yaml` lists the four benchmark sites (Ready.gov, USCIS, the Python
+tutorial and iantoo.space) and ten that were considered and excluded, each with
+the reason: KRA (terms prohibit data extraction), eCFR (blocks automated access,
+asks for its API), FAA (unclear terms), CDC (access depends on the client; terms
+not reviewed), and six Kenyan sites that reserve all rights with no reuse grant
+(Kenya Power, KEBS, Ministry of Health, University of Nairobi, JKUAT,
+Strathmore). Each run is capped at 20 URLs and `max_cost_usd: 1.00`
+(`recipes/`).
 
 **A person must review each site's terms before it can be crawled.** Fill in
 `terms_review` (`reviewed_by`, `reviewed_on`, `outcome`) for a site in
