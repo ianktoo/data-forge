@@ -46,6 +46,22 @@ and crawl-politeness fixes the benchmark uncovered. No breaking changes.
   bucket counted its own sleep as refill time, so every other request went
   through free, and it allowed a burst of 2x the rate. The burst is now one
   second's worth, or a single request when a `Crawl-delay` applies.
+- **robots.txt failures now follow RFC 9309.** A 4xx means no rules; a 5xx,
+  429 or unreachable server disallows the whole site. Before, a server-error
+  page was parsed as if it were robots.txt, which in effect allowed everything.
+  The robots.txt request itself now waits on the rate limiter.
+- **The Playwright fallback bypassed politeness.** It launched a browser with
+  no robots.txt check, no rate limit and a generic User-Agent. It now passes
+  the same gate as every request (`HTTPClient.prepare`), sends DataForge's
+  User-Agent, skips images/media/fonts, and is not used on a site that
+  declares a `Crawl-delay`.
+- **Judge and regex rejections shared a label.** Judge rejections are now
+  prefixed `judge:` (`judge: not standalone (refers to the source)`,
+  `judge: not grounded in source`, `judge: score 3 < 4`).
+- **An empty split was silent.** With fewer page groups than splits, a split
+  could receive nothing and simply not be written; it is now logged as a
+  warning. The split's docstring states that assignment is largest-first
+  greedy and the seed only breaks ties.
 - **Relative links were resolved against the site root** instead of the page
   URL (or `<base href>`), sending the BFS crawler to wrong addresses on any
   site whose pages live below the root.
@@ -71,7 +87,20 @@ and crawl-politeness fixes the benchmark uncovered. No breaking changes.
   results do not show), corrections where earlier sections described
   `Crawl-delay` enforcement as already holding, an updated abstract and
   conclusion, and an AI-assistance acknowledgment. Cites 17 U.S.C. 105 and
-  Kenya's Copyright Act (ss. 25, 31).
+  Kenya's Copyright Act (ss. 2, 25, 31).
+- `docs/TECHNICAL.tex`, after a critical review: design claims corrected to
+  match the code (judge batched per chunk with a 1-5 score plus
+  grounded/standalone checks; filter order; `cl100k_base` tokenizer; split is
+  largest-first greedy, not random; cost cap can overshoot by in-flight calls;
+  Retry-After cap; RFC 9309 behaviour); an unmeasured "the judge is
+  empirically reliable" claim removed; rejection breakdown separated into
+  regex (9) vs. judge (9) with the judge's score ceiling (89% scored 5); the
+  near-duplicate check's non-firing explained with measured Jaccard values;
+  held-out split sizes reported, including iantoo.space's empty test split;
+  streaming-vs-batch and downstream effects stated as unmeasured; hard-coded
+  section numbers replaced with references; jurisdiction point narrowed; six
+  citations added (RFC 9309, Panickssery et al. 2024, Alberti et al. 2019,
+  Puri et al. 2020, Nayak et al. 2024, distilabel).
 - `docs/TECHNICAL.tex`: new section "Agent integration via the Model Context
   Protocol" (agent guide, the MCP server's tools and server-side guards, expected
   benefits stated as unmeasured, current gaps), citing the MCP announcement,
