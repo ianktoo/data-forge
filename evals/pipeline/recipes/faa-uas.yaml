@@ -1,3 +1,6 @@
+# NOT RUN: FAA is excluded for unclear terms (see sites.yaml). Kept for if they
+# are clarified.
+#
 # Benchmark recipe: small unmanned aircraft / Part 107 (FAA). Many /uas links
 # are PDFs or Word files, which DataForge skips; only HTML pages are used.
 version: 1

@@ -7,8 +7,9 @@ separate from `evals/harness/`, which scores a *model* trained on the dataset.
 
 ## Sites
 
-`sites.yaml` lists the four benchmark sites and two that were considered and
-excluded (eCFR and CDC), with the reason. Each run is capped at 20 URLs and
+`sites.yaml` lists the three benchmark sites and three that were considered and
+excluded, with the reason: FAA (unclear terms), eCFR (blocks automated access,
+asks for its API) and CDC (access depends on the client; terms not reviewed). Each run is capped at 20 URLs and
 `max_cost_usd: 1.00` (`recipes/`).
 
 **A person must review each site's terms before it can be crawled.** Fill in

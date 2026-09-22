@@ -41,23 +41,6 @@ sites:
         public domain; images are not collected. No statement on crawling beyond
         robots.txt (Crawl-delay: 10, enforced).
 
-  - id: faa-uas
-    topic: Small drones / 14 CFR Part 107
-    recipe: recipes/faa-uas.yaml
-    terms_url: https://www.faa.gov/web_policies
-    content_status: U.S. federal government work (17 U.S.C. 105); no explicit reuse statement found
-    automated_check: "robots.txt allows /uas/; many /uas/ links are PDF/DOCX (skipped by DataForge)"
-    terms_review:
-      reviewed_by: ""
-      reviewed_on: ""          # PENDING owner decision, see outcome
-      outcome: >
-        No reuse or copyright statement found. /web_policies/disclaimer is a
-        government-system banner: "provided for U.S. Government-authorized use only.
-        Unauthorized or improper use of this system is prohibited." faa.gov returned
-        403 to two of three automated policy-page fetches. Content is a U.S. federal
-        work (17 U.S.C. 105), but whether low-volume automated collection counts as
-        authorized use is a judgement for the project owner.
-
   - id: python-docs
     topic: Technical documentation (Python tutorial)
     recipe: recipes/python-docs.yaml
@@ -77,6 +60,20 @@ sites:
 # Considered and excluded. Kept here so the paper's access table is generated
 # from the same source as the runs.
 excluded:
+  - id: faa-uas
+    topic: Small drones / 14 CFR Part 107
+    url: https://www.faa.gov/uas/
+    reason: >
+      Unclear terms. No reuse or copyright statement was found; the only policy
+      text, /web_policies/disclaimer, is a government-system banner: "provided
+      for U.S. Government-authorized use only. Unauthorized or improper use of
+      this system is prohibited." faa.gov also returned 403 to two of three
+      automated policy-page fetches. The content is a U.S. federal work
+      (17 U.S.C. 105) and robots.txt allows /uas/, but whether automated
+      collection counts as authorized use is not stated, so it was skipped.
+      recipes/faa-uas.yaml is kept for if the terms are clarified.
+    checked_on: 2026-09-22
+
   - id: ecfr
     topic: 14 CFR Part 107 (regulation text)
     url: https://www.ecfr.gov/current/title-14/chapter-I/subchapter-F/part-107

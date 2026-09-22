@@ -20,8 +20,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `run_summary.json` in each session folder after `dataforge run`: exit code,
   wall time and time per stage, models, approved count, LLM calls/cost, budget
   and skipped calls, errors. Previously these were only printed.
-- `evals/pipeline/`: pipeline benchmark over four sites (Ready.gov, USCIS,
-  FAA/UAS, Python tutorial), each capped at 20 URLs and $1. Refuses a site
+- `evals/pipeline/`: pipeline benchmark over three sites (Ready.gov, USCIS,
+  Python tutorial), each capped at 20 URLs and $1; FAA (unclear terms), eCFR
+  and CDC are documented as excluded. Refuses a site
   until a person records a terms review in `sites.yaml`; a preflight records
   robots.txt, Crawl-delay and bot blocks and skips blocked sites. Aggregation
   into JSON/Markdown/LaTeX (including a split page-leak check) and a blind
