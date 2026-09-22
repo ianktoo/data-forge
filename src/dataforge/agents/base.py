@@ -5,10 +5,14 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dataforge.config import Settings
 from dataforge.storage.models import DataFormat, PipelineStage
 from dataforge.utils import get_logger
+
+if TYPE_CHECKING:
+    from dataforge.generators import BudgetTracker
 
 
 @dataclass
@@ -48,6 +52,12 @@ class PipelineContext:
     generation_model: str = ""
     quality_model: str = ""
 
+    # LLM spend/call cap, shared by the generation and quality-judge LLM
+    # clients so a run's total cost (generation + judge) is bounded, not just
+    # generation alone. None = unlimited.
+    max_llm_calls: int | None = None
+    max_cost_usd: float | None = None
+
     # Pause signal — any agent checks this and stops early when True
     pause_requested: bool = False
 
@@ -58,8 +68,22 @@ class PipelineContext:
     # LLM usage accumulated across all stages (total_calls, tokens, cost)
     llm_usage: dict = field(default_factory=dict)
 
+    # Lazily-created, shared across the generation and quality-judge LLM
+    # clients (see get_budget()) so both draw down the same cap.
+    _llm_budget: BudgetTracker | None = field(default=None, repr=False, compare=False)
+
     def session_dir(self) -> Path:
         return self.settings.session_dir(self.session_id)
+
+    def get_budget(self) -> BudgetTracker:
+        """Return the shared BudgetTracker for this run, creating it on first use."""
+        from dataforge.generators import BudgetTracker as _BudgetTracker
+        if self._llm_budget is None:
+            self._llm_budget = _BudgetTracker(
+                max_calls=self.max_llm_calls,
+                max_cost_usd=self.max_cost_usd,
+            )
+        return self._llm_budget
 
     def add_error(self, msg: str) -> None:
         self.errors.append(msg)

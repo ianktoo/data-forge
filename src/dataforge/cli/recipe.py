@@ -133,6 +133,20 @@ class GenerationConfig(BaseModel):
     system_prompt: str = Field("", description="Custom system prompt (required for format: custom)")
     chunk_size: int | None = Field(None, gt=0)
     chunk_overlap: int | None = Field(None, ge=0)
+    max_cost_usd: float | None = Field(
+        None, ge=0,
+        description=(
+            "Stop dispatching new generation/judge LLM calls once this run's "
+            "total estimated spend reaches this amount. Unset = no cap."
+        ),
+    )
+    max_llm_calls: int | None = Field(
+        None, ge=0,
+        description=(
+            "Stop dispatching new generation/judge LLM calls once this run has "
+            "made this many calls in total. Unset = no cap."
+        ),
+    )
 
     @model_validator(mode="after")
     def _custom_needs_prompt(self) -> GenerationConfig:

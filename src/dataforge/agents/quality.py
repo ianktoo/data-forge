@@ -125,7 +125,12 @@ class QualityAgent(BaseAgent):
                 if c.id is not None
             }
 
-        llm = LLMClient(model_override=self.ctx.quality_model or self.ctx.generation_model)
+        has_cap = self.ctx.max_llm_calls is not None or self.ctx.max_cost_usd is not None
+        budget = self.ctx.get_budget() if has_cap else None
+        llm = LLMClient(
+            model_override=self.ctx.quality_model or self.ctx.generation_model,
+            budget=budget,
+        )
         min_score = self.ctx.quality_min_judge_score
         sem = asyncio.Semaphore(max(1, self.ctx.settings.stream_generate_workers))
         fatal: list[str] = []

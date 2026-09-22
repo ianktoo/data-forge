@@ -53,7 +53,9 @@ class GeneratorAgent(BaseAgent):
         self.log.info(f"Generating samples from {len(records)} chunks "
                       f"(format={self.ctx.format}, n={self.ctx.n_per_chunk})")
 
-        llm = LLMClient(model_override=self.ctx.generation_model)
+        has_cap = self.ctx.max_llm_calls is not None or self.ctx.max_cost_usd is not None
+        budget = self.ctx.get_budget() if has_cap else None
+        llm = LLMClient(model_override=self.ctx.generation_model, budget=budget)
         sample_ids: list[int] = []
         done = 0
 
