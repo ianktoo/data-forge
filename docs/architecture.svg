@@ -129,7 +129,7 @@
 
   <rect x="770" y="730" width="270" height="70" rx="8" fill="#ecfeff" stroke="#0891b2" stroke-width="1.5"/>
   <text x="905" y="754" text-anchor="middle" class="label">dataset_{train,validation,test}.*</text>
-  <text x="905" y="772" text-anchor="middle" class="sub">ChatML-ready for Unsloth / Axolotl / TRL / 🤗 datasets</text>
+  <text x="905" y="772" text-anchor="middle" class="sub">ChatML-ready for Unsloth / Axolotl / TRL / HF datasets</text>
   <text x="905" y="787" text-anchor="middle" class="tiny">no page's paraphrases span two splits</text>
 
   <!-- Resume loop -->

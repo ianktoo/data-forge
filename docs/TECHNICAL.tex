@@ -9,8 +9,6 @@
 \usepackage{xcolor}
 \usepackage{enumitem}
 \usepackage{amsmath}
-\usepackage{tabularx}
-\usepackage{multirow}
 
 \hypersetup{
   colorlinks=true,
@@ -112,31 +110,20 @@ in Section~\ref{sec:leakage}.
 
 \section{System overview}
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabularx}{\textwidth}{@{}l l X@{}}
-\toprule
-\textbf{Stage} & \textbf{Mode} & \textbf{Role} \\
-\midrule
-1. Discovery  & sequential & Enumerate candidate URLs from \texttt{sitemap.xml} / BFS fallback, before any page is fetched. \\
-2. Collection & \multirow{3}{*}{\shortstack[l]{batch \emph{or}\\streaming\\(concurrent\\worker pools)}} & Fetch pages; honor \texttt{robots.txt}, rate limits, and HTTP retry semantics (Section~2.2). \\
-3. Processing &  & Convert to Markdown, strip boilerplate, chunk with overlap (Section~2.3). \\
-4. Generation &  & LLM synthesizes Q\&A/instruction samples per chunk, budget-capped (Section~2.4--2.5). \\
-5. Quality    & batch only & Heuristic filter, source-reference filter, dedup, LLM judge (Section~2.6). \\
-6. Export     & batch only & Group-aware leak-free split; JSONL/Parquet/CSV/HF Hub/Kaggle (Section~2.7). \\
-\bottomrule
-\end{tabularx}
-\caption{DataForge pipeline stages. A recipe (YAML) or the interactive
-wizard drives all six. Stages 2--4 form a producer/consumer chain that
-runs either strictly sequentially (batch mode) or as concurrent worker
-pools connected by bounded queues (streaming mode; Section~3). Quality
-scoring and export remain batch-only because deduplication and
-group-aware splitting require visibility into the full sample set.}
-\label{tab:architecture}
-\end{table}
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\textwidth]{architecture.pdf}
+  \caption{DataForge pipeline architecture. A recipe (YAML) or the
+  interactive wizard drives six stages. The first four form a
+  producer/consumer chain that runs either strictly sequentially
+  (batch mode) or as concurrent worker pools connected by bounded
+  queues (streaming mode). Quality scoring and export remain batch
+  stages because deduplication and group-aware splitting require
+  visibility into the full sample set.}
+  \label{fig:architecture}
+\end{figure}
 
-DataForge is organized as six stages (Table~\ref{tab:architecture}):
+DataForge is organized as six stages (Figure~\ref{fig:architecture}):
 Discovery, Collection, Processing, Generation, Quality, and Export. A
 run is specified either by a YAML \emph{recipe} --- a declarative,
 version-controllable description of every stage's parameters --- or by
