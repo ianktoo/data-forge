@@ -3,7 +3,10 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [2.4.0] - 2026-09-22
+
+Agent integration (agent guide, local MCP server), a pipeline benchmark,
+and crawl-politeness fixes the benchmark uncovered. No breaking changes.
 
 ### Added
 - `dataforge agent-guide`: prints a guide for AI agents driving DataForge from
@@ -20,10 +23,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `run_summary.json` in each session folder after `dataforge run`: exit code,
   wall time and time per stage, models, approved count, LLM calls/cost, budget
   and skipped calls, errors. Previously these were only printed.
-- `evals/pipeline/`: pipeline benchmark over three sites (Ready.gov, USCIS,
-  Python tutorial), each capped at 20 URLs and $1; FAA (unclear terms), eCFR
-  and CDC are documented as excluded. Refuses a site
-  until a person records a terms review in `sites.yaml`; a preflight records
+- `evals/pipeline/`: pipeline benchmark over four sites (Ready.gov, USCIS,
+  the Python tutorial and iantoo.space, the last with the owner's consent),
+  each capped at 20 URLs and $1. KRA (terms prohibit data mining), FAA
+  (unclear terms), eCFR (bot block, API only) and CDC are documented as
+  excluded. Refuses a site until a person records a terms review in `sites.yaml`; a preflight records
   robots.txt, Crawl-delay and bot blocks and skips blocked sites. Aggregation
   into JSON/Markdown/LaTeX (including a split page-leak check) and a blind
   human audit of the LLM judge (judge precision, rejection precision, kappa).
@@ -50,6 +54,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Before, it returned the sitemap's unrelated URLs and dropped the seed, so
   sites with a shallow sitemap (docs.python.org lists only version roots)
   could not be crawled at all.
+- **TLS verification now uses the operating system's trust store**
+  (`truststore`, as pip does). Sites that send an incomplete certificate chain
+  (e.g. uonbi.ac.ke, jkuat.ac.ke, strathmore.edu) or chain to a root missing
+  from certifi (health.go.ke) failed with `CERTIFICATE_VERIFY_FAILED` although
+  browsers accept them. Verification is never disabled; self-signed and
+  expired certificates are still rejected.
 - The crawler's User-Agent reported `DataForge/0.1` and a URL that is not the
   project (`github.com/dataforge`); it now sends the real version and
   `https://github.com/ianktoo/data-forge`, so site operators can identify it.
