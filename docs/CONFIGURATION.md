@@ -9,6 +9,7 @@ Run `dataforge config` to set your provider and API key interactively.
 |---|---|---|
 | `OPENAI_API_KEY` | — | OpenAI key |
 | `ANTHROPIC_API_KEY` | — | Anthropic key |
+| `GEMINI_API_KEY` | — | Google AI (Gemini) key |
 | `GROQ_API_KEY` | — | Groq key |
 | `TOGETHER_API_KEY` | — | Together AI key |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint (no key needed) |
