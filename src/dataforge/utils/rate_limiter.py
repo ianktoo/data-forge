@@ -38,10 +38,14 @@ class _Bucket:
                 self.last = time.monotonic()
             else:
                 self.tokens -= 1
-            # jitter ±15 %
+            # jitter ±15 %; only the positive half sleeps, and the clock restarts
+            # after it so the next request can't count the jitter as waiting
+            # time. Otherwise individual gaps fell below the interval (8.6s
+            # against a 10s Crawl-delay) even though the average held.
             jitter = (1 / effective_rate) * random.uniform(-0.15, 0.15)
             if jitter > 0:
                 await asyncio.sleep(jitter)
+                self.last = time.monotonic()
 
 
 class RateLimiter:

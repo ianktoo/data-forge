@@ -276,3 +276,37 @@ def test_crawl_delay_bucket_bursts_one_request_only():
     bucket = lim._buckets["slow.test"]
     assert bucket.capacity == 1.0
     assert lim._buckets["fast.test"].capacity == 2.0   # >= 1 rps: one second's worth
+
+
+async def test_jitter_never_shortens_the_gap_below_the_interval(monkeypatch):
+    """Regression: jitter slept after a request was allowed was then counted as
+    refill for the next one, so single gaps fell to ~85% of a Crawl-delay.
+    Alternating maximum and zero jitter forces that case every time."""
+    import itertools
+    import time
+
+    from dataforge.utils import rate_limiter
+
+    jitters = itertools.cycle([0.15, 0.0])
+    monkeypatch.setattr(rate_limiter.random, "uniform", lambda a, b: next(jitters))
+    lim = RateLimiter(default_rps=1000.0)
+    lim.set_domain_limit("slow.test", 5.0)            # 0.2s interval, burst of 5
+    stamps = []
+    for _ in range(11):
+        await lim.wait("https://slow.test/")
+        stamps.append(time.monotonic())
+    gaps = [b - a for a, b in zip(stamps[5:], stamps[6:])]   # after the burst
+    assert min(gaps) >= 0.2 * 0.95, [round(g, 3) for g in gaps]
+
+
+def test_pipeline_context_shares_one_rate_limiter(tmp_settings):
+    """Every stage must draw from the same limiter, or each new stage's first
+    request ignores the Crawl-delay the previous stage was honouring."""
+    from dataforge.agents import PipelineContext
+    from dataforge.storage import DataFormat
+
+    ctx = PipelineContext(
+        session_id="s", session_name="n", goal="", format=DataFormat.qa, seed_urls=[],
+        settings=tmp_settings, custom_system_prompt="", n_per_chunk=1,
+    )
+    assert ctx.get_rate_limiter() is ctx.get_rate_limiter()

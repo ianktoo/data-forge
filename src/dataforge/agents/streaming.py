@@ -39,7 +39,7 @@ from dataforge.storage import (
     SyntheticSample,
     open_session,
 )
-from dataforge.utils import RateLimiter, concurrency_ceiling
+from dataforge.utils import concurrency_ceiling
 from dataforge.utils.errors import (
     LLMConnectionError,
     MissingCredentialError,
@@ -134,7 +134,7 @@ class StreamingAgent(BaseAgent):
             LLMClient(model_override=self.ctx.generation_model, budget=budget)
             if gen_enabled else None
         )
-        limiter = RateLimiter(s.rate_limit)
+        limiter = self.ctx.get_rate_limiter()
         raw_dir = self._stage_dir("raw")
         processed_dir = self._stage_dir("processed")
         scraper = ScraperAgent(self.ctx)

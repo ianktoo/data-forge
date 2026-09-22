@@ -8,7 +8,6 @@ from sqlmodel import select
 
 from dataforge.collectors import HTTPClient, crawl, discover_sitemap_url, filter_urls, parse_sitemap
 from dataforge.storage import DiscoveredURL, URLSource, open_session
-from dataforge.utils import RateLimiter
 
 from .base import BaseAgent, PipelineContext
 
@@ -18,7 +17,7 @@ class ExplorerAgent(BaseAgent):
 
     async def run(self) -> PipelineContext:
         self.log.info(f"Starting discovery for session {self.ctx.session_id}")
-        limiter = RateLimiter(self.ctx.settings.rate_limit)
+        limiter = self.ctx.get_rate_limiter()
         all_urls: list[str] = []
 
         source_map: dict[str, str] = {}  # url -> URLSource value

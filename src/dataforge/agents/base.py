@@ -13,6 +13,7 @@ from dataforge.utils import get_logger
 
 if TYPE_CHECKING:
     from dataforge.generators import BudgetTracker
+    from dataforge.utils import RateLimiter
 
 
 @dataclass
@@ -75,9 +76,20 @@ class PipelineContext:
     # Lazily-created, shared across the generation and quality-judge LLM
     # clients (see get_budget()) so both draw down the same cap.
     _llm_budget: BudgetTracker | None = field(default=None, repr=False, compare=False)
+    # One rate limiter per run, shared by every stage that makes HTTP requests.
+    # A site's Crawl-delay spans the whole run: with a limiter per stage, the
+    # first request of each new stage went out immediately.
+    _rate_limiter: RateLimiter | None = field(default=None, repr=False, compare=False)
 
     def session_dir(self) -> Path:
         return self.settings.session_dir(self.session_id)
+
+    def get_rate_limiter(self) -> RateLimiter:
+        """Return the run's shared RateLimiter, creating it on first use."""
+        if self._rate_limiter is None:
+            from dataforge.utils import RateLimiter as _RateLimiter
+            self._rate_limiter = _RateLimiter(self.settings.rate_limit)
+        return self._rate_limiter
 
     def get_budget(self) -> BudgetTracker:
         """Return the shared BudgetTracker for this run, creating it on first use."""
