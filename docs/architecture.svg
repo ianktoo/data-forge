@@ -1,0 +1,153 @@
+<svg viewBox="0 0 1300 900" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrowDash" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <style>
+      .stage { fill:#eef2ff; stroke:#4f46e5; stroke-width:1.5; rx:8; }
+      .stage-batch { fill:#f0fdf4; stroke:#16a34a; stroke-width:1.5; rx:8; }
+      .stage-store { fill:#fff7ed; stroke:#ea580c; stroke-width:1.5; rx:6; }
+      .stream-box { fill:#f8fafc; stroke:#94a3b8; stroke-width:1.5; stroke-dasharray:6 4; rx:10; }
+      .title { font-size:20px; font-weight:700; fill:#0f172a; }
+      .subtitle { font-size:12.5px; fill:#475569; }
+      .label { font-size:13.5px; font-weight:600; fill:#1e293b; }
+      .sub { font-size:11px; fill:#475569; }
+      .tiny { font-size:10px; fill:#64748b; }
+      .edge { stroke:#475569; stroke-width:1.6; fill:none; marker-end:url(#arrow); }
+      .edge-dash { stroke:#94a3b8; stroke-width:1.4; fill:none; stroke-dasharray:5 4; marker-end:url(#arrowDash); }
+      .section { font-size:12px; font-weight:700; fill:#334155; letter-spacing:0.5px; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1300" height="900" fill="#ffffff"/>
+
+  <text x="30" y="34" class="title">DataForge — Pipeline Architecture</text>
+  <text x="30" y="54" class="subtitle">Recipe (YAML) in → checkpointed, scored, split dataset out. Streaming mode overlaps collection / processing / generation.</text>
+
+  <!-- Recipe / config input -->
+  <rect x="30" y="80" width="170" height="60" rx="8" fill="#fef9c3" stroke="#ca8a04" stroke-width="1.5"/>
+  <text x="115" y="105" text-anchor="middle" class="label">recipe.yaml</text>
+  <text x="115" y="122" text-anchor="middle" class="sub">source / crawl / generation</text>
+  <text x="115" y="134" text-anchor="middle" class="sub">quality / export</text>
+
+  <!-- Discovery stage -->
+  <rect x="250" y="80" width="190" height="80" class="stage"/>
+  <text x="345" y="105" text-anchor="middle" class="label">1. Discovery</text>
+  <text x="345" y="123" text-anchor="middle" class="sub">sitemap.xml + robots.txt</text>
+  <text x="345" y="138" text-anchor="middle" class="sub">BFS fallback crawl</text>
+  <text x="345" y="153" text-anchor="middle" class="sub">SPA (Playwright) retry</text>
+
+  <path d="M200,110 H250" class="edge"/>
+  <path d="M440,120 H480" class="edge"/>
+
+  <!-- URL review (interactive only) -->
+  <rect x="480" y="80" width="180" height="80" fill="#fdf4ff" stroke="#a21caf" stroke-width="1.5" rx="8"/>
+  <text x="570" y="105" text-anchor="middle" class="label">URL review</text>
+  <text x="570" y="123" text-anchor="middle" class="sub">checklist / include-exclude</text>
+  <text x="570" y="138" text-anchor="middle" class="sub">interactive mode only</text>
+  <text x="570" y="153" text-anchor="middle" class="tiny">(recipes: include/exclude/max_urls)</text>
+
+  <!-- Streaming container -->
+  <rect x="230" y="210" width="760" height="270" class="stream-box"/>
+  <text x="250" y="232" class="section">STREAMING PHASE (stream: true) — concurrent worker pools, bounded queues</text>
+
+  <!-- Scrape pool -->
+  <rect x="260" y="250" width="210" height="100" class="stage"/>
+  <text x="365" y="275" text-anchor="middle" class="label">2. Scrape pool</text>
+  <text x="365" y="293" text-anchor="middle" class="sub">async httpx, retry + backoff</text>
+  <text x="365" y="308" text-anchor="middle" class="sub">robots Crawl-delay, rate limit</text>
+  <text x="365" y="323" text-anchor="middle" class="sub">HTML → Markdown</text>
+  <text x="365" y="338" text-anchor="middle" class="tiny">rate-limit bound</text>
+
+  <!-- Chunk pool -->
+  <rect x="510" y="250" width="210" height="100" class="stage"/>
+  <text x="615" y="275" text-anchor="middle" class="label">3. Chunk pool</text>
+  <text x="615" y="293" text-anchor="middle" class="sub">boilerplate removal</text>
+  <text x="615" y="308" text-anchor="middle" class="sub">token-aware chunking</text>
+  <text x="615" y="323" text-anchor="middle" class="sub">size + overlap (tiktoken)</text>
+  <text x="615" y="338" text-anchor="middle" class="tiny">CPU bound</text>
+
+  <!-- Generate pool -->
+  <rect x="760" y="250" width="210" height="100" class="stage"/>
+  <text x="865" y="275" text-anchor="middle" class="label">4. Generate pool</text>
+  <text x="865" y="293" text-anchor="middle" class="sub">LiteLLM (OpenAI / Anthropic /</text>
+  <text x="865" y="308" text-anchor="middle" class="sub">Groq / Together / Ollama)</text>
+  <text x="865" y="323" text-anchor="middle" class="sub">qa / instruction / conversation</text>
+  <text x="865" y="338" text-anchor="middle" class="tiny">cost / token bound, N workers</text>
+
+  <path d="M470,300 H510" class="edge"/>
+  <path d="M720,300 H760" class="edge"/>
+  <text x="490" y="292" text-anchor="middle" class="tiny">pages</text>
+  <text x="740" y="292" text-anchor="middle" class="tiny">chunks</text>
+
+  <!-- Bounded queue markers -->
+  <rect x="472" y="356" width="36" height="16" rx="3" fill="#fff" stroke="#94a3b8"/>
+  <text x="490" y="368" text-anchor="middle" class="tiny">queue</text>
+  <rect x="722" y="356" width="36" height="16" rx="3" fill="#fff" stroke="#94a3b8"/>
+  <text x="740" y="368" text-anchor="middle" class="tiny">queue</text>
+
+  <!-- Checkpoint DB -->
+  <rect x="300" y="400" width="620" height="60" class="stage-store"/>
+  <text x="610" y="424" text-anchor="middle" class="label">SQLite checkpoint (sessions.db)</text>
+  <text x="610" y="442" text-anchor="middle" class="sub">every URL / page / chunk / sample persisted as produced — idempotent resume, nothing re-fetched or re-billed</text>
+
+  <path d="M365,350 V400" class="edge-dash"/>
+  <path d="M615,350 V400" class="edge-dash"/>
+  <path d="M865,350 V400" class="edge-dash"/>
+
+  <!-- batch fallback note -->
+  <text x="250" y="500" class="tiny" fill="#64748b">Batch mode (stream: false): Discovery → Collection → Processing → Generation run strictly sequentially, each with a review checkpoint.</text>
+
+  <!-- Quality stage -->
+  <path d="M990,320 H1040" class="edge" transform="translate(0,0)"/>
+  <path d="M900,480 V520 H610 V540" class="edge"/>
+
+  <rect x="480" y="560" width="260" height="130" class="stage-batch"/>
+  <text x="610" y="584" text-anchor="middle" class="label">5. Quality (batch)</text>
+  <text x="610" y="602" text-anchor="middle" class="sub">heuristic length/refusal filter</text>
+  <text x="610" y="617" text-anchor="middle" class="sub">source-reference filter</text>
+  <text x="610" y="632" text-anchor="middle" class="sub">dedup across the session</text>
+  <text x="610" y="647" text-anchor="middle" class="sub">LLM judge, 1–5, fails closed</text>
+  <text x="610" y="666" text-anchor="middle" class="tiny">needs the whole sample set —</text>
+  <text x="610" y="679" text-anchor="middle" class="tiny">stays batch even in streaming mode</text>
+
+  <path d="M740,625 H790" class="edge"/>
+
+  <!-- Export stage -->
+  <rect x="790" y="560" width="230" height="130" class="stage-batch"/>
+  <text x="905" y="584" text-anchor="middle" class="label">6. Export (batch)</text>
+  <text x="905" y="602" text-anchor="middle" class="sub">group-aware train/val/test split</text>
+  <text x="905" y="617" text-anchor="middle" class="sub">(page / url / chunk, seeded)</text>
+  <text x="905" y="636" text-anchor="middle" class="sub">JSONL · Parquet · CSV</text>
+  <text x="905" y="651" text-anchor="middle" class="sub">HuggingFace Hub · Kaggle</text>
+  <text x="905" y="670" text-anchor="middle" class="tiny">lineage: page_id/chunk_id/url</text>
+
+  <path d="M905,690 V730" class="edge"/>
+
+  <rect x="770" y="730" width="270" height="70" rx="8" fill="#ecfeff" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="905" y="754" text-anchor="middle" class="label">dataset_{train,validation,test}.*</text>
+  <text x="905" y="772" text-anchor="middle" class="sub">ChatML-ready for Unsloth / Axolotl / TRL / 🤗 datasets</text>
+  <text x="905" y="787" text-anchor="middle" class="tiny">no page's paraphrases span two splits</text>
+
+  <!-- Resume loop -->
+  <path d="M300,430 C120,430 120,650 480,610" class="edge-dash"/>
+  <text x="140" y="560" class="tiny" transform="rotate(-90 140 560)">dataforge resume &lt;id&gt;</text>
+
+  <!-- Legend -->
+  <g transform="translate(30,820)">
+    <text x="0" y="0" class="section">LEGEND</text>
+    <rect x="0" y="14" width="18" height="14" class="stage"/>
+    <text x="26" y="26" class="tiny">streaming / stage agent</text>
+    <rect x="220" y="14" width="18" height="14" class="stage-batch"/>
+    <text x="246" y="26" class="tiny">batch-only stage (needs full sample set)</text>
+    <rect x="540" y="14" width="18" height="14" class="stage-store"/>
+    <text x="566" y="26" class="tiny">persisted state (SQLite)</text>
+    <line x1="760" y1="21" x2="800" y2="21" class="edge"/>
+    <text x="808" y="26" class="tiny">data flow</text>
+    <line x1="900" y1="21" x2="940" y2="21" class="edge-dash"/>
+    <text x="948" y="26" class="tiny">checkpoint / resume</text>
+  </g>
+</svg>
