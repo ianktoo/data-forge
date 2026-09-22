@@ -72,7 +72,11 @@ Layered filters, cheapest first:
    answer.
 2. **Source-reference filter** — rejects samples that talk about "the
    document" or "the passage" instead of the subject. Free, always on.
-3. **Deduplication** across the whole session.
+3. **Deduplication** — exact full-content match across the whole session,
+   plus a near-duplicate check (token-overlap/Jaccard similarity,
+   `quality.near_dup_threshold`) scoped to samples from the same chunk,
+   since `n_per_chunk` paraphrases are exactly what an exact-hash check
+   cannot catch.
 4. **LLM judge** (`quality.llm_judge`, on by default in recipes) — reads
    each sample next to the chunk it came from and rejects anything wrong,
    unsupported, or scoring below `min_judge_score` (1–5). Roughly doubles

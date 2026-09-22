@@ -69,6 +69,7 @@ can be four lines long.
 | `quality.model` | *(generation model)* | Override the LLM used by the judge |
 | `quality.llm_judge` | `true` | Check each sample against its source chunk with an LLM; fails closed |
 | `quality.min_judge_score` | `4` | Judge score (1–5) required to keep a sample |
+| `quality.near_dup_threshold` | `0.85` | Token-overlap (Jaccard) similarity above which two samples from the same chunk are rejected as near-duplicate paraphrases |
 | `export.targets` | `[local]` | Any of `local`, `huggingface`, `kaggle` |
 | `export.approved_only` | `true` | Export only samples that passed the threshold |
 | `export.hf_repo_id` | `""` | Required when targeting `huggingface` |

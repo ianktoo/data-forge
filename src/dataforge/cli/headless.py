@@ -72,6 +72,7 @@ async def run_recipe(recipe_path: str | Path, *, dry_run: bool = False) -> int:
         quality_threshold=recipe.quality.threshold,
         quality_llm_judge=recipe.quality.llm_judge,
         quality_min_judge_score=recipe.quality.min_judge_score,
+        quality_near_dup_threshold=recipe.quality.near_dup_threshold,
         generation_model=recipe.generation.model,
         quality_model=recipe.quality.model,
         max_llm_calls=recipe.generation.max_llm_calls,
