@@ -32,7 +32,7 @@ from urllib.parse import urlparse
 import httpx
 import yaml
 
-from dataforge.collectors.http import USER_AGENT
+from dataforge.collectors.http import USER_AGENT, ssl_context
 
 HERE = Path(__file__).parent
 RESULTS = HERE.parent / "results"
@@ -43,13 +43,32 @@ def load_sites() -> dict:
     return yaml.safe_load((HERE / "sites.yaml").read_text(encoding="utf-8"))
 
 
+# Wording of bot-challenge / access-request pages, matched against visible text
+# only: a commented-out reCAPTCHA <script> on a normal page (KRA) is not a block.
+_CHALLENGE = re.compile(
+    r"captcha|request access|unblock|verify you are (a )?human|just a moment|access denied",
+    re.I,
+)
+
+
+def _site(host: str) -> str:
+    """example.com and www.example.com are the same site."""
+    return host.lower().removeprefix("www.")
+
+
+def _visible_text(html: str) -> str:
+    html = re.sub(r"(?s)<!--.*?-->", " ", html)
+    html = re.sub(r"(?is)<(script|style|noscript)\b.*?</\1>", " ", html)
+    return re.sub(r"<[^>]+>", " ", html)[:50000]
+
+
 def preflight(seed: str, snapshot_dir: Path) -> dict:
     """robots.txt + seed fetch, exactly as DataForge would identify itself."""
     parsed = urlparse(seed)
     base = f"{parsed.scheme}://{parsed.netloc}"
     headers = {"User-Agent": USER_AGENT}
     out: dict = {"checked_at": datetime.now(UTC).isoformat(), "user_agent": USER_AGENT}
-    with httpx.Client(headers=headers, follow_redirects=True, timeout=30) as client:
+    with httpx.Client(headers=headers, follow_redirects=True, timeout=30, verify=ssl_context()) as client:
         robots = client.get(f"{base}/robots.txt")
         out["robots_status"] = robots.status_code
         if robots.status_code == 200:
@@ -68,9 +87,9 @@ def preflight(seed: str, snapshot_dir: Path) -> dict:
         reasons.append(f"robots.txt returned {out['robots_status']}")
     if out["seed_status"] in (401, 403, 429):
         reasons.append(f"seed returned {out['seed_status']}")
-    if final_host and final_host != parsed.netloc:
+    if final_host and _site(final_host) != _site(parsed.netloc):
         reasons.append(f"seed redirected to another host ({final_host})")
-    if re.search(r"captcha|unblock|request access", seed_resp.text[:20000], re.I):
+    if _CHALLENGE.search(_visible_text(seed_resp.text)):
         reasons.append("seed page looks like a bot challenge")
     out["blocked"] = bool(reasons)
     out["block_reasons"] = reasons

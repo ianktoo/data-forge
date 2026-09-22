@@ -57,9 +57,35 @@ sites:
         dual licensed under the PSF License Version 2 and Zero-Clause BSD.
         Attribute "Copyright Python Software Foundation" when publishing the dataset.
 
+  - id: iantoo-space
+    topic: Personal / portfolio site
+    recipe: recipes/iantoo-space.yaml
+    terms_url: https://www.iantoo.space/privacy
+    content_status: Owned by the project author; crawled with the owner's consent
+    automated_check: "robots.txt allows all except /api/; sitemap lists 8 URLs"
+    terms_review:
+      reviewed_by: Ian Too
+      reviewed_on: 2026-09-22
+      outcome: >
+        Site owner is the project author and consents to crawling it for this
+        benchmark. /privacy and /contact are excluded from the crawl.
+
 # Considered and excluded. Kept here so the paper's access table is generated
 # from the same source as the runs.
 excluded:
+  - id: kra
+    topic: Tax administration (Kenya Revenue Authority)
+    url: https://www.kra.go.ke/
+    reason: >
+      Terms prohibit it. The Website Terms and Conditions
+      (images/Corporate_Website_Terms_Conditions.pdf) expressly restrict
+      "Engaging in any data mining, data harvesting, data extracting or any other
+      similar activity in relation to this Website", and license the material
+      only "for purposes of viewing". robots.txt returns 404, which by
+      convention permits crawling: the clearest case that robots.txt is not
+      permission.
+    checked_on: 2026-09-22
+
   - id: faa-uas
     topic: Small drones / 14 CFR Part 107
     url: https://www.faa.gov/uas/

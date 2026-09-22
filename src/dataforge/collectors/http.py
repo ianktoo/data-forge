@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import functools
+import ssl
 from collections import OrderedDict
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -23,6 +25,24 @@ log = get_logger("http")
 
 # Identifies the crawler to site operators: real version and a working project URL.
 USER_AGENT = f"DataForge/{__version__} (+https://github.com/ianktoo/data-forge; research bot)"
+
+@functools.cache
+def ssl_context() -> ssl.SSLContext:
+    """TLS context that verifies against the operating system's trust store.
+
+    Many sites send an incomplete certificate chain (leaf only, no
+    intermediate) or chain to a root missing from certifi's bundle. Browsers
+    cope; plain Python did not, so e.g. www.uonbi.ac.ke and www.health.go.ke
+    failed with CERTIFICATE_VERIFY_FAILED. truststore (as pip uses) verifies
+    with the OS store, which on Windows and macOS also fetches missing
+    intermediates. Verification is never disabled.
+    """
+    try:
+        import truststore
+    except ImportError:
+        return ssl.create_default_context()
+    return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+
 
 _HEADERS = {
     "User-Agent": USER_AGENT,
@@ -97,6 +117,7 @@ class HTTPClient:
     async def __aenter__(self) -> HTTPClient:
         self._client = httpx.AsyncClient(
             headers=_HEADERS,
+            verify=ssl_context(),
             timeout=_TIMEOUT,
             follow_redirects=True,
             http2=True,

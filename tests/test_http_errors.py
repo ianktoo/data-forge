@@ -310,3 +310,14 @@ def test_pipeline_context_shares_one_rate_limiter(tmp_settings):
         settings=tmp_settings, custom_system_prompt="", n_per_chunk=1,
     )
     assert ctx.get_rate_limiter() is ctx.get_rate_limiter()
+
+
+def test_tls_context_always_verifies():
+    """The OS-trust-store context must never relax verification."""
+    import ssl
+
+    from dataforge.collectors.http import ssl_context
+
+    ctx = ssl_context()
+    assert ctx.verify_mode == ssl.CERT_REQUIRED
+    assert ctx.check_hostname is True

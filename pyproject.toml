@@ -30,6 +30,7 @@ dependencies = [
     "jinja2>=3.1",
     "pyyaml>=6.0",
     "keyring>=24",
+    "truststore>=0.10",          # verify TLS with the OS trust store (incomplete chains, see collectors/http.py)
     # robotparser is part of Python stdlib (urllib.robotparser) — no extra package needed
 ]
 
