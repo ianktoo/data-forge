@@ -12,13 +12,18 @@ sites:
   - id: ready-gov
     topic: Disaster preparedness
     recipe: recipes/ready-gov.yaml
-    terms_url: https://www.fema.gov/about/privacy-policy   # linked from Ready.gov's footer; ready.gov/website-policies is 404, and fema.gov returns 403 to automated fetches, so open it in a browser
+    terms_url: https://www.fema.gov/about/website-information   # reuse terms; Ready.gov is listed there as a FEMA domain
     content_status: U.S. federal government work; text generally public domain (17 U.S.C. 105)
     automated_check: "robots.txt allows content pages; no Crawl-delay"
     terms_review:
-      reviewed_by: ""
-      reviewed_on: ""          # YYYY-MM-DD, filled in by the reviewer
-      outcome: ""              # e.g. "text reuse permitted; images excluded"
+      reviewed_by: Ian Too
+      reviewed_on: 2026-09-22
+      outcome: >
+        FEMA "Website Information" page: "Most material on FEMA.gov is free of
+        copyright and may be copied and distributed without permission"; licensed
+        photos/graphics excepted. It lists Ready.gov as a FEMA-owned domain but does
+        not explicitly extend the reuse terms to it. No statement on automated access.
+        Text only is used; images are not collected.
 
   - id: uscis
     topic: Immigration (green card, naturalization)
@@ -27,31 +32,47 @@ sites:
     content_status: U.S. federal government work; policy notes some images are licensed and NOT public domain (text only is used)
     automated_check: "robots.txt Crawl-delay: 10 (enforced); disallows data-hub exports"
     terms_review:
-      reviewed_by: ""
-      reviewed_on: ""
-      outcome: ""
+      reviewed_by: Ian Too
+      reviewed_on: 2026-09-22
+      outcome: >
+        Website Policies: "Information presented on this WWW site is considered
+        public information and may be distributed or copied. Use of appropriate
+        byline/photo/image credit is requested." Some images are licensed and not
+        public domain; images are not collected. No statement on crawling beyond
+        robots.txt (Crawl-delay: 10, enforced).
 
   - id: faa-uas
     topic: Small drones / 14 CFR Part 107
     recipe: recipes/faa-uas.yaml
     terms_url: https://www.faa.gov/web_policies
-    content_status: U.S. federal government work; policy page text could not be extracted automatically, so read it manually
+    content_status: U.S. federal government work (17 U.S.C. 105); no explicit reuse statement found
     automated_check: "robots.txt allows /uas/; many /uas/ links are PDF/DOCX (skipped by DataForge)"
     terms_review:
       reviewed_by: ""
-      reviewed_on: ""
-      outcome: ""
+      reviewed_on: ""          # PENDING owner decision, see outcome
+      outcome: >
+        No reuse or copyright statement found. /web_policies/disclaimer is a
+        government-system banner: "provided for U.S. Government-authorized use only.
+        Unauthorized or improper use of this system is prohibited." faa.gov returned
+        403 to two of three automated policy-page fetches. Content is a U.S. federal
+        work (17 U.S.C. 105), but whether low-volume automated collection counts as
+        authorized use is a judgement for the project owner.
 
   - id: python-docs
     topic: Technical documentation (Python tutorial)
     recipe: recipes/python-docs.yaml
     terms_url: https://docs.python.org/3/license.html
-    content_status: Documentation under the PSF License Version 2; code examples under Zero-Clause BSD
+    content_status: Documentation under the PSF License Version 2; code examples dual licensed PSF-2.0 / Zero-Clause BSD
     automated_check: "robots.txt allows /3/; sitemap lists only version landing pages (crawl fallback)"
     terms_review:
-      reviewed_by: ""
-      reviewed_on: ""
-      outcome: ""
+      reviewed_by: Ian Too
+      reviewed_on: 2026-09-22
+      outcome: >
+        "History and License": documentation is under the PSF License Version 2,
+        which permits reproduction and derivative works provided the PSF copyright
+        notice is retained; since Python 3.8.6, code examples in the documentation are
+        dual licensed under the PSF License Version 2 and Zero-Clause BSD.
+        Attribute "Copyright Python Software Foundation" when publishing the dataset.
 
 # Considered and excluded. Kept here so the paper's access table is generated
 # from the same source as the runs.
