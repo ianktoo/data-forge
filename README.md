@@ -37,7 +37,7 @@ Parquet and CSV, ready for Unsloth, Axolotl, TRL or HuggingFace `datasets`.
 | **Unattended by default** | `dataforge run` needs no prompts. Cron it, or drive it interactively with `dataforge` when exploring a new site. |
 | **Streaming pipeline** | Generation starts on the first page instead of waiting for the last one, so the LLM and the crawler work at the same time. |
 | **Resumable, not restartable** | Every page, chunk and sample is checkpointed to SQLite. Interrupt a 5,000-page crawl and resume exactly where it stopped — nothing is re-fetched or re-billed. |
-| **Any model** | OpenAI, Anthropic, Groq, Together, or fully local via Ollama — so sensitive content never has to leave your machine. |
+| **Any model** | OpenAI, Anthropic, Google, Groq, Together, or fully local via Ollama — so sensitive content never has to leave your machine. |
 | **Leak-free by design** | Train/validation/test splits are page-aware, not sample-aware, so paraphrases of the same source never land on both sides of a split. |
 | **Polite by construction** | `robots.txt` honoured, per-domain rate limiting, URL sanitisation, and PII/copyright guidance built in. |
 
