@@ -41,7 +41,8 @@ Fixes from the first pipeline run driven through the MCP server
 - `docs/TECHNICAL.tex`: the agent-integration section records the first real
   MCP-driven run and the inspection-tool failures it exposed. The title page
   now carries the report's Zenodo DOI, 10.5281/zenodo.22906072, under the
-  author's name (linked, and in the PDF metadata).
+  author's name (linked, and in the PDF metadata), and is labelled
+  "Technical Note, 2026".
 
 ## [2.4.0] - 2026-09-22
 
