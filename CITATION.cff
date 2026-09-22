@@ -1,0 +1,55 @@
+cff-version: 1.2.0
+title: >-
+  DataForge: A Streaming, Leak-Aware Pipeline for Synthetic
+  LLM Fine-Tuning Datasets
+message: >-
+  If you use this software or refer to this work, please cite
+  the technical note below.
+type: software
+authors:
+  - given-names: Ian K.
+    family-names: Too
+    orcid: 'https://orcid.org/0009-0000-4888-1941'
+    affiliation: William Jessup University
+repository-code: 'https://github.com/ianktoo/data-forge'
+version: 2.4.1
+date-released: '2026-09-22'
+abstract: >-
+  DataForge is an open-source pipeline for building synthetic
+  instruction-tuning datasets from websites. It honors HTTP
+  failure semantics and robots.txt Crawl-delay during
+  collection, checkpoints every artifact so long runs are
+  resumable, overlaps collection and generation through
+  bounded queues, bounds unattended LLM spend with an explicit
+  budget, and performs group-aware train/test splitting so
+  samples generated from the same source page cannot appear on
+  both sides of a split and inflate held-out evaluation
+  scores.
+keywords:
+  - synthetic data generation
+  - instruction tuning
+  - dataset construction
+  - data leakage
+  - group-aware splitting
+  - LLM-as-judge
+  - web scraping
+  - Model Context Protocol
+  - large language models
+# The software is MIT-licensed (see LICENSE); the technical note is CC BY 4.0.
+license: MIT
+preferred-citation:
+  type: report
+  title: >-
+    DataForge: A Streaming, Leak-Aware Pipeline for Synthetic
+    LLM Fine-Tuning Datasets
+  authors:
+    - given-names: Ian K.
+      family-names: Too
+      orcid: 'https://orcid.org/0009-0000-4888-1941'
+      affiliation: William Jessup University
+  year: 2026
+  publisher:
+    name: Zenodo
+  doi: 10.5281/zenodo.22906072
+  url: 'https://doi.org/10.5281/zenodo.22906072'
+  license: CC-BY-4.0

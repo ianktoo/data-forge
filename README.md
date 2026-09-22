@@ -201,15 +201,23 @@ If you use DataForge-generated datasets in a publication or project,
 attribution is appreciated but not required:
 
 ```
-Ian Too. DataForge (2026). https://github.com/ianktoo/data-forge
+Too, I. K. (2026). DataForge: A Streaming, Leak-Aware Pipeline for Synthetic
+LLM Fine-Tuning Datasets (Technical Note). Zenodo.
+https://doi.org/10.5281/zenodo.22906072
 ```
 
 ```bibtex
-@software{dataforge2026,
-  author  = {Ian Too},
-  title   = {DataForge: LLM Data Pipeline},
-  year    = {2026},
-  url     = {https://github.com/ianktoo/data-forge},
-  license = {MIT}
+@techreport{too2026dataforge,
+  author      = {Too, Ian K.},
+  title       = {{DataForge}: A Streaming, Leak-Aware Pipeline for Synthetic
+                 {LLM} Fine-Tuning Datasets},
+  type        = {Technical Note},
+  institution = {Zenodo},
+  year        = {2026},
+  doi         = {10.5281/zenodo.22906072},
+  url         = {https://doi.org/10.5281/zenodo.22906072}
 }
 ```
+
+GitHub's "Cite this repository" button reads the same details from
+[`CITATION.cff`](CITATION.cff).
