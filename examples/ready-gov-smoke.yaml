@@ -1,0 +1,136 @@
+# DataForge recipe - configuration as code.
+#
+#   dataforge run this-file.yaml --dry-run   # validate + preview, runs nothing
+#   dataforge run this-file.yaml             # execute end-to-end, no prompts
+#
+# Only `name` and `source.urls` (or `source.url_file`) are required; everything
+# else falls back to your .env / global config. Commit this file alongside your
+# dataset so the run is reproducible and reviewable.
+#
+# The filters below were checked against the live sitemaps: Ready.gov publishes
+# 371 URLs of which 225 are English, and this recipe keeps ~138 of them.
+
+version: 1
+name: ready-gov-smoke
+
+# Overlap collection, processing and generation. On a large site this is the
+# difference between the LLM idling through the whole crawl and it working from
+# the first page onward.
+stream: true
+
+output_dir: ./output/smoke
+
+source:
+  urls:
+    - https://www.ready.gov/sitemap.xml
+
+  # ── Language ────────────────────────────────────────────────────────────────
+  # Ready.gov and FEMA serve English from the root (/floods, /cybersecurity) and
+  # translations under a locale prefix (/es/terremotos, /fr/avalanche). 'en'
+  # keeps root-level pages and drops every locale-prefixed one - 146 of
+  # Ready.gov's 371 sitemap URLs are Spanish. Use 'es' or 'fr' to invert it.
+  language: en
+
+  # ── Scoping ─────────────────────────────────────────────────────────────────
+  # NOTE: Ready.gov keeps its hazard content at the ROOT (/floods, /earthquakes,
+  # /cybersecurity) - there is no /hazard/ prefix - so an `include` list of path
+  # prefixes would filter out exactly the pages you want. Here we take the whole
+  # English site and subtract the noise instead.
+  #
+  # Plain text is a substring match; prefix with 're:' for a regular expression.
+  exclude:
+    - /node/                     # Drupal internal node ids, duplicates of real pages
+    - /sites/default/files/      # file store: PDFs and images, not article content
+    - /press-release
+    - re:toolkit                 # campaign asset bundles, not prose
+    - re:webinar
+    - re:social-media
+    - re:-old$                   # superseded drafts left in the sitemap
+    - /calendar
+    - /accessibility
+    - /privacy
+    - re:^https?://[^/]+/$       # the bare homepage: nav links, no article body
+
+  # Hard cap after filtering. 0 means no cap. Start small to check cost per page
+  # before opening it up.
+  max_urls: 5
+
+  # Leave robots.txt enforcement on unless you have explicit written permission.
+  ignore_robots: false
+
+  # Skip URLs already scraped by an earlier session against the same database.
+  skip_known: false
+
+crawl:
+  # DataForge automatically slows to a site's robots.txt Crawl-delay when that
+  # is stricter than this value. FEMA.gov declares Crawl-delay: 15 (one request
+  # every 15 seconds), so a FEMA crawl is paced by that, not by this setting.
+  rate_limit: 2.0
+  max_pages: 500
+  max_crawl_pages: 50          # only used when a site has no reachable sitemap
+  max_crawl_depth: 3
+
+generation:
+  format: qa                   # qa | instruction | conversation | custom
+  goal: >
+    Accurate question-and-answer pairs about U.S. disaster preparedness,
+    covering hazard-specific guidance, emergency kits and family planning,
+    grounded strictly in official Ready.gov and FEMA guidance.
+  n_per_chunk: 2
+  # model: openai/gpt-4o-mini  # omit to use your configured default
+  # system_prompt: "..."       # required only when format: custom
+  chunk_size: 512
+  chunk_overlap: 64
+
+quality:
+  # Cheap length/refusal heuristic, 0.0-1.0. On its own it passes almost any
+  # real answer, so treat it as a pre-filter, not the quality bar.
+  threshold: 0.5
+
+  # The actual quality bar. An LLM reads each sample next to the chunk it came
+  # from and rejects anything not supported by that text, anything that talks
+  # about "the document" instead of the subject, or anything scoring below
+  # min_judge_score. Costs about one extra call per chunk - roughly the same
+  # again as generation. Samples it cannot score are rejected, never passed.
+  llm_judge: true
+  min_judge_score: 4           # 1-5
+  # model: openai/gpt-4o-mini  # judge model; defaults to the generation model
+
+export:
+  targets: [local]             # local | huggingface | kaggle (any combination)
+  approved_only: true
+
+  # ── Train / validation / test split ─────────────────────────────────────────
+  # Omit this block to get one dataset.jsonl and split it yourself later.
+  #
+  # If you do split, group_by matters more than the ratios. Several samples are
+  # generated per chunk and several chunks per page, so every sample from one
+  # page is a paraphrase of the same source text. A random per-sample split puts
+  # those near-duplicates on both sides, the model answers eval questions from
+  # text it saw in training, and the score comes out inflated. 'page' keeps each
+  # source page wholly inside one split. Use 'none' only if you know why.
+  split:
+    train: 0.8
+    validation: 0.1
+    test: 0.1
+    group_by: page             # page | url | chunk | none
+    seed: 42                   # same seed -> same split, every run
+  # hf_repo_id: your-org/ready-gov-preparedness-qa
+  # hf_private: true
+  # kaggle_slug: your-user/ready-gov-preparedness-qa
+  # kaggle_title: Ready.gov Preparedness QA
+
+# ── Adding FEMA.gov ───────────────────────────────────────────────────────────
+# FEMA's sitemap is an INDEX of 133 sub-sitemaps totalling roughly 66,500 URLs,
+# and its robots.txt asks for one request every 15 seconds. Crawling it broadly
+# is not practical - scope it hard before adding it:
+#
+#   source:
+#     urls:
+#       - https://www.ready.gov/sitemap.xml
+#       - https://www.fema.gov/sitemap.xml
+#     language: en
+#     include:
+#       - /emergency-managers/individuals-communities
+#       - /disaster/how-to-help
+#     max_urls: 200

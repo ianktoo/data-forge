@@ -110,17 +110,26 @@ class GeneratorAgent(BaseAgent):
         return self.ctx
 
     def _persist(self, sample: GeneratedSample) -> int | None:
-        with open_session(self.ctx.settings.db_path) as db:
-            row = SyntheticSample(
-                session_id=self.ctx.session_id,
-                chunk_id=sample.chunk_id,
-                format=sample.format,
-                system_prompt=sample.system_prompt,
-                messages_json=json.dumps(sample.messages, ensure_ascii=False),
-                quality_score=0.0,
-                approved=False,
-            )
-            db.add(row)
-            db.commit()
-            db.refresh(row)
-            return row.id
+        return persist_sample(self.ctx.settings.db_path, self.ctx.session_id, sample)
+
+
+def persist_sample(db_path, session_id: str, sample: GeneratedSample) -> int | None:
+    """Write one generated sample and return its row id.
+
+    Module-level so the streaming pipeline can persist from its own worker
+    pool without constructing a GeneratorAgent.
+    """
+    with open_session(db_path) as db:
+        row = SyntheticSample(
+            session_id=session_id,
+            chunk_id=sample.chunk_id,
+            format=sample.format,
+            system_prompt=sample.system_prompt,
+            messages_json=json.dumps(sample.messages, ensure_ascii=False),
+            quality_score=0.0,
+            approved=False,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row.id

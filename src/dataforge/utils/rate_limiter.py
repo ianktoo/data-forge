@@ -45,6 +45,7 @@ class RateLimiter:
 
     def __init__(self, default_rps: float = 2.0) -> None:
         self._default_rps = default_rps
+        self.default_rps = default_rps   # read-only view for callers tightening a domain
         self._buckets: dict[str, _Bucket] = defaultdict(self._make_bucket)
 
     def _make_bucket(self) -> _Bucket:

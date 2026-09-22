@@ -38,6 +38,11 @@ class PipelineContext:
 
     # Quality control
     quality_threshold: float = 0.5   # min score to approve a sample
+    # LLM judge: checks each sample against its source chunk for grounding and
+    # for referring to the source. Off by default for the interactive wizard
+    # (it costs extra calls); recipes turn it on by default.
+    quality_llm_judge: bool = False
+    quality_min_judge_score: int = 4   # 1-5; samples below this are rejected
 
     # Per-session model overrides (empty string = use settings.llm_model)
     generation_model: str = ""

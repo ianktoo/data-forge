@@ -1,0 +1,441 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{times}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{amsmath}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue,
+  citecolor=blue,
+  pdftitle={DataForge: A Streaming, Leak-Aware Pipeline for Synthetic LLM Fine-Tuning Datasets},
+  pdfauthor={Ian Too}
+}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{gray!8},
+  frame=single,
+  breaklines=true,
+  columns=fullflexible,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray}
+}
+
+\title{DataForge: A Streaming, Leak-Aware Pipeline\\
+for Synthetic LLM Fine-Tuning Datasets}
+\author{Ian Too}
+\date{2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Fine-tuning a language model on a narrow domain requires paired
+instruction/response data that usually does not exist for that domain.
+The common workaround --- crawl a site, chunk the text, and prompt a
+stronger model to synthesize question--answer pairs from each chunk ---
+is easy to prototype and easy to get subtly wrong. We describe
+\textsc{DataForge}, an open-source pipeline that treats each of those
+failure modes as a first-class design constraint rather than an
+afterthought: HTTP failure semantics are honored (transient vs.\
+permanent status codes, \texttt{Retry-After}, \texttt{robots.txt}
+\texttt{Crawl-delay}); every artifact (page, chunk, sample) is
+checkpointed so a multi-hour run is resumable rather than restartable;
+collection and generation are overlapped through bounded, backpressured
+queues to avoid idling an LLM behind a slow crawler; and --- the
+concern motivating this document --- dataset splitting is
+group-aware, so that near-duplicate paraphrases generated from the same
+source page cannot appear on both sides of a train/test boundary and
+silently inflate held-out evaluation scores. We describe the system's
+architecture, the reasoning behind each design decision, and situate it
+relative to prior work in web-scale data collection and synthetic
+instruction-tuning data generation.
+\end{abstract}
+
+\tableofcontents
+
+\section{Motivation}
+
+Instruction-tuning and domain adaptation of large language models (LLMs)
+both benefit from data that reflects the target domain's vocabulary,
+structure, and factual content \cite{wei2022finetuned, ouyang2022training}.
+For many domains --- an organization's internal documentation, a
+government agency's public guidance, a product's help center --- no
+labeled instruction dataset exists, but a large corpus of prose does, in
+the form of a website. \emph{Synthetic instruction generation} --- using
+a capable model to read a passage and generate question--answer or
+instruction--response pairs grounded in it --- has become a standard way
+to bridge that gap \cite{wang2023selfinstruct, taori2023alpaca,
+xu2023wizardlm}.
+
+In practice, building this pipeline from scratch surfaces problems that
+are easy to underestimate:
+
+\begin{enumerate}[leftmargin=1.5em]
+  \item \textbf{Web collection is not a solved sub-problem.} Real sites
+    return a mix of transient errors (rate limiting, momentary 5xx),
+    permanent errors (404, 403), and politeness constraints
+    (\texttt{robots.txt} \texttt{Crawl-delay}) that a naive
+    \texttt{requests.get} loop conflates.
+  \item \textbf{Generation is the expensive, slow stage.} If collection
+    and generation run strictly sequentially, the LLM --- the most
+    expensive and highest-latency component --- sits idle while
+    thousands of pages download.
+  \item \textbf{A crawl-then-fail run is costly to repeat.} A pipeline
+    that is not checkpointed forces a full re-crawl (and re-billing of
+    every LLM call already made) after any interruption.
+  \item \textbf{The resulting dataset violates the i.i.d.\ assumption
+    that train/test splitting relies on.} Several synthetic samples are
+    generated per chunk, and several chunks come from one page, so
+    samples are not independent draws --- they cluster by source
+    document.
+\end{enumerate}
+
+The fourth point is the one most likely to silently corrupt a result
+rather than merely produce an error message, so we treat it in detail
+in Section~\ref{sec:leakage}.
+
+\section{System overview}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\textwidth]{architecture.svg}
+  \caption{DataForge pipeline architecture. A recipe (YAML) or the
+  interactive wizard drives six stages. The first four form a
+  producer/consumer chain that runs either strictly sequentially
+  (batch mode) or as concurrent worker pools connected by bounded
+  queues (streaming mode). Quality scoring and export remain batch
+  stages because deduplication and group-aware splitting require
+  visibility into the full sample set.}
+  \label{fig:architecture}
+\end{figure}
+
+\noindent\textit{Note: most LaTeX distributions render SVG only via a
+converter (e.g.\ \texttt{inkscape} or \texttt{pdf2svg} through
+\texttt{svg} package, or a build-time \texttt{svg}$\to$\texttt{pdf}
+step). Compile with \texttt{-{}-shell-escape} and the \texttt{svg}
+package, or pre-convert \texttt{architecture.svg} to
+\texttt{architecture.pdf} and reference that instead.}
+
+DataForge is organized as six stages (Figure~\ref{fig:architecture}):
+Discovery, Collection, Processing, Generation, Quality, and Export. A
+run is specified either by a YAML \emph{recipe} --- a declarative,
+version-controllable description of every stage's parameters --- or by
+an interactive terminal wizard for exploratory use. The recipe format
+is intentionally close to configuration-as-code practice in CI/CD
+systems: an unknown key fails validation immediately with its exact
+field path, rather than being silently ignored, and a recipe run
+returns a distinct exit code for each class of outcome (invalid recipe,
+zero URLs after filtering, paused, zero approved samples), so it
+composes with a scheduler or CI pipeline without a human watching the
+log.
+
+\subsection{Discovery}
+Candidate URLs are enumerated from \texttt{sitemap.xml} (including
+sitemap indexes) and any \texttt{Sitemap:} directive in
+\texttt{robots.txt}, before a single content page is fetched. Sites
+without a usable sitemap fall back to a breadth-first crawl bounded by
+depth and page count. Pages that look JavaScript-rendered (few raw
+links relative to body size) are retried through a headless browser
+(Playwright) when available. In interactive use, discovery is followed
+by a review step --- substring, glob, or regex filtering plus per-URL
+selection --- that a recipe replaces declaratively with
+\texttt{source.include} / \texttt{source.exclude} / \texttt{source.max\_urls}.
+
+\subsection{Collection}
+An async HTTP client applies per-domain rate limiting and
+\texttt{robots.txt} compliance. The central design decision here is
+that \emph{not all non-200 responses mean the same thing}:
+
+\begin{itemize}[leftmargin=1.5em]
+  \item Transient statuses (\texttt{429}, \texttt{500}, \texttt{502},
+    \texttt{503}, \texttt{504}) are retried with exponential backoff,
+    honoring a server-supplied \texttt{Retry-After} header
+    (delta-seconds or HTTP-date) capped at 120 seconds so a single slow
+    URL cannot stall the run.
+  \item Permanent statuses (\texttt{404}, \texttt{403}) are accepted as
+    final and not retried, preserving crawl budget.
+  \item A declared \texttt{robots.txt} \texttt{Crawl-delay} lowers the
+    effective rate limit automatically; it can only make a crawl
+    \emph{slower} than the configured rate, never faster, so an
+    operator's explicit rate-limit ceiling is never silently overridden
+    upward.
+\end{itemize}
+
+A page is marked scraped only after a successful fetch, so a resumed
+session retries exactly the URLs that previously failed, and none that
+already succeeded.
+
+\subsection{Processing}
+Retrieved HTML is converted to Markdown, boilerplate (navigation,
+footers, cookie notices) is stripped, and the remaining text is split
+into overlapping, token-bounded chunks sized against the target model's
+tokenizer (via \texttt{tiktoken}). Chunk size and overlap are
+recipe-configurable; overlap exists so that a fact spanning a chunk
+boundary is not lost to the generation stage entirely.
+
+\subsection{Generation}
+Each chunk is passed to an LLM (via LiteLLM, giving provider portability
+across OpenAI, Anthropic, Groq, Together AI, or a local Ollama model) with
+a format-specific prompt template --- \texttt{qa},
+\texttt{instruction}, \texttt{conversation}, or a user-supplied custom
+system prompt --- and a recipe-level natural-language \texttt{goal}
+string that steers topical relevance without hand-writing a full prompt
+per domain. $n$ samples are requested per chunk (recipe:
+\texttt{generation.n\_per\_chunk}), which is the direct source of the
+non-independence discussed in Section~\ref{sec:leakage}.
+
+\subsection{Quality}
+Samples pass through layered filters of increasing cost, evaluated in
+this order so that the LLM judge (the expensive step) never runs on
+samples that a free filter would reject:
+
+\begin{enumerate}[leftmargin=1.5em]
+  \item A heuristic pre-filter on answer/question length and refusal
+    phrases.
+  \item A source-reference filter that rejects samples referring to
+    ``the document'' or ``the passage'' rather than the subject matter
+    --- a model trained on such samples learns to cite a source it will
+    never have access to at inference time.
+  \item Deduplication across the full session.
+  \item An LLM judge that reads each sample alongside its source chunk
+    and scores it 1--5 on groundedness, rejecting anything below a
+    configurable threshold. This step \emph{fails closed}: a sample the
+    judge cannot score (malformed output, API error, missing key) is
+    rejected rather than passed through by default.
+\end{enumerate}
+
+The judge is empirically reliable on unambiguous failures (contradicted
+facts, unsupported claims, source self-reference) and less reliable near
+the threshold on answers that are vague but not technically wrong ---
+consistent with known limitations of LLM-as-judge evaluation
+\cite{zheng2023judging}. Operators who prefer precision over recall can
+raise the score threshold.
+
+\subsection{Export}
+Approved samples are written as JSONL, Parquet, and CSV, and optionally
+published to the HuggingFace Hub or Kaggle. Every record carries
+\texttt{page\_id}, \texttt{chunk\_id}, \texttt{chunk\_index}, and
+\texttt{source\_url} regardless of whether a split is requested, because
+that lineage is what makes a correct split possible even after the
+fact.
+
+\section{Concurrency: streaming vs.\ batch}
+
+Run strictly sequentially, the four collection-through-generation stages
+leave the LLM --- the highest-latency, highest-cost component --- idle
+for the entire duration of the crawl. DataForge's streaming mode
+(\texttt{stream: true}, the recipe default) instead runs collection,
+chunking, and generation as three concurrent worker pools connected by
+bounded queues:
+
+\[
+\text{urls} \;\longrightarrow\; [\text{scrape pool}] \;\longrightarrow\; \text{pages} \;\longrightarrow\; [\text{chunk pool}] \;\longrightarrow\; \text{chunks} \;\longrightarrow\; [\text{LLM pool}] \;\longrightarrow\; \text{samples}
+\]
+
+Pool sizes are tuned independently, since each stage is bound by a
+different resource: scraping is rate-limit bound (typically one or a few
+requests per second per domain), while generation is bound by LLM
+provider concurrency and cost. Queues between pools are bounded
+(\texttt{DATAFORGE\_STREAM\_QUEUE\_SIZE}) to apply backpressure, so a
+crawler that briefly outpaces the LLM cannot exhaust memory buffering
+unprocessed pages. A failure at any single stage --- an unparsable page,
+a malformed LLM response --- is isolated, logged, and skipped without
+halting the pool; if generation fails fatally (invalid API key,
+provider outage), scraping and chunking are allowed to finish so that a
+subsequent resume only has to re-run generation. Because every unit of
+work (URL, page, chunk) is checkpointed independently, resuming a
+streaming session replays exactly the unfinished work, and quality
+scoring and export remain deliberately batch-only: deduplication and
+group-aware splitting are properties of the \emph{whole} sample set and
+cannot be evaluated on a stream in isolation.
+
+Sessions are interchangeable between modes at resume time: a run paused
+under batch execution can be resumed with streaming enabled, and vice
+versa, since both modes checkpoint to the same schema.
+
+\section{Leak-aware dataset splitting}
+\label{sec:leakage}
+
+\subsection{The problem}
+A synthetic dataset produced this way has a clustered generative
+structure: $n$ samples are drawn per chunk, and multiple chunks are
+drawn per page. Two samples generated from the same chunk --- or from
+adjacent, overlapping chunks of the same page --- are frequently
+near-paraphrases of one another, both in question and in the grounding
+text available to answer it. This is precisely the condition under
+which a uniformly random train/test split violates the independence
+assumption implicit in held-out evaluation: memorization of a
+training-set paraphrase can trivially answer a test-set item drawn from
+the same underlying passage, producing an evaluation score that
+overstates generalization. This is a specific instance of the more
+general \emph{data leakage} problem well documented in the machine
+learning literature \cite{kaufman2012leakage}, and closely related to
+the near-duplicate contamination concerns raised for pretraining corpora
+\cite{lee2022deduplicating}.
+
+\subsection{The mitigation}
+DataForge's export stage implements \emph{group-aware} splitting: the
+grouping key (\texttt{export.split.group\_by}, default \texttt{page})
+determines the unit that must not span a split boundary. Groups ---
+whole pages by default, or URLs or chunks --- are assigned to
+train/validation/test as atomic units using a seeded random assignment
+(\texttt{export.split.seed}) targeting the configured proportions, and
+the resulting assignment is verified (no group's members appear in more
+than one split) before any file is written, rather than assumed correct
+from the assignment procedure alone. This is a direct application of
+group-based cross-validation splitting (as in, e.g.,
+\texttt{GroupKFold} / \texttt{GroupShuffleSplit} in
+scikit-learn~\cite{pedregosa2011scikit}) to synthetic
+instruction-dataset construction, where the natural grouping key is the
+source document rather than a subject or session identifier.
+
+\subsection{Why this matters in practice}
+Absent this mechanism, a practitioner who fine-tunes and evaluates on a
+randomly split version of the same dataset is liable to observe an
+evaluation score that reflects memorization of near-duplicate training
+content rather than generalization to unseen material --- a failure
+mode that is invisible from the split code alone and only surfaces (if
+at all) as an unexpectedly large drop in performance on truly
+out-of-distribution data later. Because DataForge always emits source
+lineage (\texttt{page\_id}, \texttt{chunk\_id}, \texttt{source\_url})
+even when no split is requested at export time, a correct group-aware
+split remains possible downstream even for datasets exported before
+this feature was used.
+
+\section{Related work}
+
+\textbf{Web-scale collection.} Large text corpora for language model
+training are commonly built from Common Crawl snapshots with extensive
+filtering and deduplication pipelines, as in
+CCNet~\cite{wenzek2020ccnet} and the C4 corpus~\cite{raffel2020exploring}.
+These systems optimize for scale and general-domain coverage; DataForge
+instead targets small, precisely-scoped, single- or few-domain crawls
+driven by an explicit recipe, where politeness (rate limits,
+\texttt{robots.txt}) and per-run reproducibility matter more than
+throughput.
+
+\textbf{Synthetic instruction data.} Self-Instruct~\cite{wang2023selfinstruct}
+and its descendants (Alpaca~\cite{taori2023alpaca},
+WizardLM~\cite{xu2023wizardlm}) generate instruction-tuning data by
+prompting a strong model, typically from a small seed set or from raw
+model generations rather than a grounding document. DataForge's
+generation stage is closer to retrieval/document-grounded synthetic QA
+generation, where each sample is anchored to a specific source chunk ---
+which is also what makes the source-reference quality filter and the
+group-aware split meaningful, since grounding is both the point of the
+dataset and the source of its leakage risk.
+
+\textbf{LLM-as-judge evaluation.} Using a capable LLM to score generated
+text has become common for both dataset filtering and model evaluation
+\cite{zheng2023judging}. DataForge's quality judge applies this
+pattern narrowly --- scoring groundedness of a sample against its own
+source chunk, a task closer to a natural-language-inference check than
+open-ended quality judgment --- specifically to bound the judge's known
+weakness on more subjective, open-ended criteria.
+
+\textbf{Near-duplicate leakage.} Deduplication of near-identical text
+across pretraining corpora is known to affect both training efficiency
+and evaluation validity \cite{lee2022deduplicating}. DataForge's
+group-aware split addresses the same underlying phenomenon at the
+dataset-construction stage rather than the corpus-deduplication stage:
+instead of removing near-duplicates, it ensures that when they do exist
+(as an artifact of $n>1$ samples per chunk), they cannot span the
+train/test boundary.
+
+\section{Limitations and future work}
+
+The LLM judge is a single model call scoring groundedness on a 1--5
+scale; it does not currently ensemble multiple judges or models, which
+would likely improve reliability near the threshold at proportionally
+higher cost. The BFS fallback crawler and SPA (JavaScript-rendered page)
+detection are heuristic rather than guaranteed to find all in-scope
+content on sites without a sitemap. Group-aware splitting addresses
+leakage from the generation stage's own repeated sampling per chunk, but
+does not detect near-duplicate content that exists \emph{across} distinct
+source pages (e.g., a page and its syndicated copy on another domain);
+a content-hash or embedding-similarity based deduplication pass across
+groups, rather than only within a session's chunks, is a natural
+extension.
+
+\section{Conclusion}
+
+DataForge treats the operational realities of scraping real websites and
+the statistical realities of splitting a synthetically-generated dataset
+as core design constraints rather than details to fix after the fact.
+The result is a pipeline whose default behavior --- honoring server
+signals during collection, checkpointing every unit of work, overlapping
+collection with generation, and refusing to let a random split leak
+near-duplicate content across train and test --- is also the behavior
+that produces a defensible dataset and a trustworthy evaluation number
+from it.
+
+\begin{thebibliography}{99}
+
+\bibitem{wei2022finetuned}
+J.~Wei, M.~Bosma, V.~Y.~Zhao, et al.
+\newblock Finetuned Language Models Are Zero-Shot Learners.
+\newblock \emph{International Conference on Learning Representations (ICLR)}, 2022.
+
+\bibitem{ouyang2022training}
+L.~Ouyang, J.~Wu, X.~Jiang, et al.
+\newblock Training language models to follow instructions with human feedback.
+\newblock \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2022.
+
+\bibitem{wang2023selfinstruct}
+Y.~Wang, Y.~Kordi, S.~Mishra, et al.
+\newblock Self-Instruct: Aligning Language Models with Self-Generated Instructions.
+\newblock \emph{Proceedings of ACL}, 2023.
+
+\bibitem{taori2023alpaca}
+R.~Taori, I.~Gulrajani, T.~Zhang, et al.
+\newblock Stanford Alpaca: An Instruction-following LLaMA Model.
+\newblock \emph{GitHub repository}, 2023.
+\newblock \url{https://github.com/tatsu-lab/stanford_alpaca}
+
+\bibitem{xu2023wizardlm}
+C.~Xu, Q.~Sun, K.~Zheng, et al.
+\newblock WizardLM: Empowering Large Language Models to Follow Complex Instructions.
+\newblock \emph{arXiv preprint arXiv:2304.12244}, 2023.
+
+\bibitem{zheng2023judging}
+L.~Zheng, W.-L.~Chiang, Y.~Sheng, et al.
+\newblock Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena.
+\newblock \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2023.
+
+\bibitem{kaufman2012leakage}
+S.~Kaufman, S.~Rosset, C.~Perlich, and O.~Stitelman.
+\newblock Leakage in Data Mining: Formulation, Detection, and Avoidance.
+\newblock \emph{ACM Transactions on Knowledge Discovery from Data}, 6(4), 2012.
+
+\bibitem{lee2022deduplicating}
+K.~Lee, D.~Ippolito, A.~Nystrom, et al.
+\newblock Deduplicating Training Data Makes Language Models Better.
+\newblock \emph{Proceedings of ACL}, 2022.
+
+\bibitem{pedregosa2011scikit}
+F.~Pedregosa, G.~Varoquaux, A.~Gramfort, et al.
+\newblock Scikit-learn: Machine Learning in Python.
+\newblock \emph{Journal of Machine Learning Research}, 12:2825--2830, 2011.
+
+\bibitem{wenzek2020ccnet}
+G.~Wenzek, M.-A.~Lachaux, A.~Conneau, et al.
+\newblock CCNet: Extracting High Quality Monolingual Datasets from Web Crawl Data.
+\newblock \emph{Proceedings of LREC}, 2020.
+
+\bibitem{raffel2020exploring}
+C.~Raffel, N.~Shazeer, A.~Roberts, et al.
+\newblock Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer.
+\newblock \emph{Journal of Machine Learning Research}, 21(140):1--67, 2020.
+
+\end{thebibliography}
+
+\end{document}

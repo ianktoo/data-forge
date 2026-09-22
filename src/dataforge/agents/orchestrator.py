@@ -17,6 +17,7 @@ from .generator import GeneratorAgent
 from .processor import ProcessorAgent
 from .quality import QualityAgent
 from .scraper import ScraperAgent
+from .streaming import StreamingAgent
 
 log = get_logger("orchestrator")
 
@@ -30,6 +31,21 @@ _STAGE_FLOW: dict[str, str] = {
     PipelineStage.generation.value: PipelineStage.quality.value,
     PipelineStage.quality.value:    PipelineStage.export.value,
     PipelineStage.export.value:     PipelineStage.completed.value,
+}
+
+# Streaming mode collapses collection/processing/generation into a single
+# concurrent stage, so those three share one entry. Quality and export stay
+# batch: quality deduplicates across the whole sample set.
+_STREAM_FLOW: dict[str, str] = {
+    PipelineStage.discovery.value:  PipelineStage.streaming.value,
+    PipelineStage.streaming.value:  PipelineStage.quality.value,
+    PipelineStage.quality.value:    PipelineStage.export.value,
+    PipelineStage.export.value:     PipelineStage.completed.value,
+    # A session paused under the batch flow can be resumed in streaming mode;
+    # map the old stage names onto the fused stage so no work is lost.
+    PipelineStage.collection.value: PipelineStage.streaming.value,
+    PipelineStage.processing.value: PipelineStage.streaming.value,
+    PipelineStage.generation.value: PipelineStage.streaming.value,
 }
 
 # Checkpoint hook: called after each stage with (stage, context)
@@ -51,8 +67,13 @@ class Orchestrator:
         enable_review: bool = False,
         review_cost_cap: float = 1.0,
         review_min_score: int = 3,
+        stream: bool = False,
+        stream_progress_cb=None,
     ) -> None:
         self.ctx = context
+        self._stream = stream
+        self._stream_cb = stream_progress_cb
+        self._flow = _STREAM_FLOW if stream else _STAGE_FLOW
         self._hook = stage_hook
         self._pre_hook = pre_stage_hook
         self._scraper_cb = scraper_progress_cb
@@ -66,6 +87,14 @@ class Orchestrator:
         self._init_session()
 
         stage = start_from or PipelineStage.discovery.value
+        # A session paused mid-batch-pipeline resumes into the fused stage when
+        # streaming is on; _seed_work() then replays only the unfinished items.
+        if self._stream and stage in (
+            PipelineStage.collection.value,
+            PipelineStage.processing.value,
+            PipelineStage.generation.value,
+        ):
+            stage = PipelineStage.streaming.value
 
         while stage != PipelineStage.completed:
             log.info(f"▶ Stage: {stage}")
@@ -78,7 +107,7 @@ class Orchestrator:
                 if preflight.skip:
                     # Skippable stage (e.g. generation without LLM key)
                     log.warning(f"Skipping stage '{stage}': {preflight.error_key}")
-                    stage = _STAGE_FLOW.get(stage, PipelineStage.completed)
+                    stage = self._flow.get(stage, PipelineStage.completed)
                     continue
                 else:
                     # Hard requirement — pause
@@ -91,7 +120,7 @@ class Orchestrator:
                     "No synthetic samples to evaluate — generation was skipped or produced nothing.",
                     "You can still export the processed chunks: dataforge export <session-id>",
                 )
-                stage = _STAGE_FLOW.get(stage, PipelineStage.completed)
+                stage = self._flow.get(stage, PipelineStage.completed)
                 continue
 
             try:
@@ -142,7 +171,7 @@ class Orchestrator:
                     self._update_session_status(SessionStatus.paused)
                     return self.ctx
 
-            stage = _STAGE_FLOW.get(stage, PipelineStage.completed)
+            stage = self._flow.get(stage, PipelineStage.completed)
 
         self._update_session_status(SessionStatus.completed)
         log.info("Pipeline completed successfully")
@@ -151,6 +180,8 @@ class Orchestrator:
     def _build_agent(self, stage: str) -> BaseAgent:
         if stage == PipelineStage.discovery:
             return ExplorerAgent(self.ctx)
+        if stage == PipelineStage.streaming:
+            return StreamingAgent(self.ctx, progress_cb=self._stream_cb)
         if stage == PipelineStage.collection:
             return ScraperAgent(self.ctx, progress_cb=self._scraper_cb)
         if stage == PipelineStage.processing:

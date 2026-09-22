@@ -65,42 +65,51 @@ class ScraperAgent(BaseAgent):
         self, client, sem: asyncio.Semaphore, url: str, raw_dir: Path, idx: int
     ) -> int | None:
         async with sem:
-            resp = await client.get_safe(url)
-            if resp is None:
-                self.ctx.add_error(f"Failed to fetch {url}")
-                return None
+            return await self.fetch_and_store(client, url, raw_dir, idx)
 
-            content = extract(resp.text, url)
-            if not content.text.strip():
-                return None
+    async def fetch_and_store(self, client, url: str, raw_dir: Path, idx: int) -> int | None:
+        """Fetch one URL, extract content, persist page row. Returns page id or None.
 
-            # Save raw text to disk
-            raw_path = raw_dir / f"page_{idx:05d}.md"
-            raw_path.write_text(content.markdown, encoding="utf-8")
+        Split out of :meth:`_scrape_one` so the streaming pipeline can drive it
+        from a worker pool, where the pool size — not a semaphore — bounds
+        concurrency.
+        """
+        resp = await client.get_safe(url)
+        if resp is None:
+            self.ctx.add_error(f"Failed to fetch {url}")
+            return None
 
-            # Persist metadata
-            with open_session(self.ctx.settings.db_path) as db:
-                # Mark URL as scraped
-                url_rec = db.exec(
-                    select(DiscoveredURL)
-                    .where(DiscoveredURL.session_id == self.ctx.session_id)
-                    .where(DiscoveredURL.url == url)
-                ).first()
-                if url_rec:
-                    url_rec.scraped = True
-                    url_rec.http_status = resp.status_code
+        content = extract(resp.text, url)
+        if not content.text.strip():
+            return None
 
-                page = ScrapedPage(
-                    session_id=self.ctx.session_id,
-                    url_id=url_rec.id if url_rec else 0,
-                    url=url,
-                    title=content.title,
-                    author=content.author,
-                    published_date=content.published_date,
-                    raw_path=str(raw_path),
-                    word_count=content.word_count,
-                )
-                db.add(page)
-                db.commit()
-                db.refresh(page)
-                return page.id
+        # Save raw text to disk
+        raw_path = raw_dir / f"page_{idx:05d}.md"
+        raw_path.write_text(content.markdown, encoding="utf-8")
+
+        # Persist metadata
+        with open_session(self.ctx.settings.db_path) as db:
+            # Mark URL as scraped
+            url_rec = db.exec(
+                select(DiscoveredURL)
+                .where(DiscoveredURL.session_id == self.ctx.session_id)
+                .where(DiscoveredURL.url == url)
+            ).first()
+            if url_rec:
+                url_rec.scraped = True
+                url_rec.http_status = resp.status_code
+
+            page = ScrapedPage(
+                session_id=self.ctx.session_id,
+                url_id=url_rec.id if url_rec else 0,
+                url=url,
+                title=content.title,
+                author=content.author,
+                published_date=content.published_date,
+                raw_path=str(raw_path),
+                word_count=content.word_count,
+            )
+            db.add(page)
+            db.commit()
+            db.refresh(page)
+            return page.id

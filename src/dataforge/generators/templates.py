@@ -9,6 +9,22 @@ _env = Environment(autoescape=False)
 
 # ── System prompts ─────────────────────────────────────────────────────────────
 
+# Shared by every built-in format. A fine-tuned model never sees the source
+# passage at inference time, so a sample that leans on it ("the document says",
+# "according to the passage") teaches the model to cite sources that are not
+# there. Samples must read as standalone knowledge.
+_STANDALONE_RULES = """
+Every example must stand on its own as general knowledge:
+- Never refer to the source: no "the document", "the passage", "the text",
+  "the article", "this page", "the website", "the PDF", "the guide", "the author",
+  "according to", "as mentioned" or similar
+- Questions must be answerable by someone who has never seen the passage
+- State facts directly in your own voice, e.g. "Homeowners insurance does not
+  cover flood damage", NOT "The document says homeowners insurance..."
+- Ignore navigation, download links, file names and page furniture - they are
+  not content
+- Skip anything the passage does not actually explain rather than guessing"""
+
 _SYSTEM_QA = """You are a dataset curator. Given a passage of text, generate \
 {{ n }} high-quality question-and-answer pairs that test understanding of the content.
 Rules:
@@ -16,6 +32,7 @@ Rules:
 - Answers must be fully supported by the passage
 - Vary question types: factual, inferential, applied
 - Do NOT ask questions about the URL, website, or author
+""" + _STANDALONE_RULES + """
 Output JSON array: [{"question": "...", "answer": "..."}]"""
 
 _SYSTEM_INSTRUCTION = """You are a dataset curator. Given a passage, generate \
@@ -24,6 +41,7 @@ Rules:
 - Instructions should be actionable and specific
 - Outputs must be grounded in the passage content
 - Include an optional input field when context is needed
+""" + _STANDALONE_RULES + """
 Output JSON array: [{"instruction": "...", "input": "...", "output": "..."}]"""
 
 _SYSTEM_CONVERSATION = """You are a dataset curator. Given a passage, generate \
@@ -33,6 +51,7 @@ Rules:
 - Use "user" and "assistant" roles
 - Conversations should feel natural, not like an interview
 - Ground all assistant responses in the passage
+""" + _STANDALONE_RULES + """
 Output JSON array: [{"messages": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}]"""
 
 _USER_TMPL = """<document>
