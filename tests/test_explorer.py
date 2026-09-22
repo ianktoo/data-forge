@@ -270,3 +270,38 @@ async def test_real_sitemap_discovery():
     # Run with: pytest -m integration tests/test_explorer.py::test_real_sitemap_discovery
     # For now, just verify the test can be structured
     assert ctx.seed_urls == ["https://example.com"]
+
+
+class TestSeedPathNotInSitemap:
+    """A deep seed the sitemap doesn't cover falls back to BFS from the seed."""
+
+    def _agent(self):
+        settings = MagicMock()
+        settings.max_crawl_pages = 5
+        settings.max_crawl_depth = 1
+        ctx = PipelineContext(
+            session_id="test", session_name="Test", goal="Test", format=DataFormat.qa,
+            seed_urls=[], settings=settings, custom_system_prompt="", n_per_chunk=3,
+        )
+        return ExplorerAgent(ctx)
+
+    async def test_uncovered_seed_path_crawls_from_seed(self):
+        # docs.python.org's sitemap lists only version roots, not /3/tutorial/ pages.
+        sitemap = ["https://docs.python.org/3.13/", "https://docs.python.org/3/"]
+        seed = "https://docs.python.org/3/tutorial/"
+        with patch("dataforge.agents.explorer.discover_sitemap_url", AsyncMock(return_value="https://docs.python.org/sitemap.xml")), \
+             patch("dataforge.agents.explorer.parse_sitemap", AsyncMock(return_value=sitemap)), \
+             patch("dataforge.agents.explorer.crawl", AsyncMock(return_value=[seed, seed + "introduction.html"])) as crawl:
+            urls, source = await self._agent()._explore_seed(MagicMock(), seed)
+        crawl.assert_awaited_once()
+        assert urls == [seed, seed + "introduction.html"]
+        assert source == "crawl"
+
+    async def test_covered_seed_path_uses_sitemap(self):
+        sitemap = ["https://www.ready.gov/floods", "https://www.ready.gov/floods/after"]
+        with patch("dataforge.agents.explorer.discover_sitemap_url", AsyncMock(return_value="https://www.ready.gov/sitemap.xml")), \
+             patch("dataforge.agents.explorer.parse_sitemap", AsyncMock(return_value=sitemap)), \
+             patch("dataforge.agents.explorer.crawl", AsyncMock()) as crawl:
+            urls, source = await self._agent()._explore_seed(MagicMock(), "https://www.ready.gov/floods")
+        crawl.assert_not_awaited()
+        assert urls == sitemap

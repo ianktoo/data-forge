@@ -1,0 +1,195 @@
+# Benchmark sites and their access / terms review.
+#
+# run_benchmark.py refuses to crawl a site whose `terms_review.reviewed_on` is
+# empty. Passing robots.txt is not permission: a person must read the site's
+# terms or website policies and record the date and outcome here. The robots.txt
+# snapshot and bot-block check are recorded automatically at run time.
+#
+# Checked 2026-09-22 by automated fetch (robots.txt, sitemap, policy pages).
+# That check is NOT a terms review; it only tells the reviewer where to look.
+
+sites:
+  - id: ready-gov
+    topic: Disaster preparedness
+    recipe: recipes/ready-gov.yaml
+    terms_url: https://www.fema.gov/about/website-information   # reuse terms; Ready.gov is listed there as a FEMA domain
+    content_status: U.S. federal government work; text generally public domain (17 U.S.C. 105)
+    automated_check: "robots.txt allows content pages; no Crawl-delay"
+    terms_review:
+      reviewed_by: Ian Too
+      reviewed_on: 2026-09-22
+      outcome: >
+        FEMA "Website Information" page: "Most material on FEMA.gov is free of
+        copyright and may be copied and distributed without permission"; licensed
+        photos/graphics excepted. It lists Ready.gov as a FEMA-owned domain but does
+        not explicitly extend the reuse terms to it. No statement on automated access.
+        Text only is used; images are not collected.
+
+  - id: uscis
+    topic: Immigration (green card, naturalization)
+    recipe: recipes/uscis.yaml
+    terms_url: https://www.uscis.gov/website-policies
+    content_status: U.S. federal government work; policy notes some images are licensed and NOT public domain (text only is used)
+    automated_check: "robots.txt Crawl-delay: 10 (enforced); disallows data-hub exports"
+    terms_review:
+      reviewed_by: Ian Too
+      reviewed_on: 2026-09-22
+      outcome: >
+        Website Policies: "Information presented on this WWW site is considered
+        public information and may be distributed or copied. Use of appropriate
+        byline/photo/image credit is requested." Some images are licensed and not
+        public domain; images are not collected. No statement on crawling beyond
+        robots.txt (Crawl-delay: 10, enforced).
+
+  - id: python-docs
+    topic: Technical documentation (Python tutorial)
+    recipe: recipes/python-docs.yaml
+    terms_url: https://docs.python.org/3/license.html
+    content_status: Documentation under the PSF License Version 2; code examples dual licensed PSF-2.0 / Zero-Clause BSD
+    automated_check: "robots.txt allows /3/; sitemap lists only version landing pages (crawl fallback)"
+    terms_review:
+      reviewed_by: Ian Too
+      reviewed_on: 2026-09-22
+      outcome: >
+        "History and License": documentation is under the PSF License Version 2,
+        which permits reproduction and derivative works provided the PSF copyright
+        notice is retained; since Python 3.8.6, code examples in the documentation are
+        dual licensed under the PSF License Version 2 and Zero-Clause BSD.
+        Attribute "Copyright Python Software Foundation" when publishing the dataset.
+
+  - id: iantoo-space
+    topic: Personal / portfolio site
+    recipe: recipes/iantoo-space.yaml
+    terms_url: https://www.iantoo.space/privacy
+    content_status: Owned by the project author; crawled with the owner's consent
+    automated_check: "robots.txt allows all except /api/; sitemap lists 8 URLs"
+    terms_review:
+      reviewed_by: Ian Too
+      reviewed_on: 2026-09-22
+      outcome: >
+        Site owner is the project author and consents to crawling it for this
+        benchmark. /privacy and /contact are excluded from the crawl.
+
+# Considered and excluded. Kept here so the paper's access table is generated
+# from the same source as the runs.
+excluded:
+  - id: kplc
+    topic: Electricity utility (Kenya Power)
+    url: https://www.kplc.co.ke/
+    reason: >
+      robots.txt says "Allow all crawlers"; footer "(c) 2026 - Kenya Power. All
+      rights reserved." An "AI Terms and Conditions 2026" PDF is linked from
+      /data-privacy but could not be located automatically; its title ("Terms &
+      Conditions for Use of AI Systems") suggests it covers Kenya Power's own AI
+      tools. No reuse or licence statement was found. Excluded: reserved rights
+      with no grant, and Kenyan government works are, as we understand the
+      Copyright Act, owned by the Government rather than public domain (unlike
+      U.S. federal works). Permission from the site owner would be needed.
+    checked_on: 2026-09-22
+
+  - id: kebs
+    topic: Standards (Kenya Bureau of Standards)
+    url: https://www.kebs.org/
+    reason: >
+      No robots.txt (404); footer "Copyright". No reuse or licence statement was
+      found. Excluded: reserved rights with no grant, and Kenyan government works
+      are, as we understand the Copyright Act, owned by the Government rather than
+      public domain (unlike U.S. federal works). Permission from the site owner
+      would be needed.
+    checked_on: 2026-09-22
+
+  - id: moh
+    topic: Public health (Ministry of Health, Kenya)
+    url: https://www.health.go.ke/
+    reason: >
+      Footer "Copyright 2022 | Ministry of Health | All Rights Reserved." TLS
+      chains to a root missing from certifi (fixed via the OS trust store). No
+      reuse or licence statement was found. Excluded: reserved rights with no
+      grant, and Kenyan government works are, as we understand the Copyright Act,
+      owned by the Government rather than public domain (unlike U.S. federal
+      works). Permission from the site owner would be needed.
+    checked_on: 2026-09-22
+
+  - id: uonbi
+    topic: University of Nairobi
+    url: https://www.uonbi.ac.ke/
+    reason: >
+      Footer "(c) University of Nairobi. All Rights Reserved."; only a data
+      privacy statement. Server sends an incomplete TLS chain. No reuse or licence
+      statement was found. Excluded: reserved rights with no grant, and Kenyan
+      government works are, as we understand the Copyright Act, owned by the
+      Government rather than public domain (unlike U.S. federal works). Permission
+      from the site owner would be needed.
+    checked_on: 2026-09-22
+
+  - id: jkuat
+    topic: Jomo Kenyatta University of Agriculture and Technology
+    url: https://www.jkuat.ac.ke/
+    reason: >
+      Footer "JKUAT (c) 2024. All Rights Reserved". Server sends an incomplete TLS
+      chain. No reuse or licence statement was found. Excluded: reserved rights
+      with no grant, and Kenyan government works are, as we understand the
+      Copyright Act, owned by the Government rather than public domain (unlike
+      U.S. federal works). Permission from the site owner would be needed.
+    checked_on: 2026-09-22
+
+  - id: strathmore
+    topic: Strathmore University
+    url: https://strathmore.edu/
+    reason: >
+      /legal-notice has no reuse terms; footer "All Rights Reserved". Server sends
+      an incomplete TLS chain. No reuse or licence statement was found. Excluded:
+      reserved rights with no grant, and Kenyan government works are, as we
+      understand the Copyright Act, owned by the Government rather than public
+      domain (unlike U.S. federal works). Permission from the site owner would be
+      needed.
+    checked_on: 2026-09-22
+
+  - id: kra
+    topic: Tax administration (Kenya Revenue Authority)
+    url: https://www.kra.go.ke/
+    reason: >
+      Terms prohibit it. The Website Terms and Conditions
+      (images/Corporate_Website_Terms_Conditions.pdf) expressly restrict
+      "Engaging in any data mining, data harvesting, data extracting or any other
+      similar activity in relation to this Website", and license the material
+      only "for purposes of viewing". robots.txt returns 404, which by
+      convention permits crawling: the clearest case that robots.txt is not
+      permission.
+    checked_on: 2026-09-22
+
+  - id: faa-uas
+    topic: Small drones / 14 CFR Part 107
+    url: https://www.faa.gov/uas/
+    reason: >
+      Unclear terms. No reuse or copyright statement was found; the only policy
+      text, /web_policies/disclaimer, is a government-system banner: "provided
+      for U.S. Government-authorized use only. Unauthorized or improper use of
+      this system is prohibited." faa.gov also returned 403 to two of three
+      automated policy-page fetches. The content is a U.S. federal work
+      (17 U.S.C. 105) and robots.txt allows /uas/, but whether automated
+      collection counts as authorized use is not stated, so it was skipped.
+      recipes/faa-uas.yaml is kept for if the terms are clarified.
+    checked_on: 2026-09-22
+
+  - id: ecfr
+    topic: 14 CFR Part 107 (regulation text)
+    url: https://www.ecfr.gov/current/title-14/chapter-I/subchapter-F/part-107
+    reason: >
+      robots.txt allows the page, but a plain HTTP request is redirected to
+      unblock.federalregister.gov, which states that "programmatic access to
+      these sites is limited to access to our extensive developer APIs".
+      Use the eCFR API instead; DataForge has no API source adapter yet.
+    checked_on: 2026-09-22
+
+  - id: cdc
+    topic: Public health guidance
+    url: https://www.cdc.gov/
+    reason: >
+      Access depends on the client: robots.txt returned 403 Access Denied to a
+      generic "Mozilla/5.0 (...)" User-Agent, but 200 to DataForge's own
+      User-Agent a few minutes later (edge bot protection). Not excluded for a
+      block, but because results that depend on an edge heuristic are not
+      reproducible, and its terms were not reviewed. Could be added after a
+      terms review.
+    checked_on: 2026-09-22

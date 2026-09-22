@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import functools
+import ssl
 from collections import OrderedDict
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -16,12 +18,34 @@ from tenacity import (
     wait_exponential,
 )
 
+from dataforge import __version__
 from dataforge.utils import RateLimiter, get_logger
 
 log = get_logger("http")
 
+# Identifies the crawler to site operators: real version and a working project URL.
+USER_AGENT = f"DataForge/{__version__} (+https://github.com/ianktoo/data-forge; research bot)"
+
+@functools.cache
+def ssl_context() -> ssl.SSLContext:
+    """TLS context that verifies against the operating system's trust store.
+
+    Many sites send an incomplete certificate chain (leaf only, no
+    intermediate) or chain to a root missing from certifi's bundle. Browsers
+    cope; plain Python did not, so e.g. www.uonbi.ac.ke and www.health.go.ke
+    failed with CERTIFICATE_VERIFY_FAILED. truststore (as pip uses) verifies
+    with the OS store, which on Windows and macOS also fetches missing
+    intermediates. Verification is never disabled.
+    """
+    try:
+        import truststore
+    except ImportError:
+        return ssl.create_default_context()
+    return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+
+
 _HEADERS = {
-    "User-Agent": "DataForge/0.1 (+https://github.com/dataforge; research bot)",
+    "User-Agent": USER_AGENT,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
 }
@@ -35,8 +59,6 @@ _MAX_RETRY_AFTER = 120.0   # cap an absurd Retry-After so one URL cannot stall a
 _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 _ROBOTS_CACHE_MAX = 256
 _robots_cache: OrderedDict[str, RobotFileParser] = OrderedDict()
-# Domains whose robots.txt Crawl-delay has already been applied to the limiter.
-_crawl_delay_applied: set[str] = set()
 
 
 class RetryableHTTPError(Exception):
@@ -66,20 +88,42 @@ def _parse_retry_after(value: str | None) -> float:
         return 0.0
 
 
-async def _robots(client: httpx.AsyncClient, base_url: str) -> RobotFileParser:
+async def _robots(
+    client: httpx.AsyncClient, base_url: str, limiter: RateLimiter | None = None
+) -> RobotFileParser:
+    """Fetch and parse a site's robots.txt, following RFC 9309 on failures:
+    a 4xx means no rules (allow all); a 5xx, 429 or network error means the
+    rules are unknown, so everything is disallowed rather than guessed at.
+    """
     if base_url in _robots_cache:
         _robots_cache.move_to_end(base_url)
         return _robots_cache[base_url]
     parser = RobotFileParser()
     robots_url = urljoin(base_url, "/robots.txt")
     try:
+        if limiter is not None:
+            # The robots.txt request is a request to the site like any other.
+            await limiter.wait(robots_url)
         r = await client.get(robots_url, timeout=10)
-        parser.parse(r.text.splitlines())
-        delay = parser.crawl_delay("DataForge") or parser.crawl_delay("*")
-        if delay:
-            log.debug(f"robots.txt crawl-delay for {base_url}: {delay}s")
-    except Exception:
-        pass
+        if r.status_code >= 500 or r.status_code == 429:
+            log.warning(
+                f"robots.txt for {base_url} returned {r.status_code}; "
+                "treating the whole site as disallowed (RFC 9309)"
+            )
+            parser.disallow_all = True
+        elif r.status_code >= 400:
+            parser.allow_all = True
+        else:
+            parser.parse(r.text.splitlines())
+            delay = parser.crawl_delay("DataForge") or parser.crawl_delay("*")
+            if delay:
+                log.debug(f"robots.txt crawl-delay for {base_url}: {delay}s")
+    except Exception as exc:
+        log.warning(
+            f"robots.txt for {base_url} unreachable ({type(exc).__name__}); "
+            "treating the whole site as disallowed (RFC 9309)"
+        )
+        parser.disallow_all = True
     _robots_cache[base_url] = parser
     if len(_robots_cache) > _ROBOTS_CACHE_MAX:
         _robots_cache.popitem(last=False)
@@ -95,6 +139,7 @@ class HTTPClient:
     async def __aenter__(self) -> HTTPClient:
         self._client = httpx.AsyncClient(
             headers=_HEADERS,
+            verify=ssl_context(),
             timeout=_TIMEOUT,
             follow_redirects=True,
             http2=True,
@@ -105,6 +150,26 @@ class HTTPClient:
         if self._client:
             await self._client.aclose()
 
+    def has_crawl_delay(self, domain: str) -> bool:
+        """True if this client is honouring a robots.txt Crawl-delay for *domain*."""
+        return self._limiter.has_domain_limit(domain)
+
+    async def prepare(self, url: str, *, check_robots: bool = True) -> None:
+        """Everything a request to *url* must pass before it is sent: the
+        robots.txt check (raising PermissionError if disallowed), the site's
+        Crawl-delay, and the rate limiter. Used by get() and by anything that
+        fetches a URL outside this client, such as the Playwright fallback.
+        """
+        assert self._client, "Use as async context manager"
+        parsed = urlparse(url)
+        if check_robots and not self._ignore_robots:
+            robots = await _robots(self._client, f"{parsed.scheme}://{parsed.netloc}", self._limiter)
+            if not robots.can_fetch("DataForge", url):
+                log.warning(f"robots.txt disallows {url}")
+                raise PermissionError(f"robots.txt disallows {url}")
+            self._apply_crawl_delay(robots, parsed.netloc)
+        await self._limiter.wait(url)
+
     @retry(
         retry=retry_if_exception_type(
             (httpx.TransportError, httpx.TimeoutException, RetryableHTTPError)
@@ -114,18 +179,7 @@ class HTTPClient:
         reraise=True,
     )
     async def get(self, url: str, *, check_robots: bool = True) -> httpx.Response:
-        assert self._client, "Use as async context manager"
-        parsed = urlparse(url)
-        base = f"{parsed.scheme}://{parsed.netloc}"
-
-        if check_robots and not self._ignore_robots:
-            robots = await _robots(self._client, base)
-            if not robots.can_fetch("DataForge", url):
-                log.warning(f"robots.txt disallows {url}")
-                raise PermissionError(f"robots.txt disallows {url}")
-            self._apply_crawl_delay(robots, parsed.netloc)
-
-        await self._limiter.wait(url)
+        await self.prepare(url, check_robots=check_robots)
         response = await self._client.get(url)
         log.debug(f"GET {url} → {response.status_code}")
 
@@ -149,9 +203,12 @@ class HTTPClient:
         asking for one request every 15 seconds (FEMA does) was still crawled at
         the configured default. Only ever slows down, never speeds up.
         """
-        if domain in _crawl_delay_applied:
+        # Tracked on the limiter, not per process: each stage (discovery,
+        # scraping, streaming) builds its own limiter, and a process-wide flag
+        # meant only the first one ever received the delay.
+        if domain in self._limiter.crawl_delay_domains:
             return
-        _crawl_delay_applied.add(domain)
+        self._limiter.crawl_delay_domains.add(domain)
         try:
             delay = robots.crawl_delay("DataForge") or robots.crawl_delay("*")
         except Exception:

@@ -1,0 +1,26 @@
+# Benchmark recipe: personal/portfolio site (iantoo.space), crawled with the
+# owner's consent. Small (8 sitemap URLs) and possibly JavaScript-rendered,
+# which exercises the thin-content path.
+version: 1
+name: bench-iantoo-space
+stream: true
+output_dir: ./output/benchmark/iantoo-space
+source:
+  urls: [https://www.iantoo.space/sitemap.xml]
+  exclude: [/privacy, /contact, /api/]
+  max_urls: 20
+  skip_known: false
+generation:
+  format: qa
+  goal: >
+    Accurate question-and-answer pairs about Ian Too's work, projects, study
+    and community involvement, grounded strictly in the content of his website.
+  n_per_chunk: 3
+  max_cost_usd: 1.00
+quality:
+  llm_judge: true
+  min_judge_score: 4
+export:
+  targets: [local]
+  approved_only: true
+  split: {train: 0.8, validation: 0.1, test: 0.1, group_by: page, seed: 42}

@@ -5,6 +5,7 @@
 \usepackage{hyperref}
 \usepackage{graphicx}
 \usepackage{booktabs}
+\usepackage{array}
 \usepackage{listings}
 \usepackage{xcolor}
 \usepackage{enumitem}
@@ -53,11 +54,20 @@ collection and generation are overlapped through bounded, backpressured
 queues to avoid idling an LLM behind a slow crawler; unattended LLM spend
 is bounded by an explicit, concurrency-safe budget rather than only
 indirect knobs like page count; and --- the concern motivating this
-document --- dataset splitting is group-aware, so that near-duplicate
-paraphrases generated from the same source page cannot appear on both
-sides of a train/test boundary and silently inflate held-out evaluation
-scores. We describe the system's architecture, the reasoning behind each
-design decision, situate the resulting synthetic, fine-tuning-oriented
+document --- dataset splitting is group-aware, so that samples generated
+from the same source page, which share its facts, cannot appear on both
+sides of a train/test boundary and inflate held-out evaluation scores. We describe the system's architecture and the reasoning behind
+each design decision, and evaluate it end to end on four websites: 831
+samples for \$0.12, with page-disjoint splits on every site. The same
+benchmark exposed six defects that unit tests had missed, including a
+declared \texttt{Crawl-delay} that was not enforced while scraping; all
+are fixed and reported. Of fourteen sites considered, ten were excluded
+after a review of their terms and access policies, although
+\texttt{robots.txt} alone would have permitted at least six of them. The
+LLM judge approved 97.6\% of samples, but the same model generated and
+judged them, so we treat that figure as unvalidated until a human audit is
+complete. We also describe agent access through the Model Context
+Protocol, situate the resulting synthetic, fine-tuning-oriented
 dataset relative to retrieval-augmented generation as a complementary
 route to reducing hallucination, discuss the responsible-use
 considerations inherent to an unattended web-scraping and synthetic-data
@@ -109,6 +119,7 @@ rather than merely produce an error message, so we treat it in detail
 in Section~\ref{sec:leakage}.
 
 \section{System overview}
+\label{sec:overview}
 
 \begin{table}[h]
   \centering
@@ -160,35 +171,53 @@ composes with a scheduler or CI pipeline without a human watching the
 log.
 
 \subsection{Discovery}
+\label{sec:discovery}
 Candidate URLs are enumerated from \texttt{sitemap.xml} (including
 sitemap indexes) and any \texttt{Sitemap:} directive in
 \texttt{robots.txt}, before a single content page is fetched. Sites
 without a usable sitemap fall back to a breadth-first crawl bounded by
-depth and page count. Pages that look JavaScript-rendered (few raw
-links relative to body size) are retried through a headless browser
-(Playwright) when available. In interactive use, discovery is followed
-by a review step --- substring, glob, or regex filtering plus per-URL
+depth and page count, and so does a seed deeper than the site root (such
+as \texttt{/3/tutorial/}) when the sitemap lists nothing under the seed's
+path. Pages that look JavaScript-rendered (few raw links relative to body
+size) can be retried through a headless browser (Playwright) when it is
+installed. The browser passes the same gate as every other request
+(\texttt{robots.txt}, rate limit, DataForge's User-Agent), does not load
+images, media or fonts, and is not used at all on a site that declares a
+\texttt{Crawl-delay}, because the sub-requests of a page load cannot be
+spaced one per delay. In interactive use, discovery is followed by a
+review step --- substring, glob, or regex filtering plus per-URL
 selection --- that a recipe replaces declaratively with
 \texttt{source.include} / \texttt{source.exclude} / \texttt{source.max\_urls}.
 
 \subsection{Collection}
+\label{sec:collection}
 An async HTTP client applies per-domain rate limiting and
 \texttt{robots.txt} compliance. The central design decision here is
 that \emph{not all non-200 responses mean the same thing}:
 
 \begin{itemize}[leftmargin=1.5em]
   \item Transient statuses (\texttt{429}, \texttt{500}, \texttt{502},
-    \texttt{503}, \texttt{504}) are retried with exponential backoff,
-    honoring a server-supplied \texttt{Retry-After} header
-    (delta-seconds or HTTP-date) capped at 120 seconds so a single slow
-    URL cannot stall the run.
+    \texttt{503}, \texttt{504}) are retried, up to three attempts, with
+    exponential backoff. When the server sends \texttt{Retry-After}
+    (delta-seconds or HTTP-date), the client waits that long before the
+    backoff, but at most 120 seconds. The cap bounds run time at the cost
+    of strict compliance: a server that asks for a longer wait is retried
+    sooner than it asked. A stricter policy would abandon the URL instead.
   \item Permanent statuses (\texttt{404}, \texttt{403}) are accepted as
     final and not retried, preserving crawl budget.
-  \item A declared \texttt{robots.txt} \texttt{Crawl-delay} lowers the
-    effective rate limit automatically; it can only make a crawl
-    \emph{slower} than the configured rate, never faster, so an
-    operator's explicit rate-limit ceiling is never silently overridden
-    upward.
+  \item \texttt{robots.txt} failures follow RFC~9309 \cite{rfc9309}: a
+    4xx response means there are no rules, while a 5xx, a 429 or an
+    unreachable server means the rules are unknown and the whole site is
+    treated as disallowed. The \texttt{robots.txt} request itself waits on
+    the rate limiter like any other.
+  \item A declared \texttt{Crawl-delay} (a widely used extension that
+    RFC~9309 does not define) lowers the effective rate limit for that
+    site; it can only make a crawl \emph{slower} than the configured rate,
+    never faster, so an operator's explicit rate-limit ceiling is never
+    silently overridden upward. One rate limiter is shared by every stage
+    of a run, so the delay holds across stage boundaries. Before
+    version~2.4.0 it did not, and the benchmark of
+    Section~\ref{sec:eval-defects} is what showed it.
 \end{itemize}
 
 A page is marked scraped only after a successful fetch, so a resumed
@@ -196,14 +225,18 @@ session retries exactly the URLs that previously failed, and none that
 already succeeded.
 
 \subsection{Processing}
+\label{sec:processing}
 Retrieved HTML is converted to Markdown, boilerplate (navigation,
 footers, cookie notices) is stripped, and the remaining text is split
-into overlapping, token-bounded chunks sized against the target model's
-tokenizer (via \texttt{tiktoken}). Chunk size and overlap are
-recipe-configurable; overlap exists so that a fact spanning a chunk
-boundary is not lost to the generation stage entirely.
+into overlapping, token-bounded chunks. Token counts use
+\texttt{tiktoken}'s \texttt{cl100k\_base} encoding whatever the target
+model, so chunk sizes are approximate for models with a different
+tokenizer. Chunk size and overlap are recipe-configurable; overlap exists
+so that a fact spanning a chunk boundary is not lost to the generation
+stage entirely.
 
 \subsection{Generation}
+\label{sec:generation}
 Each chunk is passed to an LLM (via LiteLLM, giving provider portability
 across OpenAI, Anthropic, Google, Groq, Together AI, or a local Ollama
 model) with a format-specific prompt template --- \texttt{qa},
@@ -216,74 +249,82 @@ non-independence discussed in Section~\ref{sec:leakage}.
 
 \subsubsection{Cost control}
 \label{sec:budget}
-Because the pipeline is designed to run unattended (\texttt{dataforge
-run}, typically cron'd), and because the quality judge (below) issues a
-second LLM call per sample --- roughly doubling generation cost on its
-own --- an operator's only cost control was, until recently, indirect:
-bounding the number of pages or chunks fed into generation, fixed before
-the provider or its pricing is even known. DataForge now exposes an
-explicit, recipe-level budget --- \texttt{generation.max\_cost\_usd} and
-\texttt{generation.max\_llm\_calls} --- enforced by a single tracker
-shared across the generation and judge stages (and the streaming
-pipeline's concurrent workers), so the cap bounds \emph{combined} spend
-rather than either stage alone. The check happens before a network call
-is dispatched, not after: once exhausted, a chunk is skipped cleanly
-(the run finishes and reports how many calls were skipped) rather than
-the process crashing or continuing to spend past the configured limit.
-This mirrors the existing pattern of \texttt{crawl.max\_pages} bounding
-collection, extended to the stage that actually incurs LLM cost.
+The pipeline is designed to run unattended (\texttt{dataforge run}, for
+example from a scheduler), and the quality judge (Section~\ref{sec:quality})
+adds one LLM call per chunk, roughly doubling the number of calls. Bounding
+the number of pages or chunks controls spend only indirectly, and must be
+fixed before the provider's pricing is considered. The recipe therefore
+sets an explicit budget, \texttt{generation.max\_cost\_usd} and
+\texttt{generation.max\_llm\_calls}, enforced by one tracker shared by the
+generation and judge stages and by the streaming pipeline's concurrent
+workers, so the cap bounds \emph{combined} spend. Each call reserves a
+slot before it is dispatched, so the call cap is exact. Spend is recorded
+when a call completes, so the cost cap can be exceeded by the cost of the
+calls already in flight when it is reached (at most one per concurrent
+generation worker and judge task). Once the budget is exhausted, remaining
+chunks are skipped cleanly and the run reports how many calls were
+skipped, rather than crashing or continuing to spend.
 
 \subsection{Quality}
-Samples pass through layered filters of increasing cost, evaluated in
-this order so that the LLM judge (the expensive step) never runs on
-samples that a free filter would reject:
+\label{sec:quality}
+Samples pass through filters in the following order, so that the LLM
+judge, the only one that costs anything, never runs on a sample a free
+filter would reject. The first filter to reject a sample determines its
+recorded rejection reason.
 
 \begin{enumerate}[leftmargin=1.5em]
-  \item A heuristic pre-filter on answer/question length and refusal
+  \item Exact deduplication over the full message content.
+  \item Near-duplicate detection within the sample's source chunk
+    (Section~\ref{sec:dedup}).
+  \item A source-reference filter (regular expressions) that rejects
+    samples referring to ``the document'' or ``the passage'' rather than
+    the subject matter: a model trained on such samples learns to cite a
+    source it will never have at inference time.
+  \item A heuristic threshold on answer and question length and refusal
     phrases.
-  \item A source-reference filter that rejects samples referring to
-    ``the document'' or ``the passage'' rather than the subject matter
-    --- a model trained on such samples learns to cite a source it will
-    never have access to at inference time.
-  \item Deduplication across the full session (Section~\ref{sec:dedup}).
-  \item An LLM judge that reads each sample alongside its source chunk
-    and scores it 1--5 on groundedness, rejecting anything below a
-    configurable threshold. This step \emph{fails closed}: a sample the
-    judge cannot score (malformed output, API error, missing key, or a
-    call skipped by the budget cap of Section~\ref{sec:budget}) is
-    rejected rather than passed through by default.
+  \item An LLM judge. It reads a chunk's samples together with the source
+    chunk, in batches of up to ten per call, and returns for each sample
+    an overall quality score from 1 to 5 (accurate, specific and useful)
+    and two independent yes/no judgements: \emph{grounded} (every factual
+    claim is supported by the passage) and \emph{standalone} (the sample
+    makes sense without the passage). A sample passes only if it is
+    grounded, standalone, and scores at least the configured minimum.
+    Samples judged in the same batch are not judged independently of one
+    another. This step \emph{fails closed}: a sample the judge cannot score
+    (malformed output, API error, missing key, or a call skipped by the
+    budget cap of Section~\ref{sec:budget}) is rejected rather than passed
+    through. Judge rejections are recorded with a \texttt{judge:} prefix,
+    so they can be told apart from the regular-expression filter's.
 \end{enumerate}
 
-The judge is empirically reliable on unambiguous failures (contradicted
-facts, unsupported claims, source self-reference) and less reliable near
-the threshold on answers that are vague but not technically wrong ---
-consistent with known limitations of LLM-as-judge evaluation
-\cite{zheng2023judging}. Operators who prefer precision over recall can
-raise the score threshold.
+How well the judge agrees with human judgement has not been measured
+(Section~\ref{sec:eval-limits}). LLM judges are known to be least
+consistent near a decision threshold \cite{zheng2023judging} and to favour
+text resembling their own output \cite{panickssery2024selfpref}, which
+matters here because the judge is often the same model that generated the
+samples. Operators who prefer precision over recall can raise the minimum
+score.
 
 \subsubsection{Deduplication: exact and near-duplicate}
 \label{sec:dedup}
-An earlier implementation fingerprinted a sample by MD5-hashing only the
-first 200 characters of its concatenated message content, which is
-wrong in both directions: two unrelated samples that happen to share an
-opening sentence (common in templated agency guidance) collide as
-false-positive duplicates, while the near-paraphrases that
-\texttt{generation.n\_per\_chunk}$>1$ produces by design --- differing
-in wording beyond the first 200 characters, which is the normal, expected
-shape of asking an LLM for several question--answer pairs from the same
-passage --- are never caught, since they hash differently. The exact-hash
-check now covers the full message content, fixing the false-positive
-direction, and is supplemented with a near-duplicate pass: token-set
-Jaccard similarity computed only against other samples generated from the
-\emph{same source chunk} (bounded comparison set, avoiding an $O(n^2)$
-scan over the whole session), rejecting anything at or above a
-configurable threshold (\texttt{quality.near\_dup\_threshold}, default
-0.85). Without this, a session could log ``deduplication: passing'' while
-the surviving samples were still substantially redundant paraphrases of
-one another --- distinct from, and prior to, the cross-page leakage that
-group-aware splitting (Section~\ref{sec:leakage}) addresses.
+The exact-duplicate check hashes the full content of a sample's messages.
+Hashing only a prefix would be wrong in both directions: unrelated samples
+that share an opening sentence (common in templated agency guidance) would
+collide as false duplicates, while paraphrases that diverge after the
+prefix would not be caught. The near-duplicate check computes the
+token-set Jaccard similarity between a sample and the samples already
+accepted from the \emph{same source chunk} (a bounded comparison, avoiding
+an $O(n^2)$ scan over the whole session) and rejects anything at or above
+\texttt{quality.near\_dup\_threshold} (default 0.85). It targets the
+redundancy that $n>1$ samples per chunk invites, which is distinct from,
+and prior to, the cross-page leakage that group-aware splitting
+(Section~\ref{sec:leakage}) addresses. In the benchmark it never fired
+(Section~\ref{sec:eval-results}), and word-overlap similarity may simply be
+unable to see a paraphrase; an embedding-based comparison is the natural
+alternative.
 
 \subsection{Export}
+\label{sec:export}
 Approved samples are written as JSONL, Parquet, and CSV, and optionally
 published to the HuggingFace Hub or Kaggle. Every record carries
 \texttt{page\_id}, \texttt{chunk\_id}, \texttt{chunk\_index}, and
@@ -301,25 +342,23 @@ document, which matters wherever attribution or provenance is required
 downstream (Section~\ref{sec:limitations}, project issue \#19).
 
 \subsubsection{Dataset introspection}
-Because quality scoring, deduplication, and splitting all happen inside
-a single run, their outcomes were, until recently, visible only as
-transient log lines during that run --- not queryable afterward, and not
-available at all for a session viewed later. A \texttt{dataforge stats
-<session\_id>} command now reports, read-only, over data the pipeline
-already computes and now persists (the per-sample rejection reason is
-written to the session database rather than only logged): approval
-rate, a rejection-reason breakdown, the quality-score distribution,
-question/answer length statistics, and the realized train/validation/test
-proportions from the most recent export. Realized proportions are
-reported rather than compared against the recipe's configured target
-ratios, since target ratios are not yet persisted per-session outside of
-the export step itself; target-vs-realized comparison is a natural
-follow-up once that is stored.
+\label{sec:introspection}
+Quality scoring, deduplication and splitting all happen inside a run, so
+their outcomes are persisted rather than only logged: each sample's
+rejection reason is stored in the session database. \texttt{dataforge stats
+<session\_id>} reports, read-only, the approval rate, a breakdown of
+rejection reasons, the quality-score distribution, question and answer
+length statistics, and the realized train/validation/test proportions of
+the most recent export. Target ratios are not persisted per session
+outside the export step, so realized proportions are reported without a
+comparison against the target. After \texttt{dataforge run}, each session
+also holds a \texttt{run\_summary.json} with timing per stage, LLM calls
+and cost, budget use, and errors.
 
 \section{Concurrency: streaming vs.\ batch}
 \label{sec:streaming}
 
-Run strictly sequentially, the four collection-through-generation stages
+Run strictly sequentially, the collection, chunking and generation stages
 leave the LLM --- the highest-latency, highest-cost component --- idle
 for the entire duration of the crawl. DataForge's streaming mode
 (\texttt{stream: true}, the recipe default) instead runs collection,
@@ -349,7 +388,9 @@ cannot be evaluated on a stream in isolation.
 
 Sessions are interchangeable between modes at resume time: a run paused
 under batch execution can be resumed with streaming enabled, and vice
-versa, since both modes checkpoint to the same schema.
+versa, since both modes checkpoint to the same schema. The benefit of
+overlapping the stages is a design rationale here, not a measured result:
+the benchmark ran in streaming mode only (Section~\ref{sec:eval-limits}).
 
 \section{Leak-aware dataset splitting}
 \label{sec:leakage}
@@ -358,9 +399,9 @@ versa, since both modes checkpoint to the same schema.
 A synthetic dataset produced this way has a clustered generative
 structure: $n$ samples are drawn per chunk, and multiple chunks are
 drawn per page. Two samples generated from the same chunk --- or from
-adjacent, overlapping chunks of the same page --- are frequently
-near-paraphrases of one another, both in question and in the grounding
-text available to answer it. This is precisely the condition under
+adjacent, overlapping chunks of the same page --- draw on the same
+underlying facts and the same grounding text, even when they are worded
+differently. This is precisely the condition under
 which a uniformly random train/test split violates the independence
 assumption implicit in held-out evaluation: memorization of a
 training-set paraphrase can trivially answer a test-set item drawn from
@@ -376,16 +417,24 @@ DataForge's export stage implements \emph{group-aware} splitting: the
 grouping key (\texttt{export.split.group\_by}, default \texttt{page})
 determines the unit that must not span a split boundary. Groups ---
 whole pages by default, or URLs or chunks --- are assigned to
-train/validation/test as atomic units using a seeded random assignment
-(\texttt{export.split.seed}) targeting the configured proportions, and
-the resulting assignment is verified (no group's members appear in more
-than one split) before any file is written, rather than assumed correct
-from the assignment procedure alone. This is a direct application of
-group-based cross-validation splitting (as in, e.g.,
-\texttt{GroupKFold} / \texttt{GroupShuffleSplit} in
-scikit-learn~\cite{pedregosa2011scikit}) to synthetic
-instruction-dataset construction, where the natural grouping key is the
-source document rather than a subject or session identifier.
+train/validation/test as atomic units, and the resulting assignment is
+verified (no group's members appear in more than one split) before any
+file is written, rather than assumed correct from the assignment
+procedure alone. Assignment is a deterministic, largest-first greedy:
+groups are ordered by size, and each is placed in the split furthest
+below its target share. The seed (\texttt{export.split.seed}) only
+breaks ties between groups of equal size, so which pages are held out is
+decided by size rank, not at random: the second- and third-largest pages
+tend to become the validation and test sets. Placing large groups first
+keeps realized proportions close to the targets, but a held-out set
+chosen by size can differ systematically from the training set, and with
+few groups a split can end up empty (it is then reported as a warning).
+A seeded random assignment among groups of similar size is a
+straightforward alternative. The approach applies group-based
+cross-validation splitting (as in, e.g., \texttt{GroupKFold} /
+\texttt{GroupShuffleSplit} in scikit-learn~\cite{pedregosa2011scikit}) to
+synthetic instruction-dataset construction, where the natural grouping
+key is the source document rather than a subject or session identifier.
 
 \subsection{Why this matters in practice}
 Absent this mechanism, a practitioner who fine-tunes and evaluates on a
@@ -442,6 +491,416 @@ row-level shuffle is not yet implemented; it is tracked as an open item
 (Section~\ref{sec:limitations}, project issue \#20) rather than
 presented as shipped.
 
+\section{Empirical evaluation}
+\label{sec:eval}
+
+The preceding sections describe what DataForge is designed to do. This
+section reports what it did when run end to end against real websites:
+what it fetched, generated, approved and rejected, what that cost and how
+long it took, whether the split leaked pages, and which of the design
+claims above did not hold until the benchmark exposed them. It does not
+measure the quality of a model fine-tuned on the output, and it does not
+yet validate the LLM judge against human labels
+(Section~\ref{sec:eval-limits}).
+
+\subsection{Setup}
+\label{sec:eval-setup}
+We selected sites that differ in structure and domain, then crawled only
+those that passed a terms review (Section~\ref{sec:eval-access}). Four
+remained:
+\begin{itemize}[leftmargin=1.5em]
+  \item \textbf{Ready.gov} (U.S. disaster preparedness): a flat sitemap
+    of 372 URLs, no \texttt{Crawl-delay}.
+  \item \textbf{USCIS} (U.S. immigration): a sitemap index expanding to
+    19{,}623 URLs, with \texttt{Crawl-delay: 10}.
+  \item \textbf{The Python tutorial} (technical documentation): the
+    site's sitemap lists only eight version landing pages, so discovery
+    must fall back to a breadth-first crawl from the seed
+    \texttt{/3/tutorial/}.
+  \item \textbf{iantoo.space} (a small personal site, 8 sitemap URLs),
+    owned by the author and crawled with the owner's consent.
+\end{itemize}
+Every run used the same recipe settings apart from scoping: at most 20
+URLs (\texttt{source.max\_urls}), a \$1.00 spending cap
+(\texttt{generation.max\_cost\_usd}), three samples per chunk, 512-token chunks with 64-token overlap, the LLM
+judge enabled at \texttt{min\_judge\_score: 4}, streaming mode, and an
+80/10/10 split grouped by page with seed 42. Generation and judging both
+used \texttt{gpt-4o-mini} through LiteLLM. Runs were made on 2026-09-22 on
+Windows~11 with Python~3.11, from commit \texttt{73593bf} (the first three
+sites) and \texttt{4cc258b} (iantoo.space; it differs only in TLS
+trust-store handling and the benchmark's own preflight check). Both
+commits contain the fixes of Section~\ref{sec:eval-defects} but predate
+the version bump, so the runs record version 2.3.3; the fixes found in
+the later code review are not included. Earlier runs made while finding
+those defects are discarded, and only the final run for each site is
+reported. The recipes,
+the site list with its terms reviews, and the scripts that produced every
+number below are in the repository under \texttt{evals/pipeline/}; each
+run also writes a \texttt{run\_summary.json} (timing per stage, LLM calls,
+cost, budget, errors) so the figures can be recomputed from disk.
+
+\subsection{Access and terms}
+\label{sec:eval-access}
+The benchmark runner refuses to crawl a site until a person has recorded a
+terms review, and runs a preflight that fetches \texttt{robots.txt} and the
+seed page with DataForge's own User-Agent and skips any site that serves a
+bot challenge or redirects to another host. Fourteen sites were considered;
+Table~\ref{tab:access} summarizes the outcome.
+
+\begin{table}[h]
+  \centering
+  \small
+  \caption{Sites considered for the benchmark and why each was included or
+  excluded. Quotations are from each site's own terms or policy pages,
+  retrieved 2026-09-22.}
+  \label{tab:access}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{3.1cm}
+                     >{\raggedright\arraybackslash}p{2.4cm}
+                     >{\raggedright\arraybackslash}p{8.6cm}@{}}
+    \toprule
+    Site & Outcome & Basis \\
+    \midrule
+    USCIS & Included & ``Information presented on this WWW site is
+      considered public information and may be distributed or copied.'' \\
+    Ready.gov (FEMA) & Included & FEMA: ``Most material on FEMA.gov is free
+      of copyright and may be copied and distributed without permission'';
+      the page lists Ready.gov as a FEMA domain but does not extend these
+      terms to it explicitly. \\
+    Python docs & Included & Documentation under the PSF License Version~2. \\
+    iantoo.space & Included & Owner's consent. \\
+    \midrule
+    KRA (Kenya) & Excluded: prohibited & Terms restrict ``data mining, data
+      harvesting, data extracting or any other similar activity''; yet
+      \texttt{robots.txt} returns 404, which by convention permits crawling. \\
+    eCFR & Excluded: blocked & \texttt{robots.txt} allows the page, but
+      requests are redirected to a bot block stating that ``programmatic
+      access \ldots\ is limited to access to our extensive developer APIs.'' \\
+    Kenya Power & Excluded: no grant & \texttt{robots.txt}: ``Allow all
+      crawlers''; footer: ``All rights reserved.'' \\
+    KEBS, Ministry of Health, Univ.\ of Nairobi, JKUAT, Strathmore (Kenya)
+      & Excluded: no grant & Copyright or ``All Rights Reserved'' notices;
+      no reuse statement found. \\
+    FAA & Excluded: unclear & No reuse statement; the only policy text is a
+      government-system banner: ``provided for U.S. Government-authorized
+      use only.'' \\
+    CDC & Excluded: not reviewed & \texttt{robots.txt} returned 403 to a
+      generic User-Agent but 200 to DataForge's minutes later. \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Two observations follow. First, \texttt{robots.txt} and the terms that
+actually govern reuse disagreed in both directions: KRA has no
+\texttt{robots.txt} at all but prohibits data extraction in its terms;
+eCFR's \texttt{robots.txt} permits the page while the site blocks
+automated clients and points them to an API; and Kenya Power explicitly
+invites all crawlers while reserving all rights in the content. A crawler
+that treats \texttt{robots.txt} compliance as permission would have
+crawled all three. Second, the Kenyan sites we examined all reserved their
+rights, whereas the U.S. federal text we used is public domain by statute
+\cite{usc17sec105} and two of those sites say so explicitly. Some of the
+Kenyan sites are not government bodies (Strathmore is a private
+university; Kenya Power is a listed company), so their notices are
+ordinary reserved rights. For the government sites, Kenyan law excludes
+written laws and judicial decisions from copyright (the definition of
+``literary work'' in s.~2 of \cite{kenyacopyright2001}), but not other
+government publications such as agency guidance: copyright in works
+commissioned by the Government vests in the Government, and works made by
+employees in the course of their employment pass to the employer
+(ss.~25(1), 31(1)(b) and 31(2)). Seven non-randomly chosen sites cannot
+show a general pattern, but the difference in legal starting points is
+real: a dataset built only from sites that grant reuse can be skewed by
+jurisdiction, which matters for domains such as public services, where
+the relevant guidance is national.
+
+\subsection{Pipeline results}
+\label{sec:eval-results}
+
+\begin{table}[h]
+  \centering
+  \small
+  \caption{Benchmark results per site (each capped at 20 URLs and
+  \$1.00). ``Approved'' is the LLM judge's verdict, not a human one; see
+  Section~\ref{sec:eval-limits}.}
+  \label{tab:bench}
+  \begin{tabular}{@{}l r r r r r r r@{}}
+    \toprule
+    Site & Pages & Chunks & Samples & Approved & LLM calls & Cost (USD) & Wall (s) \\
+    \midrule
+    Ready.gov       & 20 &  64 & 192 & 189 (98.4\%) & 128 & 0.0248 &  91 \\
+    USCIS           & 20 &  53 & 159 & 152 (95.6\%) & 106 & 0.0222 & 296 \\
+    Python tutorial & 17 & 153 & 456 & 447 (98.0\%) & 305 & 0.0663 & 258 \\
+    iantoo.space    &  6 &   8 &  24 &  23 (95.8\%) &  16 & 0.0031 &  14 \\
+    \midrule
+    Total           & 63 & 278 & 831 & 811 (97.6\%) & 555 & 0.1164 & 659 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Table~\ref{tab:bench} gives the per-site results. All four runs completed
+with no errors and no budget-skipped calls; the most expensive run used
+6.6\% of its \$1.00 cap. Cost per approved sample was between
+\$0.00013 and \$0.00015 on every site, so cost scaled with the amount of
+text rather than with the site: the Python tutorial's pages are long (a
+median of 2{,}152 words, against 831 for Ready.gov and 576 for USCIS),
+giving 153 chunks from 17 pages. Every selected page was fetched
+successfully. On the Python tutorial the crawl fallback stopped at the
+recipe's limit of 40 pages (\texttt{crawl.max\_crawl\_pages}), of which the
+\texttt{/3/tutorial/} filter kept 17. The number of LLM calls is about twice
+the number of chunks because the judge makes one call per chunk: for
+example, 128 calls for Ready.gov's 64 chunks.
+
+The stage timings suggest which resource limited each run, although we
+did not measure LLM idle time directly. USCIS spent 212.7 of its 296
+seconds in the streaming stage, close to the 200-second floor that 20
+pages at one request per 10 seconds imposes, and a further 54.2 seconds
+in discovery fetching its sitemap index and five sub-sitemaps at the same
+spacing, which is consistent with a run limited by the site's declared
+crawl delay. The Python tutorial, with no crawl delay and nine times as
+many chunks as pages, spent 142.5 seconds streaming and 83.8 seconds in
+the judge, consistent with a run limited by the LLM.
+
+The quality stage rejected 20 of 831 samples (2.4\%). The free filters
+rejected 11: 9 caught by the source-reference regular expressions and 2
+exact duplicates. The judge rejected 9: 6 as not standalone and 3 with a
+score of 3, below the minimum of 4. (In these runs both kinds of
+source-reference rejection were recorded under the same label; they are
+separated here by their recorded scores, and the labels are now
+distinct.) No sample was rejected as ungrounded or as a near-duplicate,
+and the judge's scores sit at the ceiling: every approved sample scored 4
+or 5, and 724 of 811 (89\%) scored 5. The near-duplicate check could not
+have fired at its 0.85 threshold: across the 831 pairs of samples from the
+same chunk, token-set Jaccard similarity had a median of 0.14 and a
+maximum of 0.58. Either samples from one chunk are worded quite
+differently, or word overlap cannot detect paraphrase; this benchmark
+cannot tell which.
+
+Every export's training, validation and test files were page-disjoint, as
+the group-aware split guarantees, but the held-out splits were tiny and
+chosen by size rank (Section~\ref{sec:leakage}). The Python tutorial's
+validation set was a single 52-sample page and its test set two pages of
+39 and 6 samples; USCIS's validation set was a single page. iantoo.space,
+with approved samples from only 5 pages, received no test split at all;
+DataForge now warns when this happens.
+
+\subsection{Defects the benchmark exposed}
+\label{sec:eval-defects}
+The unit tests for each component passed before the benchmark was run.
+The end-to-end runs nonetheless exposed six defects, all fixed in version
+2.4.0. The first five have regression tests that fail on the previous
+code; the sixth was verified against the affected sites and against
+public test hosts with self-signed and expired certificates, and its test
+checks only that verification stays enabled.
+
+\begin{enumerate}[leftmargin=1.5em]
+  \item \textbf{\texttt{Crawl-delay} was not applied while scraping.}
+    DataForge logged ``limiting to 0.100 req/s'' for USCIS, then fetched
+    all 20 pages in about four seconds. The flag recording that a domain's
+    delay had been applied was process-wide, so the delay reached only the
+    first rate limiter created (discovery's); the scraping stage built its
+    own limiter and ran at the default rate.
+  \item \textbf{The rate limiter ran at about twice its configured rate.}
+    The token bucket recorded the time before sleeping, so the next call
+    counted the sleep as refill and went through free; it also allowed an
+    initial burst of twice the per-second rate.
+  \item \textbf{Stage boundaries and jitter shortened individual gaps.}
+    With the first two fixed, the median gap to USCIS was 9.99~seconds,
+    but the first scrape request followed the last sitemap request by
+    3.95~seconds (each stage still had its own limiter), and random jitter
+    counted as refill let single gaps fall to 8.6~seconds. After the fix
+    (one limiter per run; jitter can only lengthen a gap), the 26 requests
+    to USCIS had a minimum gap of 9.73~seconds and a median of
+    10.16~seconds, measured between response log timestamps, so variation
+    in response latency accounts for the residual shortfall.
+  \item \textbf{A shallow sitemap suppressed crawling.} Given the seed
+    \texttt{/3/tutorial/}, discovery found the site's sitemap, returned its
+    eight unrelated version roots, and dropped the seed; the site could
+    not be crawled at all. Discovery now falls back to a crawl from the
+    seed when the sitemap lists nothing under the seed's path.
+  \item \textbf{Relative links resolved against the site root.} From
+    \texttt{/3/tutorial/}, the link \texttt{../genindex.html} was resolved
+    to \texttt{/genindex.html} rather than \texttt{/3/genindex.html}, so
+    the crawler left the section it was asked to cover.
+  \item \textbf{Valid sites failed TLS verification.} Four of the Kenyan
+    sites could not be fetched with Python's default certificate bundle:
+    three send an incomplete certificate chain and one chains to a root
+    absent from the \texttt{certifi} bundle, although browsers accept all
+    four. DataForge now verifies against the operating system's trust
+    store; verification is never disabled, and self-signed and expired
+    certificates are still rejected. (These sites were then excluded on
+    terms, not on access.)
+\end{enumerate}
+
+A review of the code after the benchmark found three further politeness
+gaps, also fixed in 2.4.0: the \texttt{robots.txt} request itself bypassed
+the rate limiter (one request per site in these runs); a \texttt{robots.txt}
+that returned a server error was parsed as if it were the file, which in
+effect allowed everything, where RFC~9309 requires treating the site as
+disallowed \cite{rfc9309}; and the optional browser fallback bypassed
+\texttt{robots.txt}, the rate limiter and DataForge's User-Agent. The
+browser fallback did not run in the benchmark (Playwright was not
+installed).
+
+The first three defects matter most, because Section~\ref{sec:collection}
+describes \texttt{Crawl-delay} enforcement as a design property, and it
+was true of the rate limiter in isolation but not of the assembled
+pipeline until version~2.4.0. Politeness guarantees have to be measured
+end to end, with timing, against a site that declares them.
+
+\subsection{What these results do not show}
+\label{sec:eval-limits}
+\begin{itemize}[leftmargin=1.5em]
+  \item \textbf{The approval rate is not evidence of quality.} The same
+    model generated and judged every sample, LLM judges favour text
+    resembling their own output \cite{panickssery2024selfpref}, and the
+    judge scored 89\% of approved samples at the maximum. An approval rate
+    of 97.6\% says that the judge rarely objected, not that the samples are
+    correct. Judging several samples in one call also means they are not
+    judged independently. The repository includes a blind audit
+    (\texttt{evals/pipeline/audit.py}) that draws equal numbers of approved
+    and rejected samples per site for a person to label without seeing the
+    judge's verdict, from which judge precision and rejection precision
+    can be computed. Those labels had not been collected at the time of
+    writing; we will report them in a later version rather than infer
+    quality from the judge alone.
+  \item \textbf{The scale is small.} Twenty URLs per site is enough to
+    show where time and cost go and to expose the defects above, but not
+    to give confidence intervals, and held-out splits of zero to two pages
+    are too small to evaluate a model on.
+  \item \textbf{URL selection was not random.} \texttt{max\_urls} keeps
+    the first N URLs in sitemap order.
+  \item \textbf{Streaming was not compared with batch mode.} Every run
+    used streaming, so the benefit of overlapping collection with
+    generation (Section~\ref{sec:streaming}) is not measured here.
+  \item \textbf{One model, one run per site, one platform.} Results
+    depend on \texttt{gpt-4o-mini}; operating-system trust stores differ,
+    and on Linux the store does not fetch missing intermediate
+    certificates, so the TLS fix may not help there.
+  \item \textbf{No downstream evaluation.} The paper's central claim, that
+    a page-grouped split avoids an inflated held-out score, is argued
+    rather than measured: fine-tuning on page-grouped and random splits of
+    the same data and comparing held-out scores would test it directly
+    (\texttt{evals/harness/}). It is not reported here.
+\end{itemize}
+
+\section{Agent integration via the Model Context Protocol}
+\label{sec:mcp}
+
+The recipe format and distinct exit codes of Section~\ref{sec:overview} already make
+DataForge scriptable. A growing share of that scripting, however, is done
+not by a human writing a shell script but by an LLM agent running inside a
+coding assistant or chat client. DataForge supports two integration paths
+for such agents, at different costs.
+
+\subsection{Shell use with a bundled guide}
+The lowest-cost path needs no protocol at all: any agent that can run
+shell commands can drive the CLI, provided it knows which commands are
+safe to call without a terminal. \texttt{dataforge agent-guide} prints a
+guide shipped inside the installed package, so it is available after
+\texttt{pip install} without the source repository. It separates the
+non-interactive commands (\texttt{run}, \texttt{run --dry-run},
+\texttt{init-recipe}, \texttt{explore}, and the \texttt{--json} forms of
+\texttt{sessions}, \texttt{stats} and \texttt{view}) from those that open
+interactive menus and would hang a non-TTY shell, and states the
+configuration, workflow, exit-code and responsible-use rules an agent must
+follow. A test asserts that every command the guide names exists, so the
+guide cannot drift silently from the CLI.
+
+\subsection{A local MCP server}
+The Model Context Protocol (MCP) is an open standard, introduced by
+Anthropic in November 2024, for connecting AI applications to external
+tools and data sources \cite{anthropic2024mcp}. An MCP server advertises
+\emph{tools} with typed input schemas that a client lets its model call.
+Hosting is not required: under the protocol's \texttt{stdio} transport,
+the client launches the server as a subprocess and exchanges messages over
+its standard streams \cite{mcpspec2026}. \texttt{dataforge mcp} is such a
+server; in Claude Code, for example, it is registered with
+\texttt{claude mcp add dataforge -{}- dataforge mcp}
+\cite{claudecodemcp}. The server exposes seven tools
+(Table~\ref{tab:mcp-tools}).
+
+\begin{table}[h]
+  \centering
+  \small
+  \caption{Tools exposed by \texttt{dataforge mcp}.}
+  \label{tab:mcp-tools}
+  \begin{tabular}{@{}l l p{7.6cm}@{}}
+    \toprule
+    Tool & Effect & Purpose \\
+    \midrule
+    \texttt{explore\_site}    & Network read   & List a site's sitemap URLs before a recipe is written \\
+    \texttt{validate\_recipe} & Read-only      & Dry-run a recipe and return the execution plan \\
+    \texttt{start\_run}       & Crawls, spends & Launch \texttt{dataforge run} in the background; return a run ID \\
+    \texttt{run\_status}      & Read-only      & Running or finished, exit code and its meaning, session ID, log tail \\
+    \texttt{list\_sessions}   & Read-only      & Sessions in the project database \\
+    \texttt{session\_stats}   & Read-only      & The session statistics of Section~\ref{sec:introspection}, as JSON \\
+    \texttt{view\_samples}    & Read-only      & Sample records from any pipeline stage \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Three design decisions follow from the pipeline's characteristics rather
+than from MCP itself. First, a full run takes minutes to hours --- longer
+than a client should hold a single tool call open --- so a run is split
+into \texttt{start\_run}, which returns immediately, and
+\texttt{run\_status}, which the agent polls. Second, the session tools
+(\texttt{list\_sessions}, \texttt{session\_stats}, \texttt{view\_samples})
+invoke the CLI's own \texttt{--json} output rather than reimplementing
+its queries, and \texttt{validate\_recipe} runs the CLI's dry run, so the
+CLI stays the source of truth for those; \texttt{explore\_site} calls the
+discovery library directly. Third, and most important, the safety
+constraints that matter most are \emph{enforced by the server} rather
+than requested of the model. \texttt{start\_run} refuses a recipe that
+sets no spending cap (\texttt{generation.max\_cost\_usd} or
+\texttt{generation.max\_llm\_calls}, Section~\ref{sec:budget}) unless the
+caller explicitly opts in, and it always refuses a recipe that disables
+\texttt{robots.txt} compliance, because an agent has no way to verify the
+written permission that setting presupposes; such a run must be started
+by the user from their own terminal.
+
+This division is deliberate. The specification requires clients to treat
+a server's tool annotations (such as a ``read-only'' hint) as untrusted,
+and recommends that a human remain in the loop with the ability to deny
+any tool invocation \cite{mcpspec2026}. Those are client-side safeguards.
+A rule written only into a model's instructions can be ignored; a rule
+enforced by the server cannot be bypassed \emph{through the server}. It
+does not bind an agent that also has a shell and runs \texttt{dataforge
+run} directly, and the guards do not cover every setting: nothing stops a
+recipe from raising \texttt{crawl.rate\_limit} on a site that declares no
+\texttt{Crawl-delay}. The guide of the previous subsection is
+served both as the server's instructions and as a readable resource, so
+both integration paths carry the same responsible-use rules
+(Section~\ref{sec:responsible}).
+
+\subsection{Potential benefits}
+We have not measured the effect of agent access on dataset quality or on
+operator effort; the following are expected benefits, not results.
+\begin{itemize}[leftmargin=1.5em]
+  \item \textbf{Typed interaction instead of text parsing.} Tools accept
+    schema-validated arguments and return JSON, so an agent does not have
+    to infer structure from terminal output formatted for humans.
+  \item \textbf{A lower barrier for domain experts.} An operator can
+    describe the target domain in natural language and have the agent
+    explore the sitemap, draft a scoped recipe, dry-run it, and report
+    the resulting statistics, while the recipe itself remains the
+    reviewable, version-controlled artifact of Section~\ref{sec:overview}.
+  \item \textbf{Clients without a shell.} Desktop and chat clients that
+    cannot run arbitrary commands can still drive the pipeline.
+  \item \textbf{Reproducible agent configuration.} Claude Code's
+    project-scoped MCP configuration is a file (\texttt{.mcp.json})
+    committed to the repository \cite{claudecodemcp}, so the tools an
+    agent could use can be versioned alongside the recipes it ran.
+  \item \textbf{Composition with other servers.} One agent session can
+    combine DataForge with other MCP servers, for example to inspect a
+    published dataset or to file an issue about a failed run.
+\end{itemize}
+
+The current server keeps its registry of background runs in memory: a
+restarted server can still read a run's log but no longer knows its exit
+code. It also offers no tool to pause or cancel a run and sends no
+progress notifications, so the agent must poll. None of these is
+fundamental, but each is a gap in the present implementation.
+
 \section{Related work}
 
 \textbf{Web-scale collection.} Large text corpora for language model
@@ -459,19 +918,30 @@ and its descendants (Alpaca~\cite{taori2023alpaca},
 WizardLM~\cite{xu2023wizardlm}) generate instruction-tuning data by
 prompting a strong model, typically from a small seed set or from raw
 model generations rather than a grounding document. DataForge's
-generation stage is closer to retrieval/document-grounded synthetic QA
-generation, where each sample is anchored to a specific source chunk ---
-which is also what makes the source-reference quality filter and the
-group-aware split meaningful, since grounding is both the point of the
-dataset and the source of its leakage risk.
+generation stage is closer to document-grounded synthetic QA generation,
+where each sample is anchored to a source passage: generating questions
+from passages and filtering them for consistency
+\cite{alberti2019synthetic}, training QA models on synthetic question--answer
+pairs at scale \cite{puri2020training}, and converting unannotated text
+into task-specific instruction-tuning data with a dedicated generator
+model \cite{nayak2024bonito}. Grounding is what makes the source-reference
+filter and the group-aware split meaningful, since it is both the point of
+the dataset and the source of its leakage risk. Open-source frameworks
+such as distilabel \cite{distilabel} provide general building blocks for
+synthetic-data pipelines; DataForge differs mainly in owning the
+collection end (crawling politely and resumably) and the export end
+(leak-aware splitting) around the generation step.
 
 \textbf{LLM-as-judge evaluation.} Using a capable LLM to score generated
 text has become common for both dataset filtering and model evaluation
-\cite{zheng2023judging}. DataForge's quality judge applies this
-pattern narrowly --- scoring groundedness of a sample against its own
-source chunk, a task closer to a natural-language-inference check than
-open-ended quality judgment --- specifically to bound the judge's known
-weakness on more subjective, open-ended criteria.
+\cite{zheng2023judging}, and LLM judges are known to favour their own
+generations \cite{panickssery2024selfpref}. DataForge's judge sees each
+sample next to its own source chunk and answers two narrow yes/no
+questions (is every claim supported by the passage; does the sample make
+sense without it), which are closer to a natural-language-inference check
+than to open-ended judgement, alongside a general 1--5 quality score.
+Whether the narrower questions make it more reliable than open-ended
+judging is not established here (Section~\ref{sec:eval-limits}).
 
 \textbf{Near-duplicate leakage.} Deduplication of near-identical text
 across pretraining corpora is known to affect both training efficiency
@@ -513,7 +983,7 @@ A practical implication for a tool like DataForge is that the same
 processed corpus it already produces as a byproduct of dataset
 construction --- cleaned, boilerplate-stripped, token-bounded chunks with
 persisted source lineage (\texttt{page\_id}, \texttt{chunk\_id},
-\texttt{source\_url}; Section~2.6) --- is also exactly the unit of text a
+\texttt{source\_url}; Section~\ref{sec:export}) --- is also exactly the unit of text a
 RAG retriever indexes. Nothing in the current pipeline exposes this
 chunk store as a retrieval index; doing so (e.g., an export target that
 writes chunks with embeddings to a vector index rather than, or in
@@ -525,6 +995,7 @@ present this as a natural extension (Section~\ref{sec:limitations})
 rather than a shipped capability.
 
 \section{Responsible use and misuse considerations}
+\label{sec:responsible}
 \label{sec:misuse}
 
 DataForge automates two activities that are each individually subject to
@@ -539,13 +1010,19 @@ easier to run at a scale and cadence that a manual scraping script is
 not, which raises the ceiling on how much load an operator can put on a
 target site, intentionally or not. DataForge honors \texttt{robots.txt}
 by default, including a declared \texttt{Crawl-delay}
-(Section~2.3), and exposes \texttt{source.ignore\_robots} as an explicit,
+(Section~\ref{sec:collection}), and exposes \texttt{source.ignore\_robots} as an explicit,
 named opt-out rather than a default — a design choice intended to make
 disabling politeness a deliberate, auditable act in a committed recipe
 file rather than an accidental one. This is a technical control, not a
 legal or ethical one: \texttt{robots.txt} compliance does not by itself
 establish that scraping a given site is permitted under its Terms of
-Service, and DataForge does not attempt to interpret ToS text. Rate
+Service, and DataForge does not attempt to interpret ToS text. The
+benchmark made this concrete (Section~\ref{sec:eval-access}): one site
+with no \texttt{robots.txt} prohibits data extraction in its terms,
+another permits the page in \texttt{robots.txt} but blocks automated
+clients, and a third invites all crawlers while reserving all rights. The
+benchmark therefore gates each site on a recorded human terms review, and
+the agent integration of Section~\ref{sec:mcp} carries the same rule. Rate
 limiting defaults to a conservative 2 requests/second/domain; nothing
 prevents an operator from configuring a much higher rate against a site
 with no declared \texttt{Crawl-delay}; this remains an explicit
@@ -556,7 +1033,7 @@ produces new text (a question and answer) rather than verbatim excerpts,
 the resulting dataset is one step removed from its source in a way that
 can obscure where the underlying facts came from, particularly once
 exported without its \texttt{source\_url} lineage (e.g., via the
-Unsloth-format export path noted in Section~2.6). This is a specific
+Unsloth-format export path noted in Section~\ref{sec:export}). This is a specific
 instance of the broader dataset-provenance problem documented across the
 training-data ecosystem, where licensing and attribution information is
 frequently lost or misrepresented as data moves between hosting sites and
@@ -571,7 +1048,7 @@ not something the tool can verify on an operator's behalf.
 pipeline is only as reliable as its generation goal and quality
 thresholds make it, and the tool's own \texttt{quality}-stage terminology
 (``approved,'' ``passed'') can read as a stronger correctness guarantee
-than a threshold-based LLM judge (Section~2.6, and
+than a threshold-based LLM judge (Section~\ref{sec:quality}, and
 \cite{zheng2023judging} on the general limits of LLM-as-judge evaluation)
 actually provides, particularly near the score threshold. Presenting an
 approved export as an unqualified ground-truth dataset --- rather than as
@@ -596,7 +1073,7 @@ enforced by the pipeline itself.
 
 None of these considerations are unique to DataForge --- they apply to
 any tool that automates web collection and LLM-based content generation
-at scale --- but an unattended, cron-friendly design (Section~1) is
+at scale --- but an unattended, cron-friendly design (Section~\ref{sec:overview}) is
 specifically what makes it practical to run such a pipeline
 unsupervised, which raises rather than lowers the importance of stating
 these risks explicitly alongside the system's capabilities.
@@ -604,10 +1081,14 @@ these risks explicitly alongside the system's capabilities.
 \section{Limitations and future work}
 \label{sec:limitations}
 
-The LLM judge is a single model call scoring groundedness on a 1--5
-scale; it does not currently ensemble multiple judges or models, which
-would likely improve reliability near the threshold at proportionally
-higher cost. The BFS fallback crawler and SPA (JavaScript-rendered page)
+The LLM judge is a single model, called once per chunk, that gives a 1--5
+quality score and grounded/standalone judgements; it does not ensemble
+multiple judges or models, which would likely improve reliability near
+the threshold at proportionally higher cost, and using a different model
+from the generator would reduce self-preference. Its agreement with human judgement is not yet measured: the
+blind audit of Section~\ref{sec:eval-limits} is built but its labels are
+pending, and in the benchmark the same model generated and judged every
+sample. The BFS fallback crawler and SPA (JavaScript-rendered page)
 detection are heuristic rather than guaranteed to find all in-scope
 content on sites without a sitemap. Group-aware splitting addresses
 leakage from the generation stage's own repeated sampling per chunk, but
@@ -619,7 +1100,7 @@ extension.
 
 Two gaps identified during a post-hoc code review, rather than designed
 in from the start, remain open at the time of writing: the Unsloth-format
-export's loss of source lineage (Section~2.6), for which the fix is to
+export's loss of source lineage (Section~\ref{sec:export}), for which the fix is to
 carry lineage as a parallel, format-appropriate side channel (e.g. an
 adjacent \texttt{dataset\_unsloth.meta.jsonl} keyed by row index) rather
 than any change to splitting or generation logic; and the row-order
@@ -634,9 +1115,9 @@ The most significant near-term extension, and the one we consider the
 project's actual next step rather than a background item, is support for
 \textbf{non-text source material}. The pipeline today assumes its input
 is HTML prose reachable by an HTTP client: PDFs and images are filtered
-out of crawl candidates entirely (Section~2.2) rather than processed,
+out of crawl candidates before any request is made, rather than processed,
 tabular and structured data embedded in a page is flattened or lost by
-the Markdown-conversion step (Section~2.3), and there is no handling for
+the Markdown-conversion step (Section~\ref{sec:processing}), and there is no handling for
 audio or video sources at all. Domains where the authoritative content is
 a table (regulatory filings, statistical releases), a scanned or
 image-based PDF (many government and legal documents), or a recorded
@@ -648,7 +1129,7 @@ PDF/table extraction path (text and layout-aware, so a table survives as
 structured data rather than becoming word salad) and an
 optional OCR or vision-model pass for image-based content, feeding the
 same downstream Processing/Generation/Quality/Export stages described in
-Section~2, is the direction we intend to pursue next.
+Section~\ref{sec:overview}, is the direction we intend to pursue next.
 
 \section{Conclusion}
 
@@ -658,10 +1139,17 @@ as core design constraints rather than details to fix after the fact.
 The result is a pipeline whose default behavior --- honoring server
 signals during collection, checkpointing every unit of work, overlapping
 collection with generation, bounding unattended LLM spend explicitly,
-catching near-duplicate paraphrases rather than only exact matches, and
-refusing to let a random split leak near-duplicate content across train
-and test --- is also the behavior that produces a defensible dataset and
-a trustworthy evaluation number from it. Fine-tuning on that dataset is,
+and refusing to let a random split put samples from the same page on
+both sides of the train/test boundary --- is intended to be the behavior
+that produces a defensible dataset and a trustworthy evaluation number
+from it. The benchmark confirms the mechanics (page-disjoint splits,
+bounded cost, honored crawl delays after the fixes) but not yet the
+outcome: whether the split changes a held-out score, and whether the
+judge's approvals match human judgement, remain to be measured. The benchmark of
+Section~\ref{sec:eval} adds a caution: three of the six defects it found
+concerned politeness, a property that held for the rate limiter in
+isolation and failed in the assembled pipeline until it was measured end
+to end, against a site that declares a crawl delay. Fine-tuning on that dataset is,
 as Section~\ref{sec:rag} discusses, one half of reducing hallucination
 rather than the whole of it, and the same corpus the pipeline builds
 along the way is positioned to serve the other half (retrieval) as
@@ -669,6 +1157,15 @@ naturally as it serves fine-tuning. None of this removes the operator's
 responsibility for what is collected and published in the first place
 (Section~\ref{sec:misuse}); it narrows the space of failures that would
 otherwise have to be caught by hand.
+
+\section*{Acknowledgments}
+Parts of the DataForge code and of the text of this report were drafted
+with the assistance of an AI coding assistant (Claude, by Anthropic), used
+under the author's direction. The author reviewed and edited all of it and
+takes full responsibility for the content. The figures in
+Section~\ref{sec:eval} are taken from the output of the scripts in
+\texttt{evals/pipeline/}, which compute them from the recorded benchmark
+data, and can be regenerated from it.
 
 \begin{thebibliography}{99}
 
@@ -753,6 +1250,62 @@ E.~M.~Bender, T.~Gebru, A.~McMillan-Major, and S.~Shmitchell.
 S.~Longpre, R.~Mahari, A.~Chen, et al.
 \newblock The Data Provenance Initiative: A Large Scale Audit of Dataset Licensing \& Attribution in AI.
 \newblock \emph{arXiv preprint arXiv:2310.16787}, 2023.
+
+\bibitem{anthropic2024mcp}
+Anthropic.
+\newblock Introducing the Model Context Protocol.
+\newblock \url{https://www.anthropic.com/news/model-context-protocol}, November 25, 2024.
+
+\bibitem{mcpspec2026}
+Model Context Protocol.
+\newblock Specification, revision 2026-07-28 (Transports; Server Features: Tools).
+\newblock \url{https://modelcontextprotocol.io/specification/2026-07-28}, accessed 2026-09-22.
+
+\bibitem{claudecodemcp}
+Anthropic.
+\newblock Connect Claude Code to tools via MCP.
+\newblock \url{https://code.claude.com/docs/en/mcp}, accessed 2026-09-22.
+
+\bibitem{rfc9309}
+M.~Koster, G.~Illyes, H.~Zeller, and L.~Sassman.
+\newblock Robots Exclusion Protocol.
+\newblock RFC~9309, Internet Engineering Task Force, September 2022.
+\newblock \url{https://www.rfc-editor.org/info/rfc9309}
+
+\bibitem{panickssery2024selfpref}
+A.~Panickssery, S.~R.~Bowman, and S.~Feng.
+\newblock LLM Evaluators Recognize and Favor Their Own Generations.
+\newblock \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2024.
+\newblock arXiv:2404.13076.
+
+\bibitem{alberti2019synthetic}
+C.~Alberti, D.~Andor, E.~Pitler, J.~Devlin, and M.~Collins.
+\newblock Synthetic QA Corpora Generation with Roundtrip Consistency.
+\newblock \emph{Proceedings of ACL}, pages 6168--6173, 2019.
+
+\bibitem{puri2020training}
+R.~Puri, R.~Spring, M.~Shoeybi, M.~Patwary, and B.~Catanzaro.
+\newblock Training Question Answering Models From Synthetic Data.
+\newblock \emph{Proceedings of EMNLP}, pages 5811--5826, 2020.
+
+\bibitem{nayak2024bonito}
+N.~Nayak, Y.~Nan, A.~Trost, and S.~Bach.
+\newblock Learning to Generate Instruction Tuning Datasets for Zero-Shot Task Adaptation.
+\newblock \emph{Findings of ACL}, pages 12585--12611, 2024.
+
+\bibitem{distilabel}
+Argilla.
+\newblock distilabel: a framework for synthetic data and AI feedback.
+\newblock \url{https://github.com/argilla-io/distilabel}, accessed 2026-09-22.
+
+\bibitem{usc17sec105}
+United States Code, Title 17, Section 105.
+\newblock Subject matter of copyright: United States Government works.
+
+\bibitem{kenyacopyright2001}
+Republic of Kenya.
+\newblock Copyright Act, No.~12 of 2001 (Cap.~130), Revised Edition 2022.
+\newblock \url{https://copyright.go.ke/sites/default/files/downloads/CopyrightAct12of2001.pdf}, accessed 2026-09-22.
 
 \end{thebibliography}
 

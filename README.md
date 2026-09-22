@@ -6,6 +6,10 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
+**Current release: 2.4.0** — AI agents can now drive DataForge through a local
+MCP server or the built-in `dataforge agent-guide`, and robots.txt `Crawl-delay`
+is now enforced in every stage. See the [changelog](CHANGELOG.md#240---2026-09-22).
+
 Fine-tuning needs data, and good domain data is trapped in documentation
 sites, knowledge bases and public archives. Getting it out usually means
 writing a throwaway scraper, a chunker, a prompt loop and an exporter — then
@@ -134,6 +138,33 @@ environment variables and the complete recipe schema are in the docs:
 - **[Ethics & data residency](docs/ETHICS.md)** — responsible use, PII, copyright, rate limits
 - **[Third-party libraries](docs/THIRD_PARTY.md)** — full dependency and license list
 - **[Technical writeup](docs/TECHNICAL.tex)** — design rationale and references
+
+## Using DataForge from an AI agent
+
+Claude Code, Codex, Cursor and other coding agents can drive DataForge through
+its non-interactive commands. Point the agent at the built-in guide:
+
+```bash
+dataforge agent-guide
+```
+
+It lists which commands are safe to run without a terminal, how to configure a
+provider through environment variables, the recipe workflow and exit codes, and
+the responsible-use rules an agent must follow before crawling a site.
+
+For clients that support the [Model Context Protocol](https://modelcontextprotocol.io),
+DataForge also runs as a local MCP server. Nothing is hosted; the client starts
+it on your machine:
+
+```bash
+pip install "llm-web-crawler[mcp]"
+claude mcp add dataforge -- dataforge mcp   # run from your project directory
+```
+
+The agent then gets typed tools (explore a site, validate a recipe, start and
+monitor a run, read session stats and samples) instead of parsing terminal
+output. Runs started this way must have a spending cap, and a recipe that
+disables `robots.txt` is refused.
 
 ## What makes it different
 

@@ -92,10 +92,13 @@ Layered filters, cheapest first:
 5. **Fails closed** — a sample the judge cannot score is rejected, never
    approved.
 
-The stage logs a rejection breakdown (`refers to the source`, `not grounded
-in source`, `judge score 3 < 4`, …). The judge is dependable on clear
-failures (wrong facts, unsupported claims, source references) and less
-consistent on vague-but-true answers near the threshold; set
+The stage logs a rejection breakdown. Rejections by the free filters are
+labelled plainly (`exact duplicate`, `near-duplicate`, `refers to the source`,
+`below heuristic threshold`); rejections by the LLM judge are prefixed
+`judge:` (`judge: not grounded in source`, `judge: not standalone (refers to
+the source)`, `judge: score 3 < 4`). The judge's agreement with human
+judgement has not been measured yet (see `evals/pipeline/audit.py`); LLM
+judges are generally less consistent near a threshold, so set
 `min_judge_score: 5` to trade recall for precision.
 
 ### 6. Export (batch)

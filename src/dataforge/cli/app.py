@@ -941,6 +941,32 @@ def plan() -> None:
     _show_pipeline_plan()
 
 
+# ── agent-guide command ───────────────────────────────────────────────────────
+
+@app.command("agent-guide")
+def agent_guide() -> None:
+    """Print the usage guide for AI agents driving DataForge from a shell."""
+    from importlib.resources import files
+    typer.echo(files("dataforge").joinpath("agent_guide.md").read_text(encoding="utf-8"))
+
+
+# ── mcp command ───────────────────────────────────────────────────────────────
+
+@app.command()
+def mcp() -> None:
+    """Run DataForge as a local MCP server over stdio, for AI agents and MCP clients."""
+    try:
+        from dataforge.mcp_server import main
+    except ImportError:
+        typer.echo(
+            "MCP support is an optional extra. Install it with:\n"
+            "  pip install 'llm-web-crawler[mcp]'",
+            err=True,
+        )
+        raise typer.Exit(code=1) from None
+    main()
+
+
 # ── info command ──────────────────────────────────────────────────────────────
 
 @app.command()

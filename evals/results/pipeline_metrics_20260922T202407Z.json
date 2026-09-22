@@ -1,0 +1,295 @@
+{
+  "sites": [
+    {
+      "id": "ready-gov",
+      "topic": "Disaster preparedness",
+      "recipe": "recipes/ready-gov.yaml",
+      "terms_reviewed": true,
+      "preflight": {
+        "checked_at": "2026-09-22T20:09:52.237794+00:00",
+        "user_agent": "DataForge/2.3.3 (+https://github.com/ianktoo/data-forge; research bot)",
+        "robots_status": 200,
+        "robots_sha256": "a759cbd289ab33c55ee487e2b77b9aa2c41f814bfb8bca8d29ac47a0d87c9faf",
+        "crawl_delay": [],
+        "seed_status": 200,
+        "seed_final_url": "https://www.ready.gov/sitemap.xml",
+        "blocked": false,
+        "block_reasons": []
+      },
+      "run": {
+        "exit_code": 0,
+        "wall_seconds": 95.5,
+        "db_path": "output\\benchmark\\ready-gov\\dataforge.db",
+        "log": "output\\benchmark\\ready-gov\\run_20260922T200952Z.log",
+        "run_summary": "output\\benchmark\\ready-gov\\sessions\\277f9f01-3f3f-4311-9e18-0e5b39e13f60\\run_summary.json"
+      },
+      "metrics": {
+        "session_id": "277f9f01-3f3f-4311-9e18-0e5b39e13f60",
+        "exit_code": 0,
+        "model": "gpt-4o-mini",
+        "judge_model": "gpt-4o-mini",
+        "urls_discovered": 372,
+        "urls_selected": 20,
+        "urls_fetched": 20,
+        "urls_failed": 0,
+        "discovery_source": {
+          "sitemap": 372
+        },
+        "pages": 20,
+        "words_per_page_median": 830.5,
+        "chunks": 64,
+        "samples_generated": 192,
+        "samples_approved": 189,
+        "approval_rate": 0.9844,
+        "rejection_reasons": {
+          "refers to the source": 2,
+          "judge score below threshold": 1
+        },
+        "quality_score_median": 1.0,
+        "llm_calls": 128,
+        "cost_usd": 0.0248,
+        "cost_per_approved_usd": 0.00013,
+        "budget_skipped_calls": 0,
+        "wall_seconds": 90.89,
+        "stage_seconds": {
+          "discovery": 0.3,
+          "streaming": 53.88,
+          "quality": 36.33,
+          "export": 0.38
+        },
+        "split_pages": {
+          "train": 16,
+          "validation": 2,
+          "test": 2
+        },
+        "split_page_overlap": {
+          "train&validation": 0,
+          "train&test": 0,
+          "validation&test": 0
+        },
+        "leak_free": true,
+        "session_status": "completed"
+      }
+    },
+    {
+      "id": "uscis",
+      "topic": "Immigration (green card, naturalization)",
+      "recipe": "recipes/uscis.yaml",
+      "terms_reviewed": true,
+      "preflight": {
+        "checked_at": "2026-09-22T20:11:28.070498+00:00",
+        "user_agent": "DataForge/2.3.3 (+https://github.com/ianktoo/data-forge; research bot)",
+        "robots_status": 200,
+        "robots_sha256": "45f4e816691bba0d5001bc0b1c45000035cd56b0074b17d12cf2effb54afba61",
+        "crawl_delay": [
+          "10"
+        ],
+        "seed_status": 200,
+        "seed_final_url": "https://www.uscis.gov/sitemap.xml",
+        "blocked": false,
+        "block_reasons": []
+      },
+      "run": {
+        "exit_code": 0,
+        "wall_seconds": 300.7,
+        "db_path": "output\\benchmark\\uscis\\dataforge.db",
+        "log": "output\\benchmark\\uscis\\run_20260922T201128Z.log",
+        "run_summary": "output\\benchmark\\uscis\\sessions\\ae54fc89-123e-490a-8e30-d25183e1be3f\\run_summary.json"
+      },
+      "metrics": {
+        "session_id": "ae54fc89-123e-490a-8e30-d25183e1be3f",
+        "exit_code": 0,
+        "model": "gpt-4o-mini",
+        "judge_model": "gpt-4o-mini",
+        "urls_discovered": 19623,
+        "urls_selected": 20,
+        "urls_fetched": 20,
+        "urls_failed": 0,
+        "discovery_source": {
+          "sitemap": 19623
+        },
+        "pages": 20,
+        "words_per_page_median": 575.5,
+        "chunks": 53,
+        "samples_generated": 159,
+        "samples_approved": 152,
+        "approval_rate": 0.956,
+        "rejection_reasons": {
+          "refers to the source": 6,
+          "judge score below threshold": 1
+        },
+        "quality_score_median": 1.0,
+        "llm_calls": 106,
+        "cost_usd": 0.0222,
+        "cost_per_approved_usd": 0.00015,
+        "budget_skipped_calls": 0,
+        "wall_seconds": 296.17,
+        "stage_seconds": {
+          "discovery": 54.23,
+          "streaming": 212.72,
+          "quality": 27.59,
+          "export": 0.53
+        },
+        "split_pages": {
+          "train": 17,
+          "validation": 1,
+          "test": 2
+        },
+        "split_page_overlap": {
+          "train&validation": 0,
+          "train&test": 0,
+          "validation&test": 0
+        },
+        "leak_free": true,
+        "session_status": "completed"
+      }
+    },
+    {
+      "id": "python-docs",
+      "topic": "Technical documentation (Python tutorial)",
+      "recipe": "recipes/python-docs.yaml",
+      "terms_reviewed": true,
+      "preflight": {
+        "checked_at": "2026-09-22T20:16:28.928886+00:00",
+        "user_agent": "DataForge/2.3.3 (+https://github.com/ianktoo/data-forge; research bot)",
+        "robots_status": 200,
+        "robots_sha256": "aadd08e1ef467f334dff65b4f14d1657ec293431501cc0a3cd221920c51e3ab1",
+        "crawl_delay": [],
+        "seed_status": 200,
+        "seed_final_url": "https://docs.python.org/3/tutorial/",
+        "blocked": false,
+        "block_reasons": []
+      },
+      "run": {
+        "exit_code": 0,
+        "wall_seconds": 262.6,
+        "db_path": "output\\benchmark\\python-docs\\dataforge.db",
+        "log": "output\\benchmark\\python-docs\\run_20260922T201629Z.log",
+        "run_summary": "output\\benchmark\\python-docs\\sessions\\091d422e-df35-4be1-bc3d-14c888ded099\\run_summary.json"
+      },
+      "metrics": {
+        "session_id": "091d422e-df35-4be1-bc3d-14c888ded099",
+        "exit_code": 0,
+        "model": "gpt-4o-mini",
+        "judge_model": "gpt-4o-mini",
+        "urls_discovered": 40,
+        "urls_selected": 17,
+        "urls_fetched": 17,
+        "urls_failed": 0,
+        "discovery_source": {
+          "crawl": 40
+        },
+        "pages": 17,
+        "words_per_page_median": 2152,
+        "chunks": 153,
+        "samples_generated": 456,
+        "samples_approved": 447,
+        "approval_rate": 0.9803,
+        "rejection_reasons": {
+          "refers to the source": 6,
+          "exact duplicate": 2,
+          "judge score below threshold": 1
+        },
+        "quality_score_median": 1.0,
+        "llm_calls": 305,
+        "cost_usd": 0.0663,
+        "cost_per_approved_usd": 0.00015,
+        "budget_skipped_calls": 0,
+        "wall_seconds": 257.97,
+        "stage_seconds": {
+          "discovery": 31.09,
+          "streaming": 142.48,
+          "quality": 83.8,
+          "export": 0.56
+        },
+        "split_pages": {
+          "train": 14,
+          "validation": 1,
+          "test": 2
+        },
+        "split_page_overlap": {
+          "train&validation": 0,
+          "train&test": 0,
+          "validation&test": 0
+        },
+        "leak_free": true,
+        "session_status": "completed"
+      }
+    },
+    {
+      "id": "iantoo-space",
+      "topic": "Personal / portfolio site",
+      "recipe": "recipes/iantoo-space.yaml",
+      "terms_reviewed": true,
+      "preflight": {
+        "checked_at": "2026-09-22T20:23:46.758946+00:00",
+        "user_agent": "DataForge/2.3.3 (+https://github.com/ianktoo/data-forge; research bot)",
+        "robots_status": 200,
+        "robots_sha256": "8080ac5f80a0ef12908d0eef2b02fa5646073abb9174b269979e98fcda457fca",
+        "crawl_delay": [],
+        "seed_status": 200,
+        "seed_final_url": "https://www.iantoo.space/sitemap.xml",
+        "blocked": false,
+        "block_reasons": []
+      },
+      "run": {
+        "exit_code": 0,
+        "wall_seconds": 20.1,
+        "db_path": "output\\benchmark\\iantoo-space\\dataforge.db",
+        "log": "output\\benchmark\\iantoo-space\\run_20260922T202347Z.log",
+        "run_summary": "output\\benchmark\\iantoo-space\\sessions\\19926222-05c5-4663-a09d-7fc546fe3c3c\\run_summary.json"
+      },
+      "metrics": {
+        "session_id": "19926222-05c5-4663-a09d-7fc546fe3c3c",
+        "exit_code": 0,
+        "model": "gpt-4o-mini",
+        "judge_model": "gpt-4o-mini",
+        "urls_discovered": 8,
+        "urls_selected": 6,
+        "urls_fetched": 6,
+        "urls_failed": 0,
+        "discovery_source": {
+          "sitemap": 8
+        },
+        "pages": 6,
+        "words_per_page_median": 275.0,
+        "chunks": 8,
+        "samples_generated": 24,
+        "samples_approved": 23,
+        "approval_rate": 0.9583,
+        "rejection_reasons": {
+          "refers to the source": 1
+        },
+        "quality_score_median": 1.0,
+        "llm_calls": 16,
+        "cost_usd": 0.0031,
+        "cost_per_approved_usd": 0.00013,
+        "budget_skipped_calls": 0,
+        "wall_seconds": 14.36,
+        "stage_seconds": {
+          "discovery": 0.19,
+          "streaming": 9.03,
+          "quality": 4.59,
+          "export": 0.52
+        },
+        "split_pages": {
+          "train": 4,
+          "validation": 1
+        },
+        "split_page_overlap": {
+          "train&validation": 0
+        },
+        "leak_free": true,
+        "session_status": "completed"
+      }
+    }
+  ],
+  "run_files": [
+    "C:\\Users\\iankt\\Projects\\data-forge\\evals\\results\\pipeline_run_20260922T193233Z.json",
+    "C:\\Users\\iankt\\Projects\\data-forge\\evals\\results\\pipeline_run_20260922T194640Z.json",
+    "C:\\Users\\iankt\\Projects\\data-forge\\evals\\results\\pipeline_run_20260922T195348Z.json",
+    "C:\\Users\\iankt\\Projects\\data-forge\\evals\\results\\pipeline_run_20260922T200945Z.json",
+    "C:\\Users\\iankt\\Projects\\data-forge\\evals\\results\\pipeline_run_20260922T202051Z.json",
+    "C:\\Users\\iankt\\Projects\\data-forge\\evals\\results\\pipeline_run_20260922T202407Z.json"
+  ]
+}

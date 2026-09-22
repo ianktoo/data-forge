@@ -109,12 +109,14 @@ class Verdict:
         return self.score >= min_score and self.grounded and self.standalone
 
     def rejection_reason(self, min_score: int) -> str:
+        # Prefixed "judge:" so these stay distinguishable from the free
+        # regex filter's "refers to the source" in stats and benchmarks.
         if not self.grounded:
-            return "not grounded in source"
+            return "judge: not grounded in source"
         if not self.standalone:
-            return "refers to the source"
+            return "judge: not standalone (refers to the source)"
         if self.score < min_score:
-            return f"judge score {self.score} < {min_score}"
+            return f"judge: score {self.score} < {min_score}"
         return ""
 
 

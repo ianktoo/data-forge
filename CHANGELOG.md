@@ -3,12 +3,115 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [2.4.0] - 2026-09-22
+
+Agent integration (agent guide, local MCP server), a pipeline benchmark,
+and crawl-politeness fixes the benchmark uncovered. No breaking changes.
+
+### Added
+- `dataforge agent-guide`: prints a guide for AI agents driving DataForge from
+  a shell (non-interactive commands, env-var configuration, recipe workflow,
+  exit codes, responsible-use rules). The guide ships inside the package, so it
+  is available after `pip install` without the repository.
+- `dataforge mcp`: runs DataForge as a local MCP server over stdio (optional
+  extra: `pip install "llm-web-crawler[mcp]"`, requires `mcp>=2.2,<3`). Tools:
+  `explore_site`, `validate_recipe`, `start_run` / `run_status` (background
+  runs), `list_sessions`, `session_stats`, `view_samples`; the agent guide is
+  served as the server's instructions and as the `dataforge://guide` resource.
+  `start_run` refuses recipes with no `max_cost_usd` / `max_llm_calls` cap
+  unless the caller opts in, and always refuses `source.ignore_robots: true`.
+- `run_summary.json` in each session folder after `dataforge run`: exit code,
+  wall time and time per stage, models, approved count, LLM calls/cost, budget
+  and skipped calls, errors. Previously these were only printed.
+- `evals/pipeline/`: pipeline benchmark over four sites (Ready.gov, USCIS,
+  the Python tutorial and iantoo.space, the last with the owner's consent),
+  each capped at 20 URLs and $1. KRA (terms prohibit data mining), FAA
+  (unclear terms), eCFR (bot block, API only) and CDC are documented as
+  excluded. Refuses a site until a person records a terms review in `sites.yaml`; a preflight records
+  robots.txt, Crawl-delay and bot blocks and skips blocked sites. Aggregation
+  into JSON/Markdown/LaTeX (including a split page-leak check) and a blind
+  human audit of the LLM judge (judge precision, rejection precision, kappa).
+
+### Fixed
+- **robots.txt `Crawl-delay` was not enforced while scraping.** The "already
+  applied" flag was process-wide, so a domain's delay reached only the first
+  rate limiter created (discovery); the scrape and streaming stages build
+  their own and crawled at the default rate. Found by the benchmark: USCIS
+  declares `Crawl-delay: 10` and 20 pages were fetched in about 4 seconds.
+  The flag is now tracked per limiter, and each run now shares one limiter
+  across all stages, so the first request of a new stage no longer skips the
+  delay. Random jitter now only ever lengthens a gap; before, single gaps fell
+  to about 8.6 s against a 10 s `Crawl-delay`.
+- **The rate limiter ran at about twice the configured rate.** The token
+  bucket counted its own sleep as refill time, so every other request went
+  through free, and it allowed a burst of 2x the rate. The burst is now one
+  second's worth, or a single request when a `Crawl-delay` applies.
+- **robots.txt failures now follow RFC 9309.** A 4xx means no rules; a 5xx,
+  429 or unreachable server disallows the whole site. Before, a server-error
+  page was parsed as if it were robots.txt, which in effect allowed everything.
+  The robots.txt request itself now waits on the rate limiter.
+- **The Playwright fallback bypassed politeness.** It launched a browser with
+  no robots.txt check, no rate limit and a generic User-Agent. It now passes
+  the same gate as every request (`HTTPClient.prepare`), sends DataForge's
+  User-Agent, skips images/media/fonts, and is not used on a site that
+  declares a `Crawl-delay`.
+- **Judge and regex rejections shared a label.** Judge rejections are now
+  prefixed `judge:` (`judge: not standalone (refers to the source)`,
+  `judge: not grounded in source`, `judge: score 3 < 4`).
+- **An empty split was silent.** With fewer page groups than splits, a split
+  could receive nothing and simply not be written; it is now logged as a
+  warning. The split's docstring states that assignment is largest-first
+  greedy and the seed only breaks ties.
+- **Relative links were resolved against the site root** instead of the page
+  URL (or `<base href>`), sending the BFS crawler to wrong addresses on any
+  site whose pages live below the root.
+- Discovery: a seed deeper than the site root (e.g. `/3/tutorial/`) whose
+  sitemap lists nothing under it now falls back to crawling from the seed.
+  Before, it returned the sitemap's unrelated URLs and dropped the seed, so
+  sites with a shallow sitemap (docs.python.org lists only version roots)
+  could not be crawled at all.
+- **TLS verification now uses the operating system's trust store**
+  (`truststore`, as pip does). Sites that send an incomplete certificate chain
+  (e.g. uonbi.ac.ke, jkuat.ac.ke, strathmore.edu) or chain to a root missing
+  from certifi (health.go.ke) failed with `CERTIFICATE_VERIFY_FAILED` although
+  browsers accept them. Verification is never disabled; self-signed and
+  expired certificates are still rejected.
+- The crawler's User-Agent reported `DataForge/0.1` and a URL that is not the
+  project (`github.com/dataforge`); it now sends the real version and
+  `https://github.com/ianktoo/data-forge`, so site operators can identify it.
 
 ### Changed
+- `docs/TECHNICAL.tex`: new section "Empirical evaluation" with the benchmark
+  results (setup, an access-and-terms table over the 14 sites considered,
+  per-site results, the six defects the benchmark exposed, and what the
+  results do not show), corrections where earlier sections described
+  `Crawl-delay` enforcement as already holding, an updated abstract and
+  conclusion, and an AI-assistance acknowledgment. Cites 17 U.S.C. 105 and
+  Kenya's Copyright Act (ss. 2, 25, 31).
+- `docs/TECHNICAL.tex`, after a critical review: design claims corrected to
+  match the code (judge batched per chunk with a 1-5 score plus
+  grounded/standalone checks; filter order; `cl100k_base` tokenizer; split is
+  largest-first greedy, not random; cost cap can overshoot by in-flight calls;
+  Retry-After cap; RFC 9309 behaviour); an unmeasured "the judge is
+  empirically reliable" claim removed; rejection breakdown separated into
+  regex (9) vs. judge (9) with the judge's score ceiling (89% scored 5); the
+  near-duplicate check's non-firing explained with measured Jaccard values;
+  held-out split sizes reported, including iantoo.space's empty test split;
+  streaming-vs-batch and downstream effects stated as unmeasured; hard-coded
+  section numbers replaced with references; jurisdiction point narrowed; six
+  citations added (RFC 9309, Panickssery et al. 2024, Alberti et al. 2019,
+  Puri et al. 2020, Nayak et al. 2024, distilabel).
+- `docs/TECHNICAL.tex`: new section "Agent integration via the Model Context
+  Protocol" (agent guide, the MCP server's tools and server-side guards, expected
+  benefits stated as unmeasured, current gaps), citing the MCP announcement,
+  the MCP specification (rev. 2026-07-28) and the Claude Code MCP docs.
 - Replaced the architecture diagram (`docs/architecture.svg` / `.pdf`) with a
   stage table in `docs/TECHNICAL.tex` and `docs/ARCHITECTURE.md`. The README
   now shows a one-line pipeline summary that links to the architecture doc.
+
+### Removed
+- `docs/architecture.svg` and `docs/architecture.pdf`, which nothing
+  references now that the stage table has replaced them.
 
 ## [2.3.3] - 2026-09-22
 

@@ -1,0 +1,28 @@
+# Benchmark recipe: immigration (USCIS). robots.txt declares Crawl-delay: 10,
+# which DataForge enforces, so 20 pages take roughly 3-4 minutes to fetch.
+version: 1
+name: bench-uscis
+stream: true
+output_dir: ./output/benchmark/uscis
+source:
+  urls: [https://www.uscis.gov/sitemap.xml]
+  language: en
+  include: [/green-card/, /citizenship/, /citizenship-resource-center/learn-about-citizenship]
+  exclude: [/sites/default/files/, /archive, /newsroom, re:\.pdf$]
+  max_urls: 20
+  skip_known: false
+generation:
+  format: qa
+  goal: >
+    Accurate question-and-answer pairs about U.S. green card and naturalization
+    processes, grounded strictly in official USCIS guidance. Educational only,
+    not legal advice.
+  n_per_chunk: 3
+  max_cost_usd: 1.00
+quality:
+  llm_judge: true
+  min_judge_score: 4
+export:
+  targets: [local]
+  approved_only: true
+  split: {train: 0.8, validation: 0.1, test: 0.1, group_by: page, seed: 42}

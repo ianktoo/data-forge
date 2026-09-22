@@ -1,6 +1,6 @@
 [project]
 name = "llm-web-crawler"
-version = "2.3.3"
+version = "2.4.0"
 description = "LLM data collection and synthetic fine-tuning dataset pipeline"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,11 +30,14 @@ dependencies = [
     "jinja2>=3.1",
     "pyyaml>=6.0",
     "keyring>=24",
+    "truststore>=0.10",          # verify TLS with the OS trust store (incomplete chains, see collectors/http.py)
     # robotparser is part of Python stdlib (urllib.robotparser) — no extra package needed
 ]
 
 [project.optional-dependencies]
 unsloth = ["unsloth>=2024.0"]
+# `dataforge mcp`: exposes DataForge as tools to MCP clients (Claude Code, Claude Desktop, ...)
+mcp = ["mcp>=2.2,<3"]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
@@ -44,6 +47,7 @@ dev = [
     "respx>=0.21",
     "pyinstaller>=6",
     "pip-audit>=2.7",
+    "mcp>=2.2,<3",               # so CI exercises tests/test_mcp_server.py
 ]
 
 [project.scripts]

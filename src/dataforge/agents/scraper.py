@@ -9,7 +9,7 @@ from sqlmodel import select
 
 from dataforge.collectors import HTTPClient, extract
 from dataforge.storage import DiscoveredURL, ScrapedPage, open_session
-from dataforge.utils import RateLimiter, concurrency_ceiling
+from dataforge.utils import concurrency_ceiling
 
 from .base import BaseAgent, PipelineContext
 
@@ -30,7 +30,7 @@ class ScraperAgent(BaseAgent):
             return self.ctx
 
         raw_dir = self._stage_dir("raw")
-        limiter = RateLimiter(self.ctx.settings.rate_limit)
+        limiter = self.ctx.get_rate_limiter()
         concur = min(concurrency_ceiling(), len(urls))
         sem = asyncio.Semaphore(concur)
         self.log.info(f"Scraping {len(urls)} URLs (concurrency={concur})")

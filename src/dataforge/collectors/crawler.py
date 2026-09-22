@@ -15,6 +15,7 @@ from dataforge.utils import get_logger
 from dataforge.utils.url_sanitiser import is_page_url, sanitise_many
 
 from .extractor import extract
+from .http import USER_AGENT
 from .sitemap import filter_urls
 
 log = get_logger("crawler")
@@ -25,11 +26,22 @@ _SPA_LINK_THRESHOLD = 3
 _SPA_MIN_BODY_LEN = 500
 
 
-async def _playwright_fetch(url: str) -> str | None:
+# Resource types a JS render doesn't need; blocking them keeps one render
+# closer to one request's worth of load on the site.
+_BLOCKED_RESOURCES = frozenset({"image", "media", "font"})
+
+
+async def _playwright_fetch(client, url: str) -> str | None:
     """Fetch a URL with a headless Chromium browser and return the rendered HTML.
 
-    Returns None if Playwright is not installed or the fetch fails.
-    Playwright is an optional dependency — the crawler degrades gracefully without it.
+    The browser makes its own requests, so it goes through the same gate as
+    everything else first: robots.txt, the rate limiter, DataForge's
+    User-Agent. A browser page load also triggers many sub-requests (scripts,
+    API calls) that can't be spaced one per Crawl-delay, so rendering is
+    skipped entirely on a site that declares one.
+
+    Returns None if Playwright is not installed, the URL may not be fetched,
+    or the fetch fails. Playwright is an optional dependency.
     """
     try:
         from playwright.async_api import async_playwright  # type: ignore
@@ -37,9 +49,22 @@ async def _playwright_fetch(url: str) -> str | None:
         log.debug("Playwright not installed — skipping JS render for SPA detection")
         return None
     try:
+        await client.prepare(url)
+    except PermissionError:
+        return None
+    if client.has_crawl_delay(urlparse(url).netloc):
+        log.info(f"Not rendering {url} with a browser: the site declares a Crawl-delay")
+        return None
+    try:
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=True)
-            page = await browser.new_page()
+            page = await browser.new_page(user_agent=USER_AGENT)
+            await page.route(
+                "**/*",
+                lambda route: route.abort()
+                if route.request.resource_type in _BLOCKED_RESOURCES
+                else route.continue_(),
+            )
             await page.goto(url, wait_until="networkidle", timeout=15_000)
             html = await page.content()
             await browser.close()
@@ -98,7 +123,7 @@ async def crawl(
         # SPA detection: suspiciously few links on a content-rich page → try JS render
         if len(same_domain) < _SPA_LINK_THRESHOLD and len(page.text) > _SPA_MIN_BODY_LEN:
             log.info(f"Possible SPA detected at {url} — attempting Playwright render")
-            rendered = await _playwright_fetch(url)
+            rendered = await _playwright_fetch(client, url)
             if rendered:
                 rendered_page = extract(rendered, url)
                 rendered_links = sanitise_many(rendered_page.links)

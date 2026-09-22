@@ -219,6 +219,15 @@ async def test_full_headless_run_produces_an_export(
     ]
     assert rows and "messages" in rows[0]
 
+    # run_summary.json persists what the end-of-run lines print.
+    summaries = list(isolated_settings.output_dir.rglob("run_summary.json"))
+    assert len(summaries) == 1
+    summary = json.loads(summaries[0].read_text(encoding="utf-8"))
+    assert summary["exit_code"] == EXIT_OK
+    assert summary["approved_samples"] == len(samples)
+    assert summary["wall_seconds"] >= 0
+    assert "quality" in summary["stage_seconds"]
+
 
 async def test_filters_matching_nothing_exit_cleanly(
     tmp_path, site, isolated_settings, fake_llm
