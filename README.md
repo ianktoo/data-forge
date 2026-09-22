@@ -27,7 +27,11 @@ dataforge run fema.yaml           # crawl, generate, score, export — unattende
 You get a versioned, deduplicated, quality-scored dataset in ChatML JSONL,
 Parquet and CSV, ready for Unsloth, Axolotl, TRL or HuggingFace `datasets`.
 
-![DataForge pipeline architecture](docs/architecture.svg)
+```
+Discovery → Collection → Processing → Generation → Quality → Export
+```
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for what each stage does.
 
 ## What you'll need
 

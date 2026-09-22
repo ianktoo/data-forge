@@ -3,6 +3,13 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+- Replaced the architecture diagram (`docs/architecture.svg` / `.pdf`) with a
+  stage table in `docs/TECHNICAL.tex` and `docs/ARCHITECTURE.md`. The README
+  now shows a one-line pipeline summary that links to the architecture doc.
+
 ## [2.3.3] - 2026-09-22
 
 > `v2.3.2`'s tag and GitHub Release (with working cross-platform

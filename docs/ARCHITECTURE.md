@@ -1,13 +1,21 @@
 # Architecture
 
-![DataForge pipeline architecture](architecture.svg)
-
 A run is six stages driven by one recipe (YAML) or an interactive wizard.
-The first four are a producer/consumer chain that can run either strictly
-sequential (**batch mode**) or as concurrent worker pools (**streaming
-mode**, `stream: true`, the recipe default). Quality and Export always run
+Discovery runs first; Collection, Processing and Generation then form a
+producer/consumer chain that runs either strictly sequentially (**batch
+mode**) or as concurrent worker pools (**streaming mode**, `stream: true`,
+the recipe default). Quality and Export always run
 as batch stages because deduplication and splitting need to see the whole
 sample set at once.
+
+| Stage | Consumes | Produces | Execution | Key mechanism |
+|---|---|---|---|---|
+| 1. Discovery | Seed URLs | Candidate URLs | Batch | Sitemap + `robots.txt` parsing, bounded BFS fallback, Playwright retry for JS-rendered pages |
+| 2. Collection | URLs | Pages (Markdown) | Batch or stream | Per-domain rate limit, transient vs. permanent status handling, `Crawl-delay` |
+| 3. Processing | Pages | Token-bounded chunks | Batch or stream | Boilerplate stripping, overlapping `tiktoken`-sized chunks |
+| 4. Generation | Chunks | Candidate samples | Batch or stream | LiteLLM provider portability, `n_per_chunk` samples, shared cost/call budget |
+| 5. Quality | All samples | Approved samples | Batch | Heuristic + source-reference filters, exact/near-dup removal, fail-closed LLM judge |
+| 6. Export | Approved samples | JSONL / Parquet / CSV | Batch | Per-record lineage, group-aware train/validation/test split |
 
 ```
 Discovery → Collection → Processing → Generation → Quality → Export

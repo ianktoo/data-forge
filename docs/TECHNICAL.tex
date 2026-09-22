@@ -110,20 +110,43 @@ in Section~\ref{sec:leakage}.
 
 \section{System overview}
 
-\begin{figure}[h]
+\begin{table}[h]
   \centering
-  \includegraphics[width=\textwidth]{architecture.pdf}
-  \caption{DataForge pipeline architecture. A recipe (YAML) or the
-  interactive wizard drives six stages. The first four form a
-  producer/consumer chain that runs either strictly sequentially
-  (batch mode) or as concurrent worker pools connected by bounded
-  queues (streaming mode). Quality scoring and export remain batch
-  stages because deduplication and group-aware splitting require
-  visibility into the full sample set.}
-  \label{fig:architecture}
-\end{figure}
+  \small
+  \caption{DataForge pipeline stages. A recipe (YAML) or the
+  interactive wizard drives all six. Collection, Processing, and
+  Generation run either strictly sequentially (batch mode) or as
+  concurrent worker pools connected by bounded queues (streaming mode,
+  Section~\ref{sec:streaming}). Quality scoring and export always run
+  as batch stages because deduplication and group-aware splitting
+  require visibility into the full sample set.}
+  \label{tab:architecture}
+  \begin{tabular}{@{}l p{2.1cm} p{2.1cm} l p{5.2cm}@{}}
+    \toprule
+    Stage & Consumes & Produces & Execution & Key mechanism \\
+    \midrule
+    Discovery  & Seed URLs & Candidate URLs & Batch &
+      Sitemap and \texttt{robots.txt} parsing; bounded BFS fallback;
+      headless retry for JS-rendered pages \\
+    Collection & URLs & Pages (Markdown) & Batch or stream &
+      Per-domain rate limit; transient vs.\ permanent status handling;
+      \texttt{Crawl-delay} enforcement \\
+    Processing & Pages & Token-bounded chunks & Batch or stream &
+      Boilerplate stripping; overlapping chunks sized by
+      \texttt{tiktoken} \\
+    Generation & Chunks & Candidate samples & Batch or stream &
+      LiteLLM provider portability; $n$ samples per chunk; shared
+      cost/call budget \\
+    Quality    & All samples & Approved samples & Batch &
+      Heuristic and source-reference filters; exact and near-duplicate
+      removal; fail-closed LLM judge \\
+    Export     & Approved samples & JSONL / Parquet / CSV & Batch &
+      Per-record lineage; group-aware train/validation/test split \\
+    \bottomrule
+  \end{tabular}
+\end{table}
 
-DataForge is organized as six stages (Figure~\ref{fig:architecture}):
+DataForge is organized as six stages (Table~\ref{tab:architecture}):
 Discovery, Collection, Processing, Generation, Quality, and Export. A
 run is specified either by a YAML \emph{recipe} --- a declarative,
 version-controllable description of every stage's parameters --- or by
@@ -294,6 +317,7 @@ the export step itself; target-vs-realized comparison is a natural
 follow-up once that is stored.
 
 \section{Concurrency: streaming vs.\ batch}
+\label{sec:streaming}
 
 Run strictly sequentially, the four collection-through-generation stages
 leave the LLM --- the highest-latency, highest-cost component --- idle
