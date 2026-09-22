@@ -34,7 +34,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   rate limiter created (discovery); the scrape and streaming stages build
   their own and crawled at the default rate. Found by the benchmark: USCIS
   declares `Crawl-delay: 10` and 20 pages were fetched in about 4 seconds.
-  The flag is now tracked per limiter.
+  The flag is now tracked per limiter, and each run now shares one limiter
+  across all stages, so the first request of a new stage no longer skips the
+  delay. Random jitter now only ever lengthens a gap; before, single gaps fell
+  to about 8.6 s against a 10 s `Crawl-delay`.
 - **The rate limiter ran at about twice the configured rate.** The token
   bucket counted its own sleep as refill time, so every other request went
   through free, and it allowed a burst of 2x the rate. The burst is now one
