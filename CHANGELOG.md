@@ -5,10 +5,50 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `dataforge agent-guide`: prints a guide for AI agents driving DataForge from
+  a shell (non-interactive commands, env-var configuration, recipe workflow,
+  exit codes, responsible-use rules). The guide ships inside the package, so it
+  is available after `pip install` without the repository.
+- `dataforge mcp`: runs DataForge as a local MCP server over stdio (optional
+  extra: `pip install "llm-web-crawler[mcp]"`, requires `mcp>=2.2,<3`). Tools:
+  `explore_site`, `validate_recipe`, `start_run` / `run_status` (background
+  runs), `list_sessions`, `session_stats`, `view_samples`; the agent guide is
+  served as the server's instructions and as the `dataforge://guide` resource.
+  `start_run` refuses recipes with no `max_cost_usd` / `max_llm_calls` cap
+  unless the caller opts in, and always refuses `source.ignore_robots: true`.
+- `run_summary.json` in each session folder after `dataforge run`: exit code,
+  wall time and time per stage, models, approved count, LLM calls/cost, budget
+  and skipped calls, errors. Previously these were only printed.
+- `evals/pipeline/`: pipeline benchmark over four sites (Ready.gov, USCIS,
+  FAA/UAS, Python tutorial), each capped at 20 URLs and $1. Refuses a site
+  until a person records a terms review in `sites.yaml`; a preflight records
+  robots.txt, Crawl-delay and bot blocks and skips blocked sites. Aggregation
+  into JSON/Markdown/LaTeX (including a split page-leak check) and a blind
+  human audit of the LLM judge (judge precision, rejection precision, kappa).
+
+### Fixed
+- Discovery: a seed deeper than the site root (e.g. `/3/tutorial/`) whose
+  sitemap lists nothing under it now falls back to crawling from the seed.
+  Before, it returned the sitemap's unrelated URLs and dropped the seed, so
+  sites with a shallow sitemap (docs.python.org lists only version roots)
+  could not be crawled at all.
+- The crawler's User-Agent reported `DataForge/0.1` and a URL that is not the
+  project (`github.com/dataforge`); it now sends the real version and
+  `https://github.com/ianktoo/data-forge`, so site operators can identify it.
+
 ### Changed
+- `docs/TECHNICAL.tex`: new section "Agent integration via the Model Context
+  Protocol" (agent guide, the MCP server's tools and server-side guards, expected
+  benefits stated as unmeasured, current gaps), citing the MCP announcement,
+  the MCP specification (rev. 2026-07-28) and the Claude Code MCP docs.
 - Replaced the architecture diagram (`docs/architecture.svg` / `.pdf`) with a
   stage table in `docs/TECHNICAL.tex` and `docs/ARCHITECTURE.md`. The README
   now shows a one-line pipeline summary that links to the architecture doc.
+
+### Removed
+- `docs/architecture.svg` and `docs/architecture.pdf`, which nothing
+  references now that the stage table has replaced them.
 
 ## [2.3.3] - 2026-09-22
 

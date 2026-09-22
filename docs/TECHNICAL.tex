@@ -442,6 +442,118 @@ row-level shuffle is not yet implemented; it is tracked as an open item
 (Section~\ref{sec:limitations}, project issue \#20) rather than
 presented as shipped.
 
+\section{Agent integration via the Model Context Protocol}
+\label{sec:mcp}
+
+The recipe format and distinct exit codes of Section~2 already make
+DataForge scriptable. A growing share of that scripting, however, is done
+not by a human writing a shell script but by an LLM agent running inside a
+coding assistant or chat client. DataForge supports two integration paths
+for such agents, at different costs.
+
+\subsection{Shell use with a bundled guide}
+The lowest-cost path needs no protocol at all: any agent that can run
+shell commands can drive the CLI, provided it knows which commands are
+safe to call without a terminal. \texttt{dataforge agent-guide} prints a
+guide shipped inside the installed package, so it is available after
+\texttt{pip install} without the source repository. It separates the
+non-interactive commands (\texttt{run}, \texttt{run --dry-run},
+\texttt{init-recipe}, \texttt{explore}, and the \texttt{--json} forms of
+\texttt{sessions}, \texttt{stats} and \texttt{view}) from those that open
+interactive menus and would hang a non-TTY shell, and states the
+configuration, workflow, exit-code and responsible-use rules an agent must
+follow. A test asserts that every command the guide names exists, so the
+guide cannot drift silently from the CLI.
+
+\subsection{A local MCP server}
+The Model Context Protocol (MCP) is an open standard, introduced by
+Anthropic in November 2024, for connecting AI applications to external
+tools and data sources \cite{anthropic2024mcp}. An MCP server advertises
+\emph{tools} with typed input schemas that a client lets its model call.
+Hosting is not required: under the protocol's \texttt{stdio} transport,
+the client launches the server as a subprocess and exchanges messages over
+its standard streams \cite{mcpspec2026}. \texttt{dataforge mcp} is such a
+server; in Claude Code, for example, it is registered with
+\texttt{claude mcp add dataforge -{}- dataforge mcp}
+\cite{claudecodemcp}. The server exposes seven tools
+(Table~\ref{tab:mcp-tools}).
+
+\begin{table}[h]
+  \centering
+  \small
+  \caption{Tools exposed by \texttt{dataforge mcp}.}
+  \label{tab:mcp-tools}
+  \begin{tabular}{@{}l l p{7.6cm}@{}}
+    \toprule
+    Tool & Effect & Purpose \\
+    \midrule
+    \texttt{explore\_site}    & Network read   & List a site's sitemap URLs before a recipe is written \\
+    \texttt{validate\_recipe} & Read-only      & Dry-run a recipe and return the execution plan \\
+    \texttt{start\_run}       & Crawls, spends & Launch \texttt{dataforge run} in the background; return a run ID \\
+    \texttt{run\_status}      & Read-only      & Running or finished, exit code and its meaning, session ID, log tail \\
+    \texttt{list\_sessions}   & Read-only      & Sessions in the project database \\
+    \texttt{session\_stats}   & Read-only      & The session statistics of Section~2.6, as JSON \\
+    \texttt{view\_samples}    & Read-only      & Sample records from any pipeline stage \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Three design decisions follow from the pipeline's characteristics rather
+than from MCP itself. First, a full run takes minutes to hours --- longer
+than a client should hold a single tool call open --- so a run is split
+into \texttt{start\_run}, which returns immediately, and
+\texttt{run\_status}, which the agent polls. Second, the read-only tools
+invoke the CLI's own \texttt{--json} output rather than reimplementing
+its queries, so the CLI remains the single source of truth and the two
+interfaces cannot disagree. Third, and most important, the safety
+constraints that matter most are \emph{enforced by the server} rather
+than requested of the model. \texttt{start\_run} refuses a recipe that
+sets no spending cap (\texttt{generation.max\_cost\_usd} or
+\texttt{generation.max\_llm\_calls}, Section~\ref{sec:budget}) unless the
+caller explicitly opts in, and it always refuses a recipe that disables
+\texttt{robots.txt} compliance, because an agent has no way to verify the
+written permission that setting presupposes; such a run must be started
+by the user from their own terminal.
+
+This division is deliberate. The specification requires clients to treat
+a server's tool annotations (such as a ``read-only'' hint) as untrusted,
+and recommends that a human remain in the loop with the ability to deny
+any tool invocation \cite{mcpspec2026}. Those are client-side safeguards.
+A rule written only into a model's instructions can be ignored; a rule
+enforced by the server cannot. The guide of the previous subsection is
+served both as the server's instructions and as a readable resource, so
+both integration paths carry the same responsible-use rules
+(Section~\ref{sec:responsible}).
+
+\subsection{Potential benefits}
+We have not measured the effect of agent access on dataset quality or on
+operator effort; the following are expected benefits, not results.
+\begin{itemize}[leftmargin=1.5em]
+  \item \textbf{Typed interaction instead of text parsing.} Tools accept
+    schema-validated arguments and return JSON, so an agent does not have
+    to infer structure from terminal output formatted for humans.
+  \item \textbf{A lower barrier for domain experts.} An operator can
+    describe the target domain in natural language and have the agent
+    explore the sitemap, draft a scoped recipe, dry-run it, and report
+    the resulting statistics, while the recipe itself remains the
+    reviewable, version-controlled artifact of Section~2.
+  \item \textbf{Clients without a shell.} Desktop and chat clients that
+    cannot run arbitrary commands can still drive the pipeline.
+  \item \textbf{Reproducible agent configuration.} Claude Code's
+    project-scoped MCP configuration is a file (\texttt{.mcp.json})
+    committed to the repository \cite{claudecodemcp}, so the tools an
+    agent could use can be versioned alongside the recipes it ran.
+  \item \textbf{Composition with other servers.} One agent session can
+    combine DataForge with other MCP servers, for example to inspect a
+    published dataset or to file an issue about a failed run.
+\end{itemize}
+
+The current server keeps its registry of background runs in memory: a
+restarted server can still read a run's log but no longer knows its exit
+code. It also offers no tool to pause or cancel a run and sends no
+progress notifications, so the agent must poll. None of these is
+fundamental, but each is a gap in the present implementation.
+
 \section{Related work}
 
 \textbf{Web-scale collection.} Large text corpora for language model
@@ -525,6 +637,7 @@ present this as a natural extension (Section~\ref{sec:limitations})
 rather than a shipped capability.
 
 \section{Responsible use and misuse considerations}
+\label{sec:responsible}
 \label{sec:misuse}
 
 DataForge automates two activities that are each individually subject to
@@ -753,6 +866,21 @@ E.~M.~Bender, T.~Gebru, A.~McMillan-Major, and S.~Shmitchell.
 S.~Longpre, R.~Mahari, A.~Chen, et al.
 \newblock The Data Provenance Initiative: A Large Scale Audit of Dataset Licensing \& Attribution in AI.
 \newblock \emph{arXiv preprint arXiv:2310.16787}, 2023.
+
+\bibitem{anthropic2024mcp}
+Anthropic.
+\newblock Introducing the Model Context Protocol.
+\newblock \url{https://www.anthropic.com/news/model-context-protocol}, November 25, 2024.
+
+\bibitem{mcpspec2026}
+Model Context Protocol.
+\newblock Specification, revision 2026-07-28 (Transports; Server Features: Tools).
+\newblock \url{https://modelcontextprotocol.io/specification/2026-07-28}, accessed 2026-09-22.
+
+\bibitem{claudecodemcp}
+Anthropic.
+\newblock Connect Claude Code to tools via MCP.
+\newblock \url{https://code.claude.com/docs/en/mcp}, accessed 2026-09-22.
 
 \end{thebibliography}
 
