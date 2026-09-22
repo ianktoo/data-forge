@@ -3,6 +3,25 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.3.3] - 2026-09-22
+
+> `v2.3.2`'s tag and GitHub Release (with working cross-platform
+> executables) were published successfully, but its "Publish to PyPI" CI
+> job failed its pre-publish test gate on the Ubuntu runner before ever
+> calling `uv publish` — PyPI has no `2.3.2` package. Cause: a test
+> (`test_full_headless_run_produces_an_export`) picked the first
+> `*.jsonl` match from a directory glob without filtering out
+> `dataset_unsloth.jsonl` (different schema, no `messages` key — see
+> issue #19); glob order isn't guaranteed across filesystems, and picked
+> the wrong file on Linux where it hadn't locally on Windows. Fixed by
+> filtering explicitly rather than relying on order. Re-cut as `2.3.3`
+> rather than moving the already-public `v2.3.2` tag.
+
+### Fixed
+
+- Test reliability: `test_full_headless_run_produces_an_export` no longer
+  depends on filesystem glob ordering to find the primary dataset export.
+
 ## [2.3.2] - 2026-09-22
 
 Documentation, hardening, and traceability release. No breaking changes.
