@@ -39,7 +39,9 @@ Fixes from the first pipeline run driven through the MCP server
 - `evals/pipeline/sites.yaml`: Ready.gov's own terms page recorded, with the
   owner's academic-use decision.
 - `docs/TECHNICAL.tex`: the agent-integration section records the first real
-  MCP-driven run and the inspection-tool failures it exposed.
+  MCP-driven run and the inspection-tool failures it exposed. The title page
+  now carries the report's Zenodo DOI, 10.5281/zenodo.22906072, under the
+  author's name (linked, and in the PDF metadata).
 
 ## [2.4.0] - 2026-09-22
 
