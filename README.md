@@ -29,6 +29,28 @@ Parquet and CSV, ready for Unsloth, Axolotl, TRL or HuggingFace `datasets`.
 
 ![DataForge pipeline architecture](docs/architecture.svg)
 
+## What you'll need
+
+Before you run anything, here's the honest list of what's required vs.
+optional:
+
+| | Required? | Notes |
+|---|---|---|
+| **Python 3.11+** | ✅ Required | Or skip it entirely with a [standalone binary](docs/INSTALLATION.md#standalone-executables-no-python-required) — no interpreter needed. |
+| **An LLM to generate and score samples** | ✅ Required (one of the below) | This is what actually writes the Q&A pairs. |
+| — A hosted provider API key (OpenAI, Anthropic, Google, Groq, or Together) | One of these, or the local option below | `dataforge config` walks you through it; stored in `.env`. Content leaves your machine for generation. |
+| — Ollama running locally, no key | *or* fully local | `ollama serve && ollama pull llama3.2`, then `dataforge config` → `ollama`. Nothing leaves your machine. This is the only local-inference path wired in today — LM Studio, Lemonade and other OpenAI-compatible local servers aren't supported yet ([#22](https://github.com/ianktoo/data-forge/issues/22)). |
+| **A HuggingFace account** | ❌ Optional | Only if you set `export.targets: [huggingface]` to publish the finished dataset to the Hub. Needs `HUGGINGFACE_TOKEN`. |
+| **A Kaggle account** | ❌ Optional | Only if you set `export.targets: [kaggle]`. Needs `KAGGLE_USERNAME` / `KAGGLE_KEY`. |
+| **Nothing else** | — | Local JSONL/Parquet/CSV export (the default) needs no account at all — the whole pipeline runs against just an LLM provider. |
+
+In short: **one LLM (hosted key, or Ollama for zero-key/fully-local) is the
+only hard requirement.** Everything else — which provider, which export
+target, whether you need a HuggingFace or Kaggle account — is a choice you
+make in the recipe, not a prerequisite to get started. Full setup for each
+option is in [docs/INSTALLATION.md](docs/INSTALLATION.md) and
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
 ## Why DataForge
 
 | | |
