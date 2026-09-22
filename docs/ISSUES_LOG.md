@@ -17,10 +17,10 @@ Convention going forward:
 
 ## Index
 
-| Date | Source | Issue | Summary |
-|---|---|---|---|
-| 2026-09-22 | [Gap analysis](reviews/2026-09-22-gap-analysis.md) | [#8](https://github.com/ianktoo/data-forge/issues/8) | No cost/token-budget cap on LLM generation or judge calls |
-| 2026-09-22 | [Gap analysis](reviews/2026-09-22-gap-analysis.md) | [#9](https://github.com/ianktoo/data-forge/issues/9) | Dedup is exact-match on a 200-char prefix — near-duplicate paraphrases pass through |
-| 2026-09-22 | [Gap analysis](reviews/2026-09-22-gap-analysis.md) | [#10](https://github.com/ianktoo/data-forge/issues/10) | No dataset profiling/statistics tooling, only raw sample viewing |
-| 2026-09-22 | [Gap analysis](reviews/2026-09-22-gap-analysis.md) | [#11](https://github.com/ianktoo/data-forge/issues/11) | HuggingFace/Kaggle exporters and non-default LLM providers untested |
-| 2026-09-22 | [Gap analysis](reviews/2026-09-22-gap-analysis.md) | [#12](https://github.com/ianktoo/data-forge/issues/12) | Google/Gemini provider implemented but undocumented (fixed in same PR) |
+| Date | Source | Issue | Summary | Resolved by |
+|---|---|---|---|---|
+| 2026-09-22 | [Gap analysis](reviews/2026-09-22-gap-analysis.md) | [#8](https://github.com/ianktoo/data-forge/issues/8) | No cost/token-budget cap on LLM generation or judge calls | [PR #14](https://github.com/ianktoo/data-forge/pull/14) |
+| 2026-09-22 | [Gap analysis](reviews/2026-09-22-gap-analysis.md) | [#9](https://github.com/ianktoo/data-forge/issues/9) | Dedup is exact-match on a 200-char prefix — near-duplicate paraphrases pass through | [PR #15](https://github.com/ianktoo/data-forge/pull/15) |
+| 2026-09-22 | [Gap analysis](reviews/2026-09-22-gap-analysis.md) | [#10](https://github.com/ianktoo/data-forge/issues/10) | No dataset profiling/statistics tooling, only raw sample viewing | [PR #16](https://github.com/ianktoo/data-forge/pull/16) |
+| 2026-09-22 | [Gap analysis](reviews/2026-09-22-gap-analysis.md) | [#11](https://github.com/ianktoo/data-forge/issues/11) | HuggingFace/Kaggle exporters and non-default LLM providers untested | [PR #17](https://github.com/ianktoo/data-forge/pull/17) |
+| 2026-09-22 | [Gap analysis](reviews/2026-09-22-gap-analysis.md) | [#12](https://github.com/ianktoo/data-forge/issues/12) | Google/Gemini provider implemented but undocumented (fixed in same PR) | fixed in filing PR |
