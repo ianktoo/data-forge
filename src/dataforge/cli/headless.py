@@ -74,6 +74,8 @@ async def run_recipe(recipe_path: str | Path, *, dry_run: bool = False) -> int:
         quality_min_judge_score=recipe.quality.min_judge_score,
         generation_model=recipe.generation.model,
         quality_model=recipe.quality.model,
+        max_llm_calls=recipe.generation.max_llm_calls,
+        max_cost_usd=recipe.generation.max_cost_usd,
     )
 
     _print_plan(recipe, seed_urls, s)
@@ -148,6 +150,15 @@ async def _drive(ctx: PipelineContext, recipe: Recipe, start_from: str | None = 
             f"LLM usage: {ctx.llm_usage.get('total_calls', 0)} calls, "
             f"${ctx.llm_usage.get('cost_usd', 0.0):.4f}"
         )
+    if ctx.max_llm_calls is not None or ctx.max_cost_usd is not None:
+        budget = ctx.get_budget()
+        cap_desc = ", ".join(
+            p for p in (
+                f"calls {budget.call_count}/{budget.max_calls}" if budget.max_calls is not None else "",
+                f"spend ${budget.spent_usd:.4f}/${budget.max_cost_usd:.2f}" if budget.max_cost_usd is not None else "",
+            ) if p
+        )
+        ui.info(f"LLM budget: {cap_desc}" + (f" — {budget.skipped} call(s) skipped" if budget.skipped else ""))
     if ctx.errors:
         ui.warn(f"{len(ctx.errors)} non-fatal error(s) recorded — see the session log.")
 

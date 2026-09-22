@@ -197,11 +197,18 @@ async def _judge_batch(llm, source_text: str, batch: list[list[dict]]) -> list[V
         except Exception as exc:
             # Credential/connection errors are the caller's to surface; anything
             # else just fails this batch closed.
-            from dataforge.utils.errors import LLMConnectionError, MissingCredentialError
+            from dataforge.utils.errors import (
+                BudgetExceededError,
+                LLMConnectionError,
+                MissingCredentialError,
+            )
 
             if isinstance(exc, (MissingCredentialError, LLMConnectionError)):
                 raise
-            log.warning(f"Judge call failed: {exc}")
+            if isinstance(exc, BudgetExceededError):
+                log.debug(f"Judge batch skipped: {exc}")
+            else:
+                log.warning(f"Judge call failed: {exc}")
             return [None] * len(batch)
         verdicts = _parse_verdicts(resp.content, len(batch))
         if verdicts is not None:

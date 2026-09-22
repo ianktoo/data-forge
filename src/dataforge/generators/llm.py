@@ -1,6 +1,7 @@
 """LiteLLM wrapper with retry, cost tracking, and streaming support."""
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -13,6 +14,50 @@ from dataforge.utils import get_logger
 
 log = get_logger("llm")
 litellm.set_verbose = False
+
+
+class BudgetTracker:
+    """Shared, concurrency-safe cap on LLM calls/spend across pipeline stages.
+
+    One tracker is typically shared between the generation and quality-judge
+    ``LLMClient`` instances for a run, so ``generation.max_llm_calls`` /
+    ``generation.max_cost_usd`` bound the *combined* cost of both stages —
+    the judge roughly doubles LLM cost on its own, so capping generation
+    alone would not bound total spend.
+    """
+
+    def __init__(
+        self,
+        max_calls: int | None = None,
+        max_cost_usd: float | None = None,
+    ) -> None:
+        self.max_calls    = max_calls
+        self.max_cost_usd = max_cost_usd
+        self.call_count   = 0
+        self.spent_usd    = 0.0
+        self.skipped      = 0
+        self._lock = asyncio.Lock()
+
+    @property
+    def exhausted(self) -> bool:
+        if self.max_calls is not None and self.call_count >= self.max_calls:
+            return True
+        if self.max_cost_usd is not None and self.spent_usd >= self.max_cost_usd:
+            return True
+        return False
+
+    async def try_reserve(self) -> bool:
+        """Atomically check and reserve one call slot. False = budget exhausted."""
+        async with self._lock:
+            if self.exhausted:
+                self.skipped += 1
+                return False
+            self.call_count += 1
+            return True
+
+    async def record_cost(self, cost: float) -> None:
+        async with self._lock:
+            self.spent_usd += cost
 
 
 @dataclass
@@ -40,7 +85,12 @@ class UsageSummary:
 
 
 class LLMClient:
-    def __init__(self, model_override: str = "", provider_override: str = "") -> None:
+    def __init__(
+        self,
+        model_override: str = "",
+        provider_override: str = "",
+        budget: BudgetTracker | None = None,
+    ) -> None:
         s = get_settings()
         self._provider = provider_override or s.llm_provider
         raw_model      = model_override or s.llm_model
@@ -48,13 +98,32 @@ class LLMClient:
         self._temp     = s.llm_temperature
         self._max_tk   = s.llm_max_tokens
         self.usage     = UsageSummary()
+        self.budget    = budget
+
+    async def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> LLMResponse:
+        """Dispatch a completion, honoring the shared budget cap if set.
+
+        Raises ``BudgetExceededError`` without making a network call when the
+        cap has already been reached — kept outside the ``@retry``-wrapped
+        implementation so a budget rejection is never retried.
+        """
+        if self.budget is not None and not await self.budget.try_reserve():
+            from dataforge.utils.errors import BudgetExceededError
+            raise BudgetExceededError(self.budget.max_calls, self.budget.max_cost_usd)
+        return await self._complete_impl(messages, temperature=temperature, max_tokens=max_tokens)
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=20),
         reraise=True,
     )
-    async def complete(
+    async def _complete_impl(
         self,
         messages: list[dict[str, str]],
         *,
@@ -86,6 +155,8 @@ class LLMClient:
                 cost_usd=cost,
             )
             self.usage.add(result)
+            if self.budget is not None:
+                await self.budget.record_cost(cost)
             log.debug(f"LLM call: {pt}pt + {ct}ct = ${cost:.5f}")
             return result
         except Exception as exc:
@@ -122,6 +193,10 @@ class LLMClient:
         For DeepSeek-R1 (Ollama), <think>...</think> tags are parsed out of the stream.
         For all other models, tokens are passed to on_token without thinking support.
         """
+        if self.budget is not None and not await self.budget.try_reserve():
+            from dataforge.utils.errors import BudgetExceededError
+            raise BudgetExceededError(self.budget.max_calls, self.budget.max_cost_usd)
+
         s = get_settings()
         supports_thinking = model_supports_thinking(s.llm_provider, s.llm_model)
 

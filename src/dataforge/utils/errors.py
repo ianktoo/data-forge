@@ -45,6 +45,19 @@ class NoContentError(DataForgeError):
     """No usable content was extracted from the provided URLs."""
 
 
+class BudgetExceededError(DataForgeError):
+    """A configured LLM cost/call cap was reached; the call was not dispatched."""
+    def __init__(self, max_calls: int | None, max_cost_usd: float | None) -> None:
+        self.max_calls    = max_calls
+        self.max_cost_usd = max_cost_usd
+        parts = []
+        if max_calls is not None:
+            parts.append(f"max_llm_calls={max_calls}")
+        if max_cost_usd is not None:
+            parts.append(f"max_cost_usd={max_cost_usd}")
+        super().__init__(f"LLM budget exceeded ({', '.join(parts)})")
+
+
 # ── Guidance catalogue ────────────────────────────────────────────────────────
 # Maps credential/error key → (title, body lines, hint lines)
 

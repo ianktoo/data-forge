@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from dataforge.processors.formatter import DataRecord
 from dataforge.utils import get_logger
+from dataforge.utils.errors import BudgetExceededError
 
 from .contracts import GenerationParseError, to_message_dict, to_message_list
 from .llm import LLMClient
@@ -56,6 +57,9 @@ async def generate_from_chunk(
     try:
         resp = await client.complete(messages)
         items = _parse_response(resp.content, format)
+    except BudgetExceededError as exc:
+        log.debug(f"Skipping chunk {record.chunk_id}: {exc}")
+        return []
     except Exception as exc:
         log.warning(f"Generation failed for chunk {record.chunk_id}: {exc}")
         return []

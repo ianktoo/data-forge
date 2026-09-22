@@ -63,6 +63,8 @@ can be four lines long.
 | `generation.system_prompt` | `""` | Custom system prompt (required when `format: custom`) |
 | `generation.chunk_size` | *(global)* | Tokens per chunk |
 | `generation.chunk_overlap` | *(global)* | Token overlap between chunks |
+| `generation.max_cost_usd` | *(unlimited)* | Stop dispatching new generation/judge LLM calls once this run's total estimated spend reaches this amount |
+| `generation.max_llm_calls` | *(unlimited)* | Stop dispatching new generation/judge LLM calls once this run has made this many calls in total |
 | `quality.threshold` | `0.5` | Minimum score (0.0–1.0) for a sample to be approved |
 | `quality.model` | *(generation model)* | Override the LLM used by the judge |
 | `quality.llm_judge` | `true` | Check each sample against its source chunk with an LLM; fails closed |

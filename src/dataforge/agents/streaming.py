@@ -128,7 +128,12 @@ class StreamingAgent(BaseAgent):
             f"generate={n_gen if gen_enabled else 0})"
         )
 
-        llm = LLMClient(model_override=self.ctx.generation_model) if gen_enabled else None
+        has_cap = self.ctx.max_llm_calls is not None or self.ctx.max_cost_usd is not None
+        budget = self.ctx.get_budget() if has_cap else None
+        llm = (
+            LLMClient(model_override=self.ctx.generation_model, budget=budget)
+            if gen_enabled else None
+        )
         limiter = RateLimiter(s.rate_limit)
         raw_dir = self._stage_dir("raw")
         processed_dir = self._stage_dir("processed")
