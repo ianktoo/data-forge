@@ -29,6 +29,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   human audit of the LLM judge (judge precision, rejection precision, kappa).
 
 ### Fixed
+- **robots.txt `Crawl-delay` was not enforced while scraping.** The "already
+  applied" flag was process-wide, so a domain's delay reached only the first
+  rate limiter created (discovery); the scrape and streaming stages build
+  their own and crawled at the default rate. Found by the benchmark: USCIS
+  declares `Crawl-delay: 10` and 20 pages were fetched in about 4 seconds.
+  The flag is now tracked per limiter.
+- **The rate limiter ran at about twice the configured rate.** The token
+  bucket counted its own sleep as refill time, so every other request went
+  through free, and it allowed a burst of 2x the rate. The burst is now one
+  second's worth, or a single request when a `Crawl-delay` applies.
+- **Relative links were resolved against the site root** instead of the page
+  URL (or `<base href>`), sending the BFS crawler to wrong addresses on any
+  site whose pages live below the root.
 - Discovery: a seed deeper than the site root (e.g. `/3/tutorial/`) whose
   sitemap lists nothing under it now falls back to crawling from the seed.
   Before, it returned the sitemap's unrelated URLs and dropped the seed, so
