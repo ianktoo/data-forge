@@ -64,14 +64,27 @@ class ExplorerAgent(BaseAgent):
             if raw_urls:
                 # filter to same domain by default
                 filtered = filter_urls(raw_urls, pattern=None, base_domain=parsed.netloc)
-                if filtered:
+                # A seed deeper than the site root (e.g. /3/tutorial/) that the
+                # sitemap lists nothing under means the sitemap doesn't cover
+                # what was asked for; crawl from the seed instead of returning
+                # unrelated sitemap URLs and dropping the seed entirely.
+                seed_path = parsed.path.rstrip("/")
+                if filtered and seed_path and not any(
+                    urlparse(u).path.rstrip("/").startswith(seed_path) for u in filtered
+                ):
+                    self.log.info(
+                        f"Sitemap at {sitemap_url} lists nothing under {parsed.path}; "
+                        "crawling from the seed instead."
+                    )
+                elif filtered:
                     return (filtered, URLSource.sitemap)
-                # Sitemap parsed successfully but all URLs were filtered out
-                self.log.warning(
-                    f"Sitemap returned {len(raw_urls)} URLs but all were filtered by domain '{parsed.netloc}'. "
-                    "Returning all discovered URLs without domain filter."
-                )
-                return (raw_urls, URLSource.sitemap)
+                else:
+                    # Sitemap parsed successfully but all URLs were filtered out
+                    self.log.warning(
+                        f"Sitemap returned {len(raw_urls)} URLs but all were filtered by domain '{parsed.netloc}'. "
+                        "Returning all discovered URLs without domain filter."
+                    )
+                    return (raw_urls, URLSource.sitemap)
             else:
                 self.log.warning(f"Sitemap found at {sitemap_url} but parsed 0 URLs")
 

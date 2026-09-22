@@ -16,12 +16,16 @@ from tenacity import (
     wait_exponential,
 )
 
+from dataforge import __version__
 from dataforge.utils import RateLimiter, get_logger
 
 log = get_logger("http")
 
+# Identifies the crawler to site operators: real version and a working project URL.
+USER_AGENT = f"DataForge/{__version__} (+https://github.com/ianktoo/data-forge; research bot)"
+
 _HEADERS = {
-    "User-Agent": "DataForge/0.1 (+https://github.com/dataforge; research bot)",
+    "User-Agent": USER_AGENT,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
 }
