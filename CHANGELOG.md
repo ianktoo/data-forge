@@ -3,6 +3,79 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.3.2] - 2026-09-22
+
+Documentation, hardening, and traceability release. No breaking changes.
+
+### Added
+
+- **`dataforge stats <session_id>`** — dataset profiling command: approval
+  rate, rejection-reason breakdown (now persisted, not just logged),
+  quality-score distribution, question/answer length statistics, and
+  realized train/validation/test split proportions.
+- **LLM cost/call budget cap** — `generation.max_cost_usd` /
+  `generation.max_llm_calls` recipe keys, enforced by a shared,
+  concurrency-safe tracker across generation and the quality judge. Once
+  hit, new calls are skipped cleanly rather than the run crashing or
+  spending past the configured limit.
+- **Near-duplicate detection** — deduplication now hashes full sample
+  content (fixing false-positive collisions on shared openings) and adds a
+  per-chunk token-set Jaccard near-duplicate check
+  (`quality.near_dup_threshold`, default 0.85), catching paraphrase
+  redundancy that an exact-hash check structurally cannot.
+- `.gitattributes`, marking PDF/PNG/JPEG/DB files as binary so they aren't
+  subject to CRLF translation on checkout.
+
+### Changed
+
+- **README rewritten** to lead with the pitch and a "What you'll need"
+  section (Python + one LLM — hosted key or local via Ollama — is the only
+  hard requirement; HuggingFace/Kaggle accounts are optional, only for
+  those export targets). Technical detail (install, full env var and
+  recipe reference, dev/release workflow, ethics, third-party licenses)
+  moved to `docs/`.
+- `docs/TECHNICAL.tex` — implementation technical writeup extended with:
+  the fixes above, a "Retrieval augmentation as a complement, not a
+  substitute" section on RAG vs. fine-tuning for hallucination reduction, a
+  "Responsible use and misuse considerations" section, and non-text source
+  ingestion (PDF/table/image/audio) named as the concrete next step. Five
+  references added, each verified against its actual venue/arXiv ID.
+  Architecture diagram embedded as `docs/architecture.pdf` (pre-rendered
+  from `docs/architecture.svg`) so the paper compiles on hosted LaTeX
+  toolchains (e.g. Papeeria) without `shell-escape`/Inkscape.
+- Documented the `google` (Gemini) provider, which existed in
+  `config/providers.py` but was missing from the README/docs.
+
+### Fixed
+
+- Test coverage added for `exporters/huggingface.py`, `exporters/kaggle_exp.py`,
+  and the full `config/providers.py` registry — previously untested.
+
+### Process
+
+- Established a going-forward convention (`docs/ISSUES_LOG.md`): gaps found
+  during review are filed as GitHub issues with problem/impact/fix, not
+  left as prose in a report. This release's work is traceable through
+  issues [#8](https://github.com/ianktoo/data-forge/issues/8)–[#12](https://github.com/ianktoo/data-forge/issues/12)
+  (filed, fixed, and closed) and [#19](https://github.com/ianktoo/data-forge/issues/19),
+  [#20](https://github.com/ianktoo/data-forge/issues/20),
+  [#22](https://github.com/ianktoo/data-forge/issues/22) (filed, **open** —
+  see below).
+
+### Known open issues at this release
+
+- **[#19](https://github.com/ianktoo/data-forge/issues/19)** — the
+  Unsloth/ShareGPT export format drops source lineage (`page_id`,
+  `chunk_id`, `source_url`); the plain JSONL/Parquet/CSV exports are
+  unaffected.
+- **[#20](https://github.com/ianktoo/data-forge/issues/20)** — rows within
+  a split's output file are not shuffled; they cluster by source page,
+  largest page first. Split *membership* (which page lands in which
+  split) is correctly randomized — only row order within a split is not.
+- **[#22](https://github.com/ianktoo/data-forge/issues/22)** — no generic
+  OpenAI-compatible local endpoint support. "Fully local" today means
+  Ollama specifically; LM Studio, Lemonade, vLLM, etc. aren't wired in.
+
 ## [2.3.1] - 2026-09-05
 
 > This is the first release cut after reconciling `master` with the
