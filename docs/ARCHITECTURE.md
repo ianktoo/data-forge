@@ -137,9 +137,13 @@ Every page, chunk, and sample is checkpointed to SQLite (`storage/`,
 SQLModel) as it is produced, with autosave after every stage
 (`DATAFORGE_AUTOSAVE`). `Ctrl-C` mid-run costs only the item in flight.
 `dataforge resume <id>` continues an interrupted session in either mode,
-`dataforge view <id> --stage generation` inspects what was produced, and
+`dataforge view <id> --stage generation` inspects what was produced,
 `dataforge export <id>` re-exports without re-running collection or
-generation.
+generation, and `dataforge stats <id>` reports dataset-level statistics —
+approval rate, rejection-reason breakdown, quality-score distribution,
+question/answer length, and realized train/validation/test proportions from
+the most recent export — read entirely from data the pipeline already
+computed, including for a past session.
 
 ## Module layout
 

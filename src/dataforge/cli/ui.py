@@ -207,6 +207,70 @@ def view_summary(stage_counts: dict) -> None:
     console.print(Panel(t, title="[bold]Session Overview[/]", border_style="cyan"))
 
 
+def stats_summary(stats: Any) -> None:
+    """Render a SessionStats object: approval rate, rejection breakdown,
+    score distribution, length stats, and realized split proportions."""
+    overview = Table.grid(padding=(0, 3))
+    overview.add_column(style="bold cyan", min_width=18)
+    overview.add_column(justify="right")
+    rate = (stats.approved / stats.total_samples * 100) if stats.total_samples else 0.0
+    overview.add_row("Total samples", str(stats.total_samples))
+    overview.add_row("Approved", f"[green]{stats.approved}[/] ({rate:.0f}%)")
+    overview.add_row("Rejected", f"[red]{stats.rejected}[/]" if stats.rejected else "0")
+    console.print(Panel(overview, title="[bold]Dataset Overview[/]", border_style="cyan"))
+
+    if stats.rejection_reasons:
+        t = Table(box=box.SIMPLE_HEAD, title="Rejection Breakdown")
+        t.add_column("Reason")
+        t.add_column("Count", justify="right")
+        for reason, count in sorted(stats.rejection_reasons.items(), key=lambda kv: -kv[1]):
+            t.add_row(reason, str(count))
+        console.print(t)
+
+    if stats.score.count:
+        t = Table(box=box.SIMPLE_HEAD, title="Quality Score Distribution")
+        t.add_column("Metric")
+        t.add_column("Value", justify="right")
+        t.add_row("Min",    f"{stats.score.min:.2f}")
+        t.add_row("Median", f"{stats.score.median:.2f}")
+        t.add_row("Mean",   f"{stats.score.mean:.2f}")
+        t.add_row("Max",    f"{stats.score.max:.2f}")
+        console.print(t)
+
+        n = len(stats.score.histogram)
+        hist = Table(box=box.SIMPLE_HEAD, title="Score Histogram")
+        hist.add_column("Range")
+        hist.add_column("Count", justify="right")
+        hist.add_column("")
+        max_count = max(stats.score.histogram) or 1
+        for i, count in enumerate(stats.score.histogram):
+            lo, hi = i / n, (i + 1) / n
+            bar = "█" * int(count / max_count * 20)
+            hist.add_row(f"{lo:.1f}–{hi:.1f}", str(count), f"[cyan]{bar}[/]")
+        console.print(hist)
+
+    if stats.question_length.count or stats.answer_length.count:
+        t = Table(box=box.SIMPLE_HEAD, title="Length (words)")
+        t.add_column("")
+        t.add_column("Min", justify="right")
+        t.add_column("Median", justify="right")
+        t.add_column("Mean", justify="right")
+        t.add_column("Max", justify="right")
+        for label, ls in (("Question", stats.question_length), ("Answer", stats.answer_length)):
+            t.add_row(label, str(ls.min), f"{ls.median:.0f}", f"{ls.mean:.1f}", str(ls.max))
+        console.print(t)
+
+    if stats.split_counts:
+        total = sum(stats.split_counts.values()) or 1
+        t = Table(box=box.SIMPLE_HEAD, title="Realized Split (most recent export)")
+        t.add_column("Split")
+        t.add_column("Samples", justify="right")
+        t.add_column("Share", justify="right")
+        for name, count in stats.split_counts.items():
+            t.add_row(name, str(count), f"{count / total * 100:.1f}%")
+        console.print(t)
+
+
 def view_urls(rows: list[dict], max_rows: int = 50) -> None:
     """Table of discovered URLs."""
     t = Table(box=box.SIMPLE_HEAD, title=f"Discovered URLs ({len(rows)} total)")

@@ -27,6 +27,7 @@ from dataforge.storage import (
     ScrapedPage,
     SessionStatus,
     SyntheticSample,
+    compute_session_stats,
     init_db,
     open_session,
     persist_url_selection,
@@ -547,24 +548,34 @@ async def _paged_view(rows: list, page_size: int, render_fn, label: str) -> None
             page -= 1
 
 
+def _resolve_session(db_path: Path, session_id: str) -> PipelineSession | None:
+    """Resolve a session by exact ID or unambiguous prefix.
+
+    Prints its own error and returns None on no-match or ambiguous-prefix,
+    so callers can just check for None rather than duplicating messaging.
+    """
+    with open_session(db_path) as db:
+        session = db.get(PipelineSession, session_id)
+        if session:
+            return session
+        all_s = db.exec(select(PipelineSession)).all()
+        matches = [x for x in all_s if x.id.startswith(session_id)]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            ui.error("Ambiguous session ID prefix — be more specific")
+            return None
+        ui.error(f"Session '{session_id}' not found")
+        return None
+
+
 async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> None:
     from dataforge.storage import ExportRecord, ProcessedChunk, ScrapedPage
     s = get_settings()
 
-    # Resolve session (support prefix match)
-    with open_session(s.db_path) as db:
-        session = db.get(PipelineSession, session_id)
-        if not session:
-            all_s = db.exec(select(PipelineSession)).all()
-            matches = [x for x in all_s if x.id.startswith(session_id)]
-            if len(matches) == 1:
-                session = matches[0]
-            elif len(matches) > 1:
-                ui.error("Ambiguous session ID prefix — be more specific")
-                return
-            else:
-                ui.error(f"Session '{session_id}' not found")
-                return
+    session = _resolve_session(s.db_path, session_id)
+    if not session:
+        return
 
     sid = session.id
     ui.info(f"Session [bold]{session.name}[/]  [{sid[:8]}]  stage=[cyan]{session.stage}[/]  status={session.status}")
@@ -633,6 +644,46 @@ async def _view_session(session_id: str, stage: str | None, limit: int = 5) -> N
 
     else:
         ui.error(f"Unknown stage '{stage}'. Valid: discovery, collection, processing, generation, quality")
+
+
+# ── stats command ─────────────────────────────────────────────────────────────
+
+@app.command()
+def stats(
+    session_id: str = typer.Argument(..., help="Session ID (or prefix) to summarize"),
+) -> None:
+    """Show dataset statistics for a session: approval rate, rejection
+    breakdown, quality-score distribution, length stats, and realized split
+    proportions from the most recent export. Read-only — computed entirely
+    from data the pipeline already produced during generation/quality/export.
+    """
+    _bootstrap()
+    s = get_settings()
+    session = _resolve_session(s.db_path, session_id)
+    if not session:
+        raise typer.Exit(code=1)
+
+    result = compute_session_stats(s.db_path, session.id, s.session_dir(session.id))
+
+    if _JSON_OUTPUT:
+        typer.echo(json.dumps({
+            "session_id": session.id,
+            "total_samples": result.total_samples,
+            "approved": result.approved,
+            "rejected": result.rejected,
+            "rejection_reasons": result.rejection_reasons,
+            "question_length": vars(result.question_length),
+            "answer_length": vars(result.answer_length),
+            "score": vars(result.score),
+            "split_counts": result.split_counts,
+        }, indent=2))
+        return
+
+    ui.info(f"Session [bold]{session.name}[/]  [{session.id[:8]}]")
+    if result.total_samples == 0:
+        ui.info("No samples generated yet for this session.")
+        return
+    ui.stats_summary(result)
 
 
 # ── config command ────────────────────────────────────────────────────────────

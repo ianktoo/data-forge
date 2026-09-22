@@ -120,6 +120,7 @@ class SyntheticSample(SQLModel, table=True):
     messages_json: str      = Field(default="[]")  # [{role, content}]
     quality_score: float    = Field(default=0.0)
     approved: bool          = Field(default=False)
+    rejection_reason: str   = Field(default="")  # "" if approved
     created_at: datetime    = Field(default_factory=lambda: datetime.now(UTC))
 
     def messages(self) -> list[dict[str, str]]:
