@@ -58,6 +58,8 @@ class RateLimiter:
 
         # Domains whose robots.txt Crawl-delay has been applied to *this* limiter.
         self.crawl_delay_domains: set[str] = set()
+        # Domains slowed below the default by set_domain_limit (a Crawl-delay).
+        self._limited_domains: set[str] = set()
 
     @staticmethod
     def _capacity(rps: float) -> float:
@@ -70,6 +72,11 @@ class RateLimiter:
 
     def set_domain_limit(self, domain: str, rps: float) -> None:
         self._buckets[domain] = _Bucket(rate=rps, capacity=self._capacity(rps))
+        self._limited_domains.add(domain)
+
+    def has_domain_limit(self, domain: str) -> bool:
+        """True if *domain* was slowed by set_domain_limit (e.g. a Crawl-delay)."""
+        return domain in self._limited_domains
 
     async def wait(self, url: str) -> None:
         domain = urlparse(url).netloc

@@ -321,3 +321,126 @@ def test_tls_context_always_verifies():
     ctx = ssl_context()
     assert ctx.verify_mode == ssl.CERT_REQUIRED
     assert ctx.check_hostname is True
+
+
+# -- robots.txt failure handling (RFC 9309) ----------------------------------
+
+
+@respx.mock
+@pytest.mark.parametrize("status", [500, 503, 429])
+async def test_robots_server_error_disallows_everything(limiter, status):
+    respx.get("https://down.test/robots.txt").mock(return_value=httpx.Response(status, text="<html>oops</html>"))
+    page = respx.get("https://down.test/page").mock(return_value=httpx.Response(200, text="hi"))
+    async with HTTPClient(limiter) as c:
+        with pytest.raises(PermissionError):
+            await c.get("https://down.test/page")
+    assert not page.called
+
+
+@respx.mock
+async def test_robots_404_allows_everything(limiter):
+    respx.get("https://none.test/robots.txt").mock(return_value=httpx.Response(404, text="<html>Not found</html>"))
+    respx.get("https://none.test/page").mock(return_value=httpx.Response(200, text="hi"))
+    async with HTTPClient(limiter) as c:
+        assert (await c.get("https://none.test/page")).status_code == 200
+
+
+@respx.mock
+async def test_robots_unreachable_disallows_everything(limiter):
+    respx.get("https://gone.test/robots.txt").mock(side_effect=httpx.ConnectError("refused"))
+    async with HTTPClient(limiter) as c:
+        with pytest.raises(PermissionError):
+            await c.get("https://gone.test/page")
+
+
+@respx.mock
+async def test_robots_fetch_goes_through_the_rate_limiter():
+    respx.get("https://rl.test/robots.txt").mock(return_value=httpx.Response(200, text=ROBOTS_OPEN))
+    respx.get("https://rl.test/page").mock(return_value=httpx.Response(200, text="hi"))
+    lim = RateLimiter(default_rps=1000.0)
+    waited = []
+    orig = lim.wait
+
+    async def spy(url):
+        waited.append(url)
+        await orig(url)
+
+    lim.wait = spy
+    async with HTTPClient(lim) as c:
+        await c.get("https://rl.test/page")
+    assert waited == ["https://rl.test/robots.txt", "https://rl.test/page"]
+
+
+# -- Playwright fallback goes through the same gate ---------------------------
+
+
+def _fake_playwright(monkeypatch):
+    """Install a stand-in playwright.async_api and return what it records."""
+    import sys
+    import types
+
+    seen = {"launched": 0, "user_agent": None}
+
+    class Page:
+        async def route(self, pattern, handler): pass
+        async def goto(self, url, **kw): pass
+        async def content(self): return "<html>rendered</html>"
+
+    class Browser:
+        async def new_page(self, user_agent=None):
+            seen["user_agent"] = user_agent
+            return Page()
+        async def close(self): pass
+
+    class Chromium:
+        async def launch(self, headless=True):
+            seen["launched"] += 1
+            return Browser()
+
+    class PW:
+        chromium = Chromium()
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+
+    mod = types.ModuleType("playwright.async_api")
+    mod.async_playwright = lambda: PW()
+    monkeypatch.setitem(sys.modules, "playwright", types.ModuleType("playwright"))
+    monkeypatch.setitem(sys.modules, "playwright.async_api", mod)
+    return seen
+
+
+@respx.mock
+async def test_browser_render_uses_robots_limiter_and_user_agent(monkeypatch, limiter):
+    from dataforge.collectors.crawler import _playwright_fetch
+    from dataforge.collectors.http import USER_AGENT
+
+    seen = _fake_playwright(monkeypatch)
+    respx.get("https://spa.test/robots.txt").mock(return_value=httpx.Response(200, text=ROBOTS_OPEN))
+    async with HTTPClient(limiter) as c:
+        html = await _playwright_fetch(c, "https://spa.test/app")
+    assert html == "<html>rendered</html>"
+    assert seen["user_agent"] == USER_AGENT
+
+
+@respx.mock
+async def test_browser_render_respects_robots_disallow(monkeypatch, limiter):
+    from dataforge.collectors.crawler import _playwright_fetch
+
+    seen = _fake_playwright(monkeypatch)
+    respx.get("https://spa.test/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nDisallow: /app\n"))
+    async with HTTPClient(limiter) as c:
+        assert await _playwright_fetch(c, "https://spa.test/app") is None
+    assert seen["launched"] == 0
+
+
+@respx.mock
+async def test_browser_render_skipped_when_site_declares_crawl_delay(monkeypatch, limiter):
+    from dataforge.collectors.crawler import _playwright_fetch
+
+    seen = _fake_playwright(monkeypatch)
+    respx.get("https://slow.test/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nCrawl-delay: 1\nAllow: /\n"))
+    async with HTTPClient(limiter) as c:
+        assert await _playwright_fetch(c, "https://slow.test/app") is None
+    assert seen["launched"] == 0

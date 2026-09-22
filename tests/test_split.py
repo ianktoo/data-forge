@@ -188,3 +188,29 @@ def test_ratios_must_sum_to_one(tmp_path):
     )
     with pytest.raises(RecipeError, match="sum to 1.0"):
         load_recipe(p)
+
+
+def test_empty_split_is_warned_not_silent(monkeypatch):
+    """Two pages cannot fill three splits; say so instead of writing no file."""
+    from unittest.mock import MagicMock
+
+    from dataforge.exporters import split as split_mod
+
+    log = MagicMock()
+    monkeypatch.setattr(split_mod, "log", log)
+    splits = split_records(_records(2), ratios=RATIOS, group_by="page")
+    assert sum(1 for recs in splits.values() if not recs) >= 1
+    assert log.warning.called and "received no page group" in log.warning.call_args[0][0]
+
+
+def test_assignment_is_largest_first_seed_only_breaks_ties():
+    """Documented behaviour: held-out splits get pages by size rank, not at random."""
+    recs = []
+    for page, size in enumerate([30, 20, 10, 5, 5, 5, 5, 5, 5, 5]):
+        recs += [{"page_id": page, "chunk_id": page * 100, "source_url": f"https://x.test/{page}"}] * size
+    a = split_records(recs, ratios=RATIOS, group_by="page", seed=1)
+    b = split_records(recs, ratios=RATIOS, group_by="page", seed=2)
+    pages = lambda s: {r["page_id"] for r in s}  # noqa: E731
+    # The three largest pages land in the same splits whatever the seed.
+    for p in (0, 1, 2):
+        assert [n for n in a if p in pages(a[n])] == [n for n in b if p in pages(b[n])]

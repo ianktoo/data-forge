@@ -20,7 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from evals.harness.judge import score_answer
@@ -86,7 +86,7 @@ def main() -> None:
         failures_by_model[model_name] = failures
 
     summary = {
-        "run_at": datetime.now(timezone.utc).isoformat(),
+        "run_at": datetime.now(UTC).isoformat(),
         "judge_model": args.judge_model,
         "holdout_size": len(holdout),
         "models": {

@@ -36,7 +36,8 @@ RESULTS = HERE.parent / "results"
 
 
 def _reason_group(reason: str) -> str:
-    return "judge score below threshold" if re.match(r"judge score \d+ <", reason) else reason
+    # Current labels are "judge: score N < M"; runs before 2.4.0 wrote "judge score N < M".
+    return "judge: score below threshold" if re.match(r"judge:? score \d+ <", reason) else reason
 
 
 def _split_page_ids(export_dir: Path) -> dict[str, set]:

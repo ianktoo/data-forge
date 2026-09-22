@@ -63,7 +63,13 @@ def split_records(
 
     ``ratios`` maps split name to target share (e.g. ``{"train": 0.8,
     "validation": 0.1, "test": 0.1}``). Shares are normalised, so they need not
-    sum to exactly 1.0. The split is deterministic for a given ``seed``.
+    sum to exactly 1.0.
+
+    Assignment is a deterministic, largest-first greedy: groups are ordered by
+    size (``seed`` only breaks ties between equal-sized groups) and each goes to
+    the split furthest below its target. Held-out splits are therefore chosen by
+    group size, not at random. With few groups a split can end up empty; that
+    is logged as a warning rather than silently written as a missing file.
     """
     if not records:
         return {name: [] for name in ratios}
@@ -100,6 +106,14 @@ def split_records(
 
     for name in ratios:
         out.setdefault(name, [])
+
+    empty = [name for name in targets if not out[name]]
+    if empty:
+        log.warning(
+            f"Split {', '.join(empty)} received no {group_by} group "
+            f"({len(groups)} group(s) for {len(targets)} split(s)); "
+            "collect more pages or reduce the number of splits."
+        )
 
     _log_summary(out, groups, group_by, len(records))
     return out

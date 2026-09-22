@@ -103,9 +103,9 @@ def test_score_is_clamped_and_booleans_must_be_true():
 
 
 def test_verdict_rejection_reasons():
-    assert Verdict(5, False, True, "").rejection_reason(4) == "not grounded in source"
-    assert Verdict(5, True, False, "").rejection_reason(4) == "refers to the source"
-    assert Verdict(3, True, True, "").rejection_reason(4) == "judge score 3 < 4"
+    assert Verdict(5, False, True, "").rejection_reason(4) == "judge: not grounded in source"
+    assert Verdict(5, True, False, "").rejection_reason(4) == "judge: not standalone (refers to the source)"
+    assert Verdict(3, True, True, "").rejection_reason(4) == "judge: score 3 < 4"
     assert Verdict(4, True, True, "").passes(4)
 
 

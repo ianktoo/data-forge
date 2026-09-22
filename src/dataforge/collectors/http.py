@@ -88,20 +88,42 @@ def _parse_retry_after(value: str | None) -> float:
         return 0.0
 
 
-async def _robots(client: httpx.AsyncClient, base_url: str) -> RobotFileParser:
+async def _robots(
+    client: httpx.AsyncClient, base_url: str, limiter: RateLimiter | None = None
+) -> RobotFileParser:
+    """Fetch and parse a site's robots.txt, following RFC 9309 on failures:
+    a 4xx means no rules (allow all); a 5xx, 429 or network error means the
+    rules are unknown, so everything is disallowed rather than guessed at.
+    """
     if base_url in _robots_cache:
         _robots_cache.move_to_end(base_url)
         return _robots_cache[base_url]
     parser = RobotFileParser()
     robots_url = urljoin(base_url, "/robots.txt")
     try:
+        if limiter is not None:
+            # The robots.txt request is a request to the site like any other.
+            await limiter.wait(robots_url)
         r = await client.get(robots_url, timeout=10)
-        parser.parse(r.text.splitlines())
-        delay = parser.crawl_delay("DataForge") or parser.crawl_delay("*")
-        if delay:
-            log.debug(f"robots.txt crawl-delay for {base_url}: {delay}s")
-    except Exception:
-        pass
+        if r.status_code >= 500 or r.status_code == 429:
+            log.warning(
+                f"robots.txt for {base_url} returned {r.status_code}; "
+                "treating the whole site as disallowed (RFC 9309)"
+            )
+            parser.disallow_all = True
+        elif r.status_code >= 400:
+            parser.allow_all = True
+        else:
+            parser.parse(r.text.splitlines())
+            delay = parser.crawl_delay("DataForge") or parser.crawl_delay("*")
+            if delay:
+                log.debug(f"robots.txt crawl-delay for {base_url}: {delay}s")
+    except Exception as exc:
+        log.warning(
+            f"robots.txt for {base_url} unreachable ({type(exc).__name__}); "
+            "treating the whole site as disallowed (RFC 9309)"
+        )
+        parser.disallow_all = True
     _robots_cache[base_url] = parser
     if len(_robots_cache) > _ROBOTS_CACHE_MAX:
         _robots_cache.popitem(last=False)
@@ -128,6 +150,26 @@ class HTTPClient:
         if self._client:
             await self._client.aclose()
 
+    def has_crawl_delay(self, domain: str) -> bool:
+        """True if this client is honouring a robots.txt Crawl-delay for *domain*."""
+        return self._limiter.has_domain_limit(domain)
+
+    async def prepare(self, url: str, *, check_robots: bool = True) -> None:
+        """Everything a request to *url* must pass before it is sent: the
+        robots.txt check (raising PermissionError if disallowed), the site's
+        Crawl-delay, and the rate limiter. Used by get() and by anything that
+        fetches a URL outside this client, such as the Playwright fallback.
+        """
+        assert self._client, "Use as async context manager"
+        parsed = urlparse(url)
+        if check_robots and not self._ignore_robots:
+            robots = await _robots(self._client, f"{parsed.scheme}://{parsed.netloc}", self._limiter)
+            if not robots.can_fetch("DataForge", url):
+                log.warning(f"robots.txt disallows {url}")
+                raise PermissionError(f"robots.txt disallows {url}")
+            self._apply_crawl_delay(robots, parsed.netloc)
+        await self._limiter.wait(url)
+
     @retry(
         retry=retry_if_exception_type(
             (httpx.TransportError, httpx.TimeoutException, RetryableHTTPError)
@@ -137,18 +179,7 @@ class HTTPClient:
         reraise=True,
     )
     async def get(self, url: str, *, check_robots: bool = True) -> httpx.Response:
-        assert self._client, "Use as async context manager"
-        parsed = urlparse(url)
-        base = f"{parsed.scheme}://{parsed.netloc}"
-
-        if check_robots and not self._ignore_robots:
-            robots = await _robots(self._client, base)
-            if not robots.can_fetch("DataForge", url):
-                log.warning(f"robots.txt disallows {url}")
-                raise PermissionError(f"robots.txt disallows {url}")
-            self._apply_crawl_delay(robots, parsed.netloc)
-
-        await self._limiter.wait(url)
+        await self.prepare(url, check_robots=check_robots)
         response = await self._client.get(url)
         log.debug(f"GET {url} → {response.status_code}")
 
