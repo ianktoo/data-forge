@@ -3,6 +3,44 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+Fixes from the first pipeline run driven through the MCP server
+(`docs/reviews/2026-09-22-mcp-run-report.md`). No breaking changes.
+
+### Fixed
+- **`run` used a different database from `sessions`, `stats` and `view`.** `run`
+  skipped the CLI bootstrap, so it ignored the `.dataforge` project file and wrote
+  to `./dataforge.db` while the reporting commands read the project file's
+  database. The MCP tools `session_stats`, `view_samples` and `list_sessions`
+  therefore could not find sessions that `start_run` created. `run` now
+  bootstraps like every other command; an explicit `DATAFORGE_DB_PATH` or
+  `DATAFORGE_OUTPUT_DIR` still takes precedence.
+- **`view --json --stage` opened an interactive pager.** It now prints the rows as
+  JSON (`session_id`, `stage`, `total`, `rows`), so the MCP `view_samples` tool
+  works. Without a terminal, human mode prints the first page instead of paging.
+  Sample rows include `id`, `chunk_id` and `rejection_reason`.
+- **Errors under `--json` were plain text with exit code 0.** They are now
+  `{"error": "..."}` with a non-zero exit, and the MCP server passes the CLI's
+  message to the agent instead of a bare "Error executing tool".
+- **`run_status` returned coloured DEBUG logs.** `run` now configures logging
+  (INFO), the console logger honours `NO_COLOR`, and `run_status` strips colour
+  codes and DEBUG lines and adds a `progress` field.
+- **False "No LLM provider key detected" warning** when the key is in `.env`.
+- The dry-run plan now shows the spending cap (`Budget:`) and the database path.
+
+### Documentation
+- Agent guide and README: Claude Code loads a newly added MCP server only in a
+  new session (`/exit`, then `claude --continue` in the terminal); register the
+  executable's full path when `dataforge` is not on PATH.
+- `examples/ready-gov-core-hazards.yaml`: a focused Ready.gov recipe (floods,
+  severe weather, wildfires, hurricanes, power outages, alerts, plan, kit,
+  National Preparedness Month). `examples/ready-gov.yaml` now has a spending cap.
+- `evals/pipeline/sites.yaml`: Ready.gov's own terms page recorded, with the
+  owner's academic-use decision.
+- `docs/TECHNICAL.tex`: the agent-integration section records the first real
+  MCP-driven run and the inspection-tool failures it exposed.
+
 ## [2.4.0] - 2026-09-22
 
 Agent integration (agent guide, local MCP server), a pipeline benchmark,

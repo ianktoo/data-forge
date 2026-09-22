@@ -19,6 +19,13 @@ sites:
       reviewed_by: Ian Too
       reviewed_on: 2026-09-22
       outcome: >
+        Ready.gov's own terms (ready.gov/terms-and-conditions, last updated
+        2013-02-07, found and read 2026-09-22) have no reuse statement and no
+        prohibition on data extraction; they carry a government-system banner
+        ("may be used only for authorized purposes"), a technical-disruption
+        liability clause, and a trademark on the Ready logo. The same banner led
+        FAA to be excluded as unclear; Ready.gov is kept because FEMA grants
+        reuse and the use is academic (owner decision, 2026-09-22).
         FEMA "Website Information" page: "Most material on FEMA.gov is free of
         copyright and may be copied and distributed without permission"; licensed
         photos/graphics excepted. It lists Ready.gov as a FEMA-owned domain but does
