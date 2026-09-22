@@ -60,7 +60,9 @@ def check_env_file() -> bool:
     s = get_settings()
     active_key_env = _PROVIDER_KEY_MAP.get(s.llm_provider.lower())
     needs_key = active_key_env is not None
-    has_key = bool(needs_key and os.getenv(active_key_env))
+    # A key in .env is loaded into Settings (e.g. openai_api_key) but not
+    # exported to the process environment, so check both.
+    has_key = bool(needs_key and (os.getenv(active_key_env) or getattr(s, active_key_env.lower(), "")))
     if needs_key and not has_key:
         show_warning(
             "No LLM provider key detected — you will be prompted for one when needed.",

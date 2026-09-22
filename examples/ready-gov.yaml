@@ -77,6 +77,10 @@ generation:
     covering hazard-specific guidance, emergency kits and family planning,
     grounded strictly in official Ready.gov and FEMA guidance.
   n_per_chunk: 3
+  # Hard ceiling on combined generation + judge spend. About 150 pages cost
+  # roughly $0.20 with gpt-4o-mini; the cap leaves headroom. `dataforge mcp`
+  # refuses to start a recipe without one.
+  max_cost_usd: 2.00
   # model: openai/gpt-4o-mini  # omit to use your configured default
   # system_prompt: "..."       # required only when format: custom
   chunk_size: 512

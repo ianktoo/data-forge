@@ -1,0 +1,59 @@
+# DataForge recipe: Ready.gov core hazards and preparedness basics.
+#
+# The topics on Ready.gov's home page: flooding, severe weather (tornadoes,
+# thunderstorms), wildfires, hurricanes and evacuation, power outages,
+# emergency alerts, making a plan, building a kit (water, food), and
+# National Preparedness Month. English pages only.
+#
+#   dataforge run examples/ready-gov-core-hazards.yaml --dry-run
+#   dataforge run examples/ready-gov-core-hazards.yaml
+#
+# Terms: Ready.gov's own terms (ready.gov/terms-and-conditions) contain no
+# reuse statement and no prohibition on data extraction, only a
+# government-system "authorized purposes" banner; FEMA, which runs Ready.gov,
+# states that most of its material "is free of copyright and may be copied and
+# distributed without permission". Text only; the Ready logo is trademarked.
+
+version: 1
+name: ready-gov-core-hazards
+stream: true
+
+source:
+  urls:
+    - https://www.ready.gov/sitemap.xml
+  language: en
+  # One anchored regex per page, so /floods does not also match
+  # /kids/disaster-facts/floods or the /flood-toolkit graphics page.
+  include:
+    - "re:^https://www\\.ready\\.gov/(floods|severe-weather|tornadoes|thunderstorms-lightning|wildfires|hurricanes|evacuation|power-outages|alerts|plan|kit|water|food|2026-national-preparedness-month-partner-toolkit)$"
+  max_urls: 20
+  ignore_robots: false
+  skip_known: false
+
+crawl:
+  rate_limit: 2.0
+
+generation:
+  format: qa
+  goal: >
+    Accurate question-and-answer pairs about preparing for and responding to
+    floods, severe weather, wildfires, hurricanes and power outages, receiving
+    emergency alerts, making a family emergency plan and building an emergency
+    supply kit, grounded strictly in official Ready.gov guidance.
+  n_per_chunk: 3
+  max_cost_usd: 1.00
+
+quality:
+  threshold: 0.5
+  llm_judge: true
+  min_judge_score: 4
+
+export:
+  targets: [local]
+  approved_only: true
+  split:
+    train: 0.8
+    validation: 0.1
+    test: 0.1
+    group_by: page
+    seed: 42

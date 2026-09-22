@@ -17,7 +17,8 @@
   urlcolor=blue,
   citecolor=blue,
   pdftitle={DataForge: A Streaming, Leak-Aware Pipeline for Synthetic LLM Fine-Tuning Datasets},
-  pdfauthor={Ian Too}
+  pdfauthor={Ian Too},
+  pdfsubject={DOI: 10.5281/zenodo.22906072}
 }
 
 \lstset{
@@ -32,8 +33,9 @@
 
 \title{DataForge: A Streaming, Leak-Aware Pipeline\\
 for Synthetic LLM Fine-Tuning Datasets}
-\author{Ian Too}
-\date{2026}
+\author{Ian Too\\
+  \small DOI: \href{https://doi.org/10.5281/zenodo.22906072}{10.5281/zenodo.22906072}}
+\date{Technical Note, 2026}
 
 \begin{document}
 \maketitle
@@ -899,7 +901,15 @@ The current server keeps its registry of background runs in memory: a
 restarted server can still read a run's log but no longer knows its exit
 code. It also offers no tool to pause or cancel a run and sends no
 progress notifications, so the agent must poll. None of these is
-fundamental, but each is a gap in the present implementation.
+fundamental, but each is a gap in the present implementation. The first
+real run driven through the server (fourteen Ready.gov pages, 125 approved
+samples for \$0.017) completed, but its inspection tools failed:
+\texttt{dataforge run} and the reporting commands resolved the session
+database differently, and \texttt{view} opened an interactive pager even
+under \texttt{--json}, so \texttt{session\_stats} and \texttt{view\_samples}
+could not return anything. Both were fixed in version~2.4.1; like the
+politeness defects of Section~\ref{sec:eval-defects}, they were invisible to
+unit tests of each command and appeared only end to end.
 
 \section{Related work}
 

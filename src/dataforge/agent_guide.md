@@ -18,6 +18,15 @@ relative recipe paths resolve against that directory:
 claude mcp add dataforge -- dataforge mcp
 ```
 
+Claude Code loads MCP servers when a session starts. After `claude mcp add`,
+the tools are not available in the session that is already open: the user
+must exit it (`/exit`) and run `claude --continue` **in the terminal** to reopen
+the same conversation with the server loaded (typing that command into the
+chat does nothing). `claude mcp list` shows whether the server connects. If
+`dataforge` is not on PATH (for example, installed in a virtual environment),
+register the full path to the executable instead:
+`claude mcp add dataforge -- /path/to/.venv/bin/dataforge mcp`.
+
 Tools: `explore_site`, `validate_recipe`, `start_run` + `run_status` (a run
 takes minutes, so it runs in the background), `list_sessions`,
 `session_stats`, `view_samples`. `start_run` refuses a recipe with no spending

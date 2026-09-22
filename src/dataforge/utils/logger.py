@@ -1,6 +1,7 @@
 """Loguru setup — structured JSON to file, human-readable to stderr."""
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -22,7 +23,9 @@ def setup_logging(log_dir: Path, level: str = "INFO") -> None:
         level=level,
         format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{extra[agent]}</cyan> — {message}",
         filter=lambda r: r["extra"].get("agent", True),  # always show
-        colorize=True,
+        # None lets loguru colour only a real terminal; NO_COLOR (also set by
+        # --no-color) turns colour off, so redirected output stays plain text.
+        colorize=False if os.getenv("NO_COLOR") else None,
     )
 
     # Structured JSON pipeline log

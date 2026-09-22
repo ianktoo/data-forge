@@ -266,6 +266,15 @@ def _count_progress(label: str, every: int = 25):
 # -- Reporting ---------------------------------------------------------------
 
 
+def _budget_text(recipe: Recipe) -> str:
+    """The spending cap, stated plainly: the one thing to confirm before a run."""
+    g = recipe.generation
+    caps = [f"${g.max_cost_usd:.2f}" if g.max_cost_usd is not None else "",
+            f"{g.max_llm_calls} LLM calls" if g.max_llm_calls is not None else ""]
+    caps = [c for c in caps if c]
+    return "at most " + " and ".join(caps) if caps else "NO CAP (spend is unbounded)"
+
+
 def _print_plan(recipe: Recipe, seed_urls: list[str], s) -> None:
     mode = "streaming (overlapped)" if recipe.stream else "batch (sequential)"
     ui.section(f"Recipe: {recipe.name}")
@@ -277,8 +286,10 @@ def _print_plan(recipe: Recipe, seed_urls: list[str], s) -> None:
         f"Rate limit:  {s.rate_limit} req/s",
         f"Threshold:   {recipe.quality.threshold}"
         + (f"  + LLM judge (min {recipe.quality.min_judge_score}/5)" if recipe.quality.llm_judge else "  (heuristic only)"),
+        f"Budget:      {_budget_text(recipe)}",
         f"Export:      {', '.join(recipe.export.targets)}",
         f"Output:      {s.output_dir}",
+        f"Database:    {s.db_path}",
     ]
     if recipe.source.language:
         lines.append(f"Language:    {recipe.source.language} (locale-prefixed URLs dropped)")

@@ -73,15 +73,36 @@ def _run_cli(*args: str, timeout: float = 300) -> subprocess.CompletedProcess:
 
 
 def _json_cli(*args: str) -> Any:
+    """Run a CLI command with --json and return its parsed output, or
+    {"error": reason} with the CLI's own message. Raising instead would reach
+    the agent only as a bare "Error executing tool", with no reason."""
     proc = _run_cli("--json", *args)
-    if proc.returncode != 0:
-        raise RuntimeError((proc.stderr or proc.stdout).strip() or f"exit code {proc.returncode}")
-    return json.loads(proc.stdout)
-
-
-def _tail(path: Path, lines: int = 40) -> str:
     try:
-        return "\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:])
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        data = None
+    if isinstance(data, dict) and "error" in data:
+        return data
+    if proc.returncode != 0 or data is None:
+        text = _clean(proc.stdout + "\n" + proc.stderr).strip()
+        return {"error": text or f"dataforge exited with code {proc.returncode}"}
+    return data
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_PROGRESS = re.compile(r"scraped \d+/\d+\s+chunks \d+\s+samples \d+")
+
+
+def _clean(text: str) -> str:
+    """Strip terminal colour codes and loguru DEBUG lines, which carry nothing
+    an agent needs (per-request and per-LLM-call chatter)."""
+    lines = _ANSI.sub("", text).splitlines()
+    return "\n".join(line for line in lines if "| DEBUG " not in line)
+
+
+def _tail(path: Path, lines: int = 25) -> str:
+    try:
+        return "\n".join(_clean(path.read_text(encoding="utf-8", errors="replace")).splitlines()[-lines:])
     except OSError:
         return ""
 
@@ -171,14 +192,16 @@ def run_status(run_id: str) -> dict:
         if not log_path.exists():
             return {"error": f"unknown run_id {run_id}"}
         code = None
-    tail = _tail(log_path)
-    match = re.search(r"Session ID:\s*(\S+)", log_path.read_text(encoding="utf-8", errors="replace"))
+    text = _clean(log_path.read_text(encoding="utf-8", errors="replace"))
+    match = re.search(r"Session ID:\s*(\S+)", text)
+    progress = _PROGRESS.findall(text)
     return {
         "state": ("running" if run_id in _runs else "unknown (server restarted)") if code is None else "finished",
         "exit_code": code,
         "meaning": _EXIT_MEANING.get(code, "") if code is not None else "",
         "session_id": match.group(1) if match else None,
-        "log_tail": tail,
+        "progress": progress[-1] if progress else None,
+        "log_tail": _tail(log_path),
     }
 
 
@@ -207,4 +230,8 @@ def guide() -> str:
 
 
 def main() -> None:
+    # Resolve the database and output folder the same way the CLI does, so
+    # run logs land in the project's output folder.
+    from dataforge.cli.app import _apply_project_file
+    _apply_project_file(get_settings(), Path.cwd())
     mcp.run("stdio")

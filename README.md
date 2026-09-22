@@ -6,9 +6,11 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**Current release: 2.4.0** — AI agents can now drive DataForge through a local
-MCP server or the built-in `dataforge agent-guide`, and robots.txt `Crawl-delay`
-is now enforced in every stage. See the [changelog](CHANGELOG.md#240---2026-09-22).
+**Current release: 2.4.1.** AI agents can drive DataForge through a local MCP
+server or the built-in `dataforge agent-guide`, robots.txt `Crawl-delay` is
+enforced in every stage, and the MCP inspection tools (`session_stats`,
+`view_samples`) now work after a real run. See the
+[changelog](CHANGELOG.md#241---2026-09-22).
 
 Fine-tuning needs data, and good domain data is trapped in documentation
 sites, knowledge bases and public archives. Getting it out usually means
@@ -160,6 +162,10 @@ it on your machine:
 pip install "llm-web-crawler[mcp]"
 claude mcp add dataforge -- dataforge mcp   # run from your project directory
 ```
+
+Claude Code picks up a newly added server only in a new session: exit with
+`/exit`, then run `claude --continue` in your terminal to reopen the same
+conversation with the DataForge tools loaded.
 
 The agent then gets typed tools (explore a site, validate a recipe, start and
 monitor a run, read session stats and samples) instead of parsing terminal
