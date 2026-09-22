@@ -50,14 +50,19 @@ permanent status codes, \texttt{Retry-After}, \texttt{robots.txt}
 \texttt{Crawl-delay}); every artifact (page, chunk, sample) is
 checkpointed so a multi-hour run is resumable rather than restartable;
 collection and generation are overlapped through bounded, backpressured
-queues to avoid idling an LLM behind a slow crawler; and --- the
-concern motivating this document --- dataset splitting is
-group-aware, so that near-duplicate paraphrases generated from the same
-source page cannot appear on both sides of a train/test boundary and
-silently inflate held-out evaluation scores. We describe the system's
-architecture, the reasoning behind each design decision, and situate it
-relative to prior work in web-scale data collection and synthetic
-instruction-tuning data generation.
+queues to avoid idling an LLM behind a slow crawler; unattended LLM spend
+is bounded by an explicit, concurrency-safe budget rather than only
+indirect knobs like page count; and --- the concern motivating this
+document --- dataset splitting is group-aware, so that near-duplicate
+paraphrases generated from the same source page cannot appear on both
+sides of a train/test boundary and silently inflate held-out evaluation
+scores. We describe the system's architecture, the reasoning behind each
+design decision, situate the resulting synthetic, fine-tuning-oriented
+dataset relative to retrieval-augmented generation as a complementary
+route to reducing hallucination, discuss the responsible-use
+considerations inherent to an unattended web-scraping and synthetic-data
+tool, and situate the system relative to prior work in web-scale data
+collection and synthetic instruction-tuning data generation.
 \end{abstract}
 
 \tableofcontents
@@ -184,14 +189,33 @@ boundary is not lost to the generation stage entirely.
 
 \subsection{Generation}
 Each chunk is passed to an LLM (via LiteLLM, giving provider portability
-across OpenAI, Anthropic, Groq, Together AI, or a local Ollama model) with
-a format-specific prompt template --- \texttt{qa},
+across OpenAI, Anthropic, Google, Groq, Together AI, or a local Ollama
+model) with a format-specific prompt template --- \texttt{qa},
 \texttt{instruction}, \texttt{conversation}, or a user-supplied custom
 system prompt --- and a recipe-level natural-language \texttt{goal}
 string that steers topical relevance without hand-writing a full prompt
 per domain. $n$ samples are requested per chunk (recipe:
 \texttt{generation.n\_per\_chunk}), which is the direct source of the
 non-independence discussed in Section~\ref{sec:leakage}.
+
+\subsubsection{Cost control}
+\label{sec:budget}
+Because the pipeline is designed to run unattended (\texttt{dataforge
+run}, typically cron'd), and because the quality judge (below) issues a
+second LLM call per sample --- roughly doubling generation cost on its
+own --- an operator's only cost control was, until recently, indirect:
+bounding the number of pages or chunks fed into generation, fixed before
+the provider or its pricing is even known. DataForge now exposes an
+explicit, recipe-level budget --- \texttt{generation.max\_cost\_usd} and
+\texttt{generation.max\_llm\_calls} --- enforced by a single tracker
+shared across the generation and judge stages (and the streaming
+pipeline's concurrent workers), so the cap bounds \emph{combined} spend
+rather than either stage alone. The check happens before a network call
+is dispatched, not after: once exhausted, a chunk is skipped cleanly
+(the run finishes and reports how many calls were skipped) rather than
+the process crashing or continuing to spend past the configured limit.
+This mirrors the existing pattern of \texttt{crawl.max\_pages} bounding
+collection, extended to the stage that actually incurs LLM cost.
 
 \subsection{Quality}
 Samples pass through layered filters of increasing cost, evaluated in
@@ -205,11 +229,12 @@ samples that a free filter would reject:
     ``the document'' or ``the passage'' rather than the subject matter
     --- a model trained on such samples learns to cite a source it will
     never have access to at inference time.
-  \item Deduplication across the full session.
+  \item Deduplication across the full session (Section~\ref{sec:dedup}).
   \item An LLM judge that reads each sample alongside its source chunk
     and scores it 1--5 on groundedness, rejecting anything below a
     configurable threshold. This step \emph{fails closed}: a sample the
-    judge cannot score (malformed output, API error, missing key) is
+    judge cannot score (malformed output, API error, missing key, or a
+    call skipped by the budget cap of Section~\ref{sec:budget}) is
     rejected rather than passed through by default.
 \end{enumerate}
 
@@ -220,13 +245,60 @@ consistent with known limitations of LLM-as-judge evaluation
 \cite{zheng2023judging}. Operators who prefer precision over recall can
 raise the score threshold.
 
+\subsubsection{Deduplication: exact and near-duplicate}
+\label{sec:dedup}
+An earlier implementation fingerprinted a sample by MD5-hashing only the
+first 200 characters of its concatenated message content, which is
+wrong in both directions: two unrelated samples that happen to share an
+opening sentence (common in templated agency guidance) collide as
+false-positive duplicates, while the near-paraphrases that
+\texttt{generation.n\_per\_chunk}$>1$ produces by design --- differing
+in wording beyond the first 200 characters, which is the normal, expected
+shape of asking an LLM for several question--answer pairs from the same
+passage --- are never caught, since they hash differently. The exact-hash
+check now covers the full message content, fixing the false-positive
+direction, and is supplemented with a near-duplicate pass: token-set
+Jaccard similarity computed only against other samples generated from the
+\emph{same source chunk} (bounded comparison set, avoiding an $O(n^2)$
+scan over the whole session), rejecting anything at or above a
+configurable threshold (\texttt{quality.near\_dup\_threshold}, default
+0.85). Without this, a session could log ``deduplication: passing'' while
+the surviving samples were still substantially redundant paraphrases of
+one another --- distinct from, and prior to, the cross-page leakage that
+group-aware splitting (Section~\ref{sec:leakage}) addresses.
+
 \subsection{Export}
 Approved samples are written as JSONL, Parquet, and CSV, and optionally
 published to the HuggingFace Hub or Kaggle. Every record carries
 \texttt{page\_id}, \texttt{chunk\_id}, \texttt{chunk\_index}, and
 \texttt{source\_url} regardless of whether a split is requested, because
 that lineage is what makes a correct split possible even after the
-fact.
+fact. This lineage is not currently preserved uniformly across every
+export format, however: the Unsloth/ShareGPT-formatted companion export
+(\texttt{dataset\_unsloth.jsonl}) discards \texttt{page\_id},
+\texttt{chunk\_id}, \texttt{chunk\_index}, and \texttt{source\_url},
+retaining only the \texttt{conversations} array that loader format
+expects. A consumer training directly from that file specifically ---
+as opposed to the plain JSONL/Parquet/CSV exports, which retain full
+lineage --- loses the ability to cite a generated sample's source
+document, which matters wherever attribution or provenance is required
+downstream (Section~\ref{sec:limitations}, project issue \#19).
+
+\subsubsection{Dataset introspection}
+Because quality scoring, deduplication, and splitting all happen inside
+a single run, their outcomes were, until recently, visible only as
+transient log lines during that run --- not queryable afterward, and not
+available at all for a session viewed later. A \texttt{dataforge stats
+<session\_id>} command now reports, read-only, over data the pipeline
+already computes and now persists (the per-sample rejection reason is
+written to the session database rather than only logged): approval
+rate, a rejection-reason breakdown, the quality-score distribution,
+question/answer length statistics, and the realized train/validation/test
+proportions from the most recent export. Realized proportions are
+reported rather than compared against the recipe's configured target
+ratios, since target ratios are not yet persisted per-session outside of
+the export step itself; target-vs-realized comparison is a natural
+follow-up once that is stored.
 
 \section{Concurrency: streaming vs.\ batch}
 
@@ -311,6 +383,48 @@ even when no split is requested at export time, a correct group-aware
 split remains possible downstream even for datasets exported before
 this feature was used.
 
+\subsection{Row-level randomization within a split}
+\label{sec:row-shuffle}
+Group-aware splitting randomizes which group is assigned to which split
+(Section~\ref{sec:leakage}, above), which is the property
+that prevents leakage. It does not, by itself, randomize row
+\emph{order} within a split's output file: groups are assigned
+largest-first so that realized proportions track the configured targets
+closely (variance in achievable proportions grows as group sizes become
+uneven, and assigning the largest, most constraining groups while every
+split is still empty minimizes it), and each group's members are then
+written as a contiguous block. The resulting \texttt{dataset\_train.*}
+file therefore contains long runs of samples from the same source page,
+ordered by descending page size, rather than a random interleaving of
+rows.
+
+Whether this matters depends on the consumer. Frameworks that shuffle
+examples before or during training (HuggingFace \texttt{datasets},
+Axolotl, TRL, in their default configurations) absorb this ordering
+transparently. A consumer that reads the file sequentially, batches
+without shuffling, or trains in a streaming fashion over the raw file
+order is exposed to it directly: early batches within an epoch would be
+dominated by whichever page happened to be largest, which can bias
+early-training gradient statistics and any diagnostic computed
+batch-by-batch rather than over a full epoch. This is a distinct concern
+from group assignment and admits an independent fix: a deterministic,
+seeded shuffle of each split's row list --- separate from, and applied
+after, group assignment --- immediately before the file is written,
+reusing \texttt{export.split.seed} for reproducibility. Group
+boundaries are unaffected by this shuffle; only row order within a
+split changes. We considered, and rejected, generating samples
+independently per target split rather than splitting a single generated
+pool: that would require deciding a sample's split membership
+\emph{before} generation, which inverts the group-aware design above,
+since the grouping key (the source page) is only well-defined once
+collection has already happened, and would either duplicate LLM calls
+per page across splits or simply recompute the same page-to-split
+assignment DataForge already makes, at additional cost and no benefit
+over shuffling the already-split result. At the time of writing this
+row-level shuffle is not yet implemented; it is tracked as an open item
+(Section~\ref{sec:limitations}, project issue \#20) rather than
+presented as shipped.
+
 \section{Related work}
 
 \textbf{Web-scale collection.} Large text corpora for language model
@@ -351,7 +465,127 @@ instead of removing near-duplicates, it ensures that when they do exist
 (as an artifact of $n>1$ samples per chunk), they cannot span the
 train/test boundary.
 
+\section{Retrieval augmentation as a complement, not a substitute}
+\label{sec:rag}
+
+Fine-tuning on a grounded synthetic dataset and retrieval-augmented
+generation (RAG) are often discussed as competing answers to the same
+problem --- getting a model to produce accurate, domain-specific output
+--- but they address different failure modes and compose rather than
+substitute for one another \cite{gao2023ragsurvey}. RAG
+\cite{lewis2020rag} retrieves relevant passages at inference time and
+conditions generation on them, which bounds hallucination by construction
+whenever retrieval succeeds: the model is answering from text placed in
+front of it, not from parametric memory alone. What RAG does not change
+is the model's underlying style, domain vocabulary, task format, or
+ability to follow a narrow instruction schema — that remains a function
+of what the model was trained on, which is exactly what a fine-tuning
+dataset like the one DataForge produces is for. Conversely, fine-tuning
+alone does not eliminate hallucination: a model fine-tuned on grounded
+Q\&A pairs learns the \emph{style} of grounded answers, including,
+plausibly, the confident tone of a correct one, without any inference-time
+guarantee that a novel question is actually answerable from what the
+model retained in its weights. Survey evidence on hallucination in
+natural language generation \cite{ji2023hallucination} is consistent with
+both halves of this: hallucination is not fully solved by better training
+data alone, nor by retrieval alone, since a retriever can itself return
+an irrelevant or stale passage that a confidently fine-tuned model then
+answers from anyway.
+
+A practical implication for a tool like DataForge is that the same
+processed corpus it already produces as a byproduct of dataset
+construction --- cleaned, boilerplate-stripped, token-bounded chunks with
+persisted source lineage (\texttt{page\_id}, \texttt{chunk\_id},
+\texttt{source\_url}; Section~2.6) --- is also exactly the unit of text a
+RAG retriever indexes. Nothing in the current pipeline exposes this
+chunk store as a retrieval index; doing so (e.g., an export target that
+writes chunks with embeddings to a vector index rather than, or in
+addition to, writing synthetic Q\&A pairs to a fine-tuning-format file)
+would let the same crawl produce both a fine-tuning dataset \emph{and}
+the retrieval corpus to pair it with, rather than requiring a second,
+separate collection effort to stand up RAG over the same domain. We
+present this as a natural extension (Section~\ref{sec:limitations})
+rather than a shipped capability.
+
+\section{Responsible use and misuse considerations}
+\label{sec:misuse}
+
+DataForge automates two activities that are each individually subject to
+misuse when unattended and applied at scale: web collection, and
+synthetic content generation from that collected content. We describe
+what the system does to reduce specific, concrete risks, and what remains
+the operator's responsibility, since neither an unattended crawler nor an
+unattended text generator is safe by default.
+
+\textbf{Collection abuse.} An unattended, resumable, streaming crawler is
+easier to run at a scale and cadence that a manual scraping script is
+not, which raises the ceiling on how much load an operator can put on a
+target site, intentionally or not. DataForge honors \texttt{robots.txt}
+by default, including a declared \texttt{Crawl-delay}
+(Section~2.3), and exposes \texttt{source.ignore\_robots} as an explicit,
+named opt-out rather than a default — a design choice intended to make
+disabling politeness a deliberate, auditable act in a committed recipe
+file rather than an accidental one. This is a technical control, not a
+legal or ethical one: \texttt{robots.txt} compliance does not by itself
+establish that scraping a given site is permitted under its Terms of
+Service, and DataForge does not attempt to interpret ToS text. Rate
+limiting defaults to a conservative 2 requests/second/domain; nothing
+prevents an operator from configuring a much higher rate against a site
+with no declared \texttt{Crawl-delay}; this remains an explicit
+operator decision, surfaced in the recipe, rather than a hidden default.
+
+\textbf{Content laundering and provenance loss.} Because generation
+produces new text (a question and answer) rather than verbatim excerpts,
+the resulting dataset is one step removed from its source in a way that
+can obscure where the underlying facts came from, particularly once
+exported without its \texttt{source\_url} lineage (e.g., via the
+Unsloth-format export path noted in Section~2.6). This is a specific
+instance of the broader dataset-provenance problem documented across the
+training-data ecosystem, where licensing and attribution information is
+frequently lost or misrepresented as data moves between hosting sites and
+downstream uses \cite{longpre2023provenance}. Preserving
+\texttt{source\_url} end to end, and treating an export format that drops
+it as a known gap rather than a cosmetic one, is the concrete mitigation
+available today; the ethical and legal obligation to have had permission
+to collect and redistribute the underlying content in the first place is
+not something the tool can verify on an operator's behalf.
+
+\textbf{Synthetic-data quality claims.} A dataset produced by this
+pipeline is only as reliable as its generation goal and quality
+thresholds make it, and the tool's own \texttt{quality}-stage terminology
+(``approved,'' ``passed'') can read as a stronger correctness guarantee
+than a threshold-based LLM judge (Section~2.6, and
+\cite{zheng2023judging} on the general limits of LLM-as-judge evaluation)
+actually provides, particularly near the score threshold. Presenting an
+approved export as an unqualified ground-truth dataset --- rather than as
+one scored by a specific, imperfect, and disclosed method --- risks the
+same kind of unearned authority that unvetted large-scale text corpora
+have been criticized for propagating downstream
+\cite{bender2021parrots}. We recommend recipes record and publish their
+\texttt{quality.threshold}, \texttt{quality.min\_judge\_score}, and judge
+model alongside any released dataset, which the export lineage already
+makes possible but does not currently automate.
+
+\textbf{Sensitive and personal content.} DataForge collects whatever a
+target site publishes; it has no content classifier that detects or
+withholds personally identifiable information, protected health
+information, or other sensitive material encountered incidentally during
+a crawl. Scoping a recipe's \texttt{source.include}/\texttt{exclude}
+patterns away from pages known or likely to contain such content, and
+using a local model (Ollama) rather than a cloud provider when source
+material carries data-residency constraints, are operator-side
+mitigations documented in the project's ethics guidance; they are not
+enforced by the pipeline itself.
+
+None of these considerations are unique to DataForge --- they apply to
+any tool that automates web collection and LLM-based content generation
+at scale --- but an unattended, cron-friendly design (Section~1) is
+specifically what makes it practical to run such a pipeline
+unsupervised, which raises rather than lowers the importance of stating
+these risks explicitly alongside the system's capabilities.
+
 \section{Limitations and future work}
+\label{sec:limitations}
 
 The LLM judge is a single model call scoring groundedness on a 1--5
 scale; it does not currently ensemble multiple judges or models, which
@@ -366,6 +600,39 @@ a content-hash or embedding-similarity based deduplication pass across
 groups, rather than only within a session's chunks, is a natural
 extension.
 
+Two gaps identified during a post-hoc code review, rather than designed
+in from the start, remain open at the time of writing: the Unsloth-format
+export's loss of source lineage (Section~2.6), for which the fix is to
+carry lineage as a parallel, format-appropriate side channel (e.g. an
+adjacent \texttt{dataset\_unsloth.meta.jsonl} keyed by row index) rather
+than any change to splitting or generation logic; and the row-order
+artifact within a split's output file (Section~\ref{sec:row-shuffle}),
+for which the fix is an additional, independent shuffle step rather than
+a change to group assignment itself. Both are recorded here as a
+reminder that lineage and ordering guarantees need to be verified
+per output format and per pipeline stage, not assumed to hold uniformly
+once established for one.
+
+The most significant near-term extension, and the one we consider the
+project's actual next step rather than a background item, is support for
+\textbf{non-text source material}. The pipeline today assumes its input
+is HTML prose reachable by an HTTP client: PDFs and images are filtered
+out of crawl candidates entirely (Section~2.2) rather than processed,
+tabular and structured data embedded in a page is flattened or lost by
+the Markdown-conversion step (Section~2.3), and there is no handling for
+audio or video sources at all. Domains where the authoritative content is
+a table (regulatory filings, statistical releases), a scanned or
+image-based PDF (many government and legal documents), or a recorded
+briefing are currently out of scope, not because the downstream
+pipeline (chunking, generation, quality, leak-aware export) is
+text-format-specific in principle, but because Discovery and Collection
+only know how to find and fetch HTML today. Extending Collection with a
+PDF/table extraction path (text and layout-aware, so a table survives as
+structured data rather than becoming word salad) and an
+optional OCR or vision-model pass for image-based content, feeding the
+same downstream Processing/Generation/Quality/Export stages described in
+Section~2, is the direction we intend to pursue next.
+
 \section{Conclusion}
 
 DataForge treats the operational realities of scraping real websites and
@@ -373,10 +640,18 @@ the statistical realities of splitting a synthetically-generated dataset
 as core design constraints rather than details to fix after the fact.
 The result is a pipeline whose default behavior --- honoring server
 signals during collection, checkpointing every unit of work, overlapping
-collection with generation, and refusing to let a random split leak
-near-duplicate content across train and test --- is also the behavior
-that produces a defensible dataset and a trustworthy evaluation number
-from it.
+collection with generation, bounding unattended LLM spend explicitly,
+catching near-duplicate paraphrases rather than only exact matches, and
+refusing to let a random split leak near-duplicate content across train
+and test --- is also the behavior that produces a defensible dataset and
+a trustworthy evaluation number from it. Fine-tuning on that dataset is,
+as Section~\ref{sec:rag} discusses, one half of reducing hallucination
+rather than the whole of it, and the same corpus the pipeline builds
+along the way is positioned to serve the other half (retrieval) as
+naturally as it serves fine-tuning. None of this removes the operator's
+responsibility for what is collected and published in the first place
+(Section~\ref{sec:misuse}); it narrows the space of failures that would
+otherwise have to be caught by hand.
 
 \begin{thebibliography}{99}
 
@@ -435,6 +710,32 @@ G.~Wenzek, M.-A.~Lachaux, A.~Conneau, et al.
 C.~Raffel, N.~Shazeer, A.~Roberts, et al.
 \newblock Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer.
 \newblock \emph{Journal of Machine Learning Research}, 21(140):1--67, 2020.
+
+\bibitem{lewis2020rag}
+P.~Lewis, E.~Perez, A.~Piktus, et al.
+\newblock Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks.
+\newblock \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2020.
+\newblock arXiv:2005.11401.
+
+\bibitem{gao2023ragsurvey}
+Y.~Gao, Y.~Xiong, X.~Gao, et al.
+\newblock Retrieval-Augmented Generation for Large Language Models: A Survey.
+\newblock \emph{arXiv preprint arXiv:2312.10997}, 2023.
+
+\bibitem{ji2023hallucination}
+Z.~Ji, N.~Lee, R.~Frieske, et al.
+\newblock Survey of Hallucination in Natural Language Generation.
+\newblock \emph{ACM Computing Surveys}, 55(12), Article 248, 2023.
+
+\bibitem{bender2021parrots}
+E.~M.~Bender, T.~Gebru, A.~McMillan-Major, and S.~Shmitchell.
+\newblock On the Dangers of Stochastic Parrots: Can Language Models Be Too Big?
+\newblock \emph{Proceedings of the 2021 ACM Conference on Fairness, Accountability, and Transparency (FAccT)}, pages 610--623, 2021.
+
+\bibitem{longpre2023provenance}
+S.~Longpre, R.~Mahari, A.~Chen, et al.
+\newblock The Data Provenance Initiative: A Large Scale Audit of Dataset Licensing \& Attribution in AI.
+\newblock \emph{arXiv preprint arXiv:2310.16787}, 2023.
 
 \end{thebibliography}
 
