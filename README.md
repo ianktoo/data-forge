@@ -161,6 +161,10 @@ pip install "llm-web-crawler[mcp]"
 claude mcp add dataforge -- dataforge mcp   # run from your project directory
 ```
 
+Claude Code picks up a newly added server only in a new session: exit with
+`/exit`, then run `claude --continue` in your terminal to reopen the same
+conversation with the DataForge tools loaded.
+
 The agent then gets typed tools (explore a site, validate a recipe, start and
 monitor a run, read session stats and samples) instead of parsing terminal
 output. Runs started this way must have a spending cap, and a recipe that
