@@ -47,6 +47,10 @@ class PipelineContext:
     # (it costs extra calls); recipes turn it on by default.
     quality_llm_judge: bool = False
     quality_min_judge_score: int = 4   # 1-5; samples below this are rejected
+    # Jaccard token-overlap threshold above which two samples from the same
+    # chunk are rejected as near-duplicate paraphrases, not just exact-hash
+    # duplicates.
+    quality_near_dup_threshold: float = 0.85
 
     # Per-session model overrides (empty string = use settings.llm_model)
     generation_model: str = ""

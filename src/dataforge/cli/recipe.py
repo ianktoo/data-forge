@@ -168,6 +168,14 @@ class QualityConfig(BaseModel):
         ),
     )
     min_judge_score: int = Field(4, ge=1, le=5, description="Judge score (1-5) needed to keep a sample")
+    near_dup_threshold: float = Field(
+        0.85, ge=0.0, le=1.0,
+        description=(
+            "Token-overlap (Jaccard) similarity above which two samples "
+            "generated from the same chunk are rejected as near-duplicate "
+            "paraphrases, not just exact-hash duplicates."
+        ),
+    )
 
 
 class SplitConfig(BaseModel):

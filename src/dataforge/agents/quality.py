@@ -5,9 +5,15 @@ that is enabled:
 
 1. Heuristic score — answer/question length and refusal detection, compared
    against ``quality_threshold``. Free.
-2. Source-reference check — rejects samples that talk about "the document" or
+2. Deduplication — two passes, both free:
+   a. Exact match — full-message-content hash, across the whole session.
+   b. Near-duplicate — token-set Jaccard similarity against other samples
+      from the *same chunk* (bounded comparison set, so this stays cheap
+      even on a large session). ``n_per_chunk`` samples generated from one
+      chunk are paraphrases of the same passage by construction, which is
+      exactly the case exact-match hashing cannot catch.
+3. Source-reference check — rejects samples that talk about "the document" or
    "the passage" instead of the subject. Free, always on.
-3. Deduplication — exact-prefix fingerprint across the whole session. Free.
 4. LLM judge (``quality_llm_judge``) — sees each sample next to the chunk it was
    generated from and rejects anything ungrounded, source-dependent, or scored
    below ``quality_min_judge_score``. Costs one call per chunk.
@@ -39,6 +45,8 @@ _REFUSAL_RE = re.compile(
     re.I,
 )
 
+_WORD_RE = re.compile(r"[a-z0-9']+")
+
 
 class QualityAgent(BaseAgent):
     name = "quality"
@@ -52,6 +60,10 @@ class QualityAgent(BaseAgent):
 
         self.log.info(f"Evaluating {len(samples)} samples")
         seen_hashes: set[str] = set()
+        # chunk_id -> token sets of samples already accepted from that chunk,
+        # for the near-duplicate check (bounded to one chunk's samples, not
+        # the whole session, to keep this a cheap check).
+        seen_tokens_by_chunk: dict[int, list[frozenset[str]]] = defaultdict(list)
         # id -> (score, approved, rejection reason)
         results: dict[int, tuple[float, bool, str]] = {}
         candidates: list[SyntheticSample] = []
@@ -64,9 +76,16 @@ class QualityAgent(BaseAgent):
             fingerprint = self._fingerprint(msgs)
 
             if fingerprint in seen_hashes:
-                results[sample.id] = (0.0, False, "duplicate")
+                results[sample.id] = (0.0, False, "exact duplicate")
                 continue
             seen_hashes.add(fingerprint)
+
+            tokens = self._tokenize(msgs)
+            chunk_group = seen_tokens_by_chunk[sample.chunk_id]
+            if self._is_near_duplicate(tokens, chunk_group, self.ctx.quality_near_dup_threshold):
+                results[sample.id] = (0.0, False, "near-duplicate")
+                continue
+            chunk_group.append(tokens)
 
             ref = find_source_reference(msgs)
             if ref:
@@ -235,5 +254,43 @@ class QualityAgent(BaseAgent):
         return sum(scores) / max(len(scores), 1)
 
     def _fingerprint(self, messages: list[dict]) -> str:
-        text = " ".join(str(m.get("content", "")) for m in messages)[:200]
+        """Hash the full message content, not a prefix.
+
+        A 200-char-prefix hash used to false-positive on samples that share
+        an identical opening sentence (common in templated agency guidance)
+        but differ later — hashing the full content only flags true exact
+        duplicates.
+        """
+        text = " ".join(str(m.get("content", "")) for m in messages)
         return hashlib.md5(text.encode()).hexdigest()
+
+    def _tokenize(self, messages: list[dict]) -> frozenset[str]:
+        text = " ".join(str(m.get("content", "")) for m in messages).lower()
+        return frozenset(_WORD_RE.findall(text))
+
+    @staticmethod
+    def _is_near_duplicate(
+        tokens: frozenset[str],
+        others: list[frozenset[str]],
+        threshold: float,
+    ) -> bool:
+        """True if ``tokens`` is a near-paraphrase (Jaccard >= threshold) of
+        any sample already accepted from the same chunk.
+
+        ``n_per_chunk`` samples generated from one chunk are expected to be
+        different wordings of the same underlying content — an exact-hash
+        check never catches this, since the LLM was explicitly asked to
+        produce several distinct-looking pairs from the same passage.
+        """
+        if not tokens:
+            return False
+        for other in others:
+            if not other:
+                continue
+            union = tokens | other
+            if not union:
+                continue
+            jaccard = len(tokens & other) / len(union)
+            if jaccard >= threshold:
+                return True
+        return False
