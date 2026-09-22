@@ -135,6 +135,33 @@ environment variables and the complete recipe schema are in the docs:
 - **[Third-party libraries](docs/THIRD_PARTY.md)** — full dependency and license list
 - **[Technical writeup](docs/TECHNICAL.tex)** — design rationale and references
 
+## Using DataForge from an AI agent
+
+Claude Code, Codex, Cursor and other coding agents can drive DataForge through
+its non-interactive commands. Point the agent at the built-in guide:
+
+```bash
+dataforge agent-guide
+```
+
+It lists which commands are safe to run without a terminal, how to configure a
+provider through environment variables, the recipe workflow and exit codes, and
+the responsible-use rules an agent must follow before crawling a site.
+
+For clients that support the [Model Context Protocol](https://modelcontextprotocol.io),
+DataForge also runs as a local MCP server. Nothing is hosted; the client starts
+it on your machine:
+
+```bash
+pip install "llm-web-crawler[mcp]"
+claude mcp add dataforge -- dataforge mcp   # run from your project directory
+```
+
+The agent then gets typed tools (explore a site, validate a recipe, start and
+monitor a run, read session stats and samples) instead of parsing terminal
+output. Runs started this way must have a spending cap, and a recipe that
+disables `robots.txt` is refused.
+
 ## What makes it different
 
 Most scrapers stop at "here's the text." DataForge is built for the part
