@@ -11,6 +11,7 @@ from .models import (
     SyntheticSample,
     URLSource,
 )
+from .stats import LengthStats, ScoreStats, SessionStats, compute_session_stats
 
 __all__ = [
     "init_db",
@@ -26,4 +27,8 @@ __all__ = [
     "ProcessedChunk",
     "SyntheticSample",
     "ExportRecord",
+    "compute_session_stats",
+    "SessionStats",
+    "ScoreStats",
+    "LengthStats",
 ]

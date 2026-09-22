@@ -214,11 +214,12 @@ class QualityAgent(BaseAgent):
     def _persist(self, results: dict[int, tuple[float, bool, str]]) -> list[int]:
         approved_ids: list[int] = []
         with open_session(self.ctx.settings.db_path) as db:
-            for sample_id, (score, approved, _reason) in results.items():
+            for sample_id, (score, approved, reason) in results.items():
                 s = db.get(SyntheticSample, sample_id)
                 if s:
                     s.quality_score = score
                     s.approved = approved
+                    s.rejection_reason = "" if approved else reason
                     db.add(s)
                     if approved:
                         approved_ids.append(sample_id)

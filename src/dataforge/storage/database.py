@@ -18,6 +18,26 @@ from .models import (  # noqa: F401 — ensure models are registered
 _engines: dict[str, "Engine"] = {}
 
 
+# Columns added after a table's first release. create_all() only creates
+# missing *tables*, never adds columns to one that already exists, so an
+# existing session DB from before a column was added needs this additive,
+# idempotent ALTER TABLE — never a destructive migration.
+_ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
+    ("synthetic_sample", "rejection_reason", "TEXT NOT NULL DEFAULT ''"),
+]
+
+
+def _apply_additive_migrations(engine) -> None:  # type: ignore[no-untyped-def]
+    with engine.connect() as conn:
+        for table, column, ddl_type in _ADDITIVE_COLUMNS:
+            existing = {
+                row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")
+            }
+            if column not in existing:
+                conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
+        conn.commit()
+
+
 def _get_engine(db_path: Path):  # type: ignore[no-untyped-def]
     """Return the (cached) engine for this db_path.
 
@@ -39,6 +59,7 @@ def _get_engine(db_path: Path):  # type: ignore[no-untyped-def]
             conn.exec_driver_sql("PRAGMA journal_mode=WAL")
             conn.exec_driver_sql("PRAGMA synchronous=NORMAL")
         SQLModel.metadata.create_all(engine)
+        _apply_additive_migrations(engine)
         _engines[key] = engine
     return engine
 
