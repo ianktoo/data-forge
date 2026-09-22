@@ -282,7 +282,7 @@ expects. A consumer training directly from that file specifically ---
 as opposed to the plain JSONL/Parquet/CSV exports, which retain full
 lineage --- loses the ability to cite a generated sample's source
 document, which matters wherever attribution or provenance is required
-downstream (Section~\ref{sec:limitations}).
+downstream (Section~\ref{sec:limitations}, project issue \#19).
 
 \subsubsection{Dataset introspection}
 Because quality scoring, deduplication, and splitting all happen inside
@@ -422,7 +422,8 @@ per page across splits or simply recompute the same page-to-split
 assignment DataForge already makes, at additional cost and no benefit
 over shuffling the already-split result. At the time of writing this
 row-level shuffle is not yet implemented; it is tracked as an open item
-(Section~\ref{sec:limitations}) rather than presented as shipped.
+(Section~\ref{sec:limitations}, project issue \#20) rather than
+presented as shipped.
 
 \section{Related work}
 

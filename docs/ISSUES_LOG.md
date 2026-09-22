@@ -24,3 +24,5 @@ Convention going forward:
 | 2026-09-22 | [Gap analysis](reviews/2026-09-22-gap-analysis.md) | [#10](https://github.com/ianktoo/data-forge/issues/10) | No dataset profiling/statistics tooling, only raw sample viewing | [PR #16](https://github.com/ianktoo/data-forge/pull/16) |
 | 2026-09-22 | [Gap analysis](reviews/2026-09-22-gap-analysis.md) | [#11](https://github.com/ianktoo/data-forge/issues/11) | HuggingFace/Kaggle exporters and non-default LLM providers untested | [PR #17](https://github.com/ianktoo/data-forge/pull/17) |
 | 2026-09-22 | [Gap analysis](reviews/2026-09-22-gap-analysis.md) | [#12](https://github.com/ianktoo/data-forge/issues/12) | Google/Gemini provider implemented but undocumented (fixed in same PR) | fixed in filing PR |
+| 2026-09-22 | [Technical paper](TECHNICAL.tex) review | [#19](https://github.com/ianktoo/data-forge/issues/19) | Unsloth/ShareGPT export drops source lineage (page_id, chunk_id, source_url) | open |
+| 2026-09-22 | [Technical paper](TECHNICAL.tex) review | [#20](https://github.com/ianktoo/data-forge/issues/20) | Split output rows not shuffled — samples cluster by source page, largest-first | open |
