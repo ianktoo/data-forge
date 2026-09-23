@@ -214,3 +214,47 @@ def test_assignment_is_largest_first_seed_only_breaks_ties():
     # The three largest pages land in the same splits whatever the seed.
     for p in (0, 1, 2):
         assert [n for n in a if p in pages(a[n])] == [n for n in b if p in pages(b[n])]
+
+
+def test_rows_are_shuffled_within_a_split_not_page_by_page():
+    """#20: rows used to be written one whole page after another, largest page
+    first. They are now shuffled within each split, reproducibly, without
+    moving any row to a different split."""
+    recs = _records(40)
+    a = split_records(recs, ratios=RATIOS, group_by="page", seed=7)
+    b = split_records(recs, ratios=RATIOS, group_by="page", seed=7)
+    assert a == b  # same seed, same order
+
+    train_pages = [r["page_id"] for r in a["train"]]
+    # A page-by-page layout changes page at most (pages - 1) times; a shuffled
+    # one changes page on almost every row.
+    changes = sum(1 for x, y in zip(train_pages, train_pages[1:]) if x != y)
+    assert changes > len(set(train_pages)) * 2
+
+    # Shuffling never moves a page across splits.
+    assert_no_group_leakage(a, "page")
+
+
+def test_unsloth_export_keeps_lineage_in_a_sidecar(tmp_path):
+    """#19: the Unsloth file (ShareGPT shape) dropped page_id/chunk_id/source_url.
+    A sidecar now carries them, one line per Unsloth row, in the same order."""
+    import json
+
+    from dataforge.exporters.local import export_all_formats
+
+    recs = [
+        {"id": i, "page_id": i % 3, "chunk_id": 10 + i, "chunk_index": 0,
+         "source_url": f"https://x.test/{i % 3}",
+         "messages": [{"role": "user", "content": f"q{i}"}, {"role": "assistant", "content": f"a{i}"}]}
+        for i in range(5)
+    ]
+    paths = export_all_formats(recs, tmp_path, name="dataset_train")
+    read = lambda p: [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]  # noqa: E731
+    unsloth, meta = read(paths["unsloth"]), read(paths["unsloth_meta"])
+    assert paths["unsloth_meta"].name == "dataset_train_unsloth.meta.jsonl"
+    assert len(unsloth) == len(meta) == 5
+    assert set(unsloth[0]) == {"conversations"}          # standard shape untouched
+    for i, (u, m) in enumerate(zip(unsloth, meta)):
+        assert m["row"] == i and m["source_url"] == recs[i]["source_url"]
+        assert m["page_id"] == recs[i]["page_id"] and m["chunk_id"] == recs[i]["chunk_id"]
+        assert u["conversations"][0]["value"] == f"q{i}"  # same order as the Unsloth file

@@ -70,6 +70,8 @@ def split_records(
     the split furthest below its target. Held-out splits are therefore chosen by
     group size, not at random. With few groups a split can end up empty; that
     is logged as a warning rather than silently written as a missing file.
+    Rows are then shuffled within each split (seeded), so a file does not run
+    page by page.
     """
     if not records:
         return {name: [] for name in ratios}
@@ -106,6 +108,13 @@ def split_records(
 
     for name in ratios:
         out.setdefault(name, [])
+
+    # Groups were appended whole and largest-first, so each split's rows would
+    # otherwise run page by page, biggest page first. Shuffle rows within each
+    # split (never across splits, so group boundaries are untouched), with its
+    # own seeded RNG so the order is reproducible and independent of assignment.
+    for name, rows in out.items():
+        random.Random(f"{seed}:{name}").shuffle(rows)
 
     empty = [name for name in targets if not out[name]]
     if empty:

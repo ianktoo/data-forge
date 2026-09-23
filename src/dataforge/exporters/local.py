@@ -86,5 +86,21 @@ def export_all_formats(
         unsloth = to_unsloth_format(records, system_prompt)
         paths["unsloth"] = export_dir / f"{name}_unsloth.jsonl"
         write_jsonl(unsloth, paths["unsloth"])
+        # The ShareGPT shape has no room for lineage, so carry it alongside:
+        # line i describes row i of the Unsloth file.
+        paths["unsloth_meta"] = export_dir / f"{name}_unsloth.meta.jsonl"
+        write_jsonl(unsloth_lineage(records), paths["unsloth_meta"])
 
     return paths
+
+
+# Fields that tie a sample back to its source; copied into the Unsloth sidecar.
+LINEAGE_FIELDS = ("id", "session_id", "page_id", "chunk_id", "chunk_index", "source_url")
+
+
+def unsloth_lineage(records: list[dict]) -> list[dict]:
+    """One lineage record per sample, in the same order as to_unsloth_format()."""
+    return [
+        {"row": i, **{k: r[k] for k in LINEAGE_FIELDS if k in r}}
+        for i, r in enumerate(records)
+    ]
