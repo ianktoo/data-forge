@@ -3,7 +3,7 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [2.4.2] - 2026-09-22
 
 Closes every open issue (#19, #20, #22, #40, #41). No breaking changes.
 
@@ -44,7 +44,7 @@ Closes every open issue (#19, #20, #22, #40, #41). No breaking changes.
 
 ### Documentation
 - `CITATION.cff`: citation metadata (GitHub shows a "Cite this repository"
-  button). The software is cited as MIT, version 2.4.1; the preferred citation
+  button). The software is cited as MIT, at the current version; the preferred citation
   is the technical note (Zenodo, DOI 10.5281/zenodo.22906072, CC BY 4.0).
 - README citation section: cites the technical note with its DOI (plain text
   and a BibTeX `@techreport` entry) instead of the old software-only entry.
