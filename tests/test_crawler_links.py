@@ -132,3 +132,32 @@ async def test_content_links_are_queued_before_navigation():
     }
     found = paths(await crawl(FakeClient(site), f"{SITE}/", max_pages=2, max_depth=2))
     assert found == ["/", "/guide"]
+
+
+# ── #62: each page is queued once ────────────────────────────────────────────
+
+class _CountingDeque(crawler.deque):  # type: ignore[misc]
+    appended = 0
+    peak = 0
+
+    def append(self, item):
+        type(self).appended += 1
+        super().append(item)
+        type(self).peak = max(type(self).peak, len(self))
+
+
+async def test_each_page_is_queued_once_even_when_linked_everywhere(monkeypatch):
+    """A fully linked site (every page links to every other, as with a big
+    navigation menu): the queue must hold each page once, O(pages), not
+    once per link, O(pages^2)."""
+    n = 12
+    paths_ = ["/"] + [f"/p{i}" for i in range(1, n)]
+    site = {p: page(p, nav=paths_) for p in paths_}
+    _CountingDeque.appended = _CountingDeque.peak = 0
+    monkeypatch.setattr(crawler, "deque", _CountingDeque)
+
+    found = await crawl(FakeClient(site), f"{SITE}/", max_pages=100, max_depth=3)
+
+    assert sorted(paths(found)) == sorted(paths_)
+    assert _CountingDeque.appended == n - 1      # every page but the seed, once
+    assert _CountingDeque.peak <= n - 1

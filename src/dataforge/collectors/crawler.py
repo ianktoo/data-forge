@@ -100,16 +100,16 @@ async def crawl(
     Returns a deduplicated list of discovered URLs in visit order.
     """
     base_domain = urlparse(seed).netloc
-    visited: set[str] = set()
+    # Canonical keys of every URL ever queued (#61: /a and /a/, www.,
+    # http(s) are one page). Marked when a URL is queued, not when it is
+    # visited, so a page linked from many others is queued once and the
+    # queue grows with pages, not links (#62).
+    seen: set[str] = {canonical_key(seed)}
     found: list[str] = []
     queue: deque[tuple[str, int]] = deque([(seed, 0)])
 
     while queue and len(found) < max_pages:
         url, depth = queue.popleft()
-        key = canonical_key(url)  # /a and /a/, www., http(s) are one page (#61)
-        if key in visited:
-            continue
-        visited.add(key)
 
         response = await client.get_safe(url)
         if not response or response.status_code != 200:
@@ -147,7 +147,9 @@ async def crawl(
                     same_domain = rendered_same
 
         for link in same_domain:
-            if canonical_key(link) not in visited:
+            key = canonical_key(link)
+            if key not in seen:
+                seen.add(key)
                 queue.append((link, depth + 1))
 
     log.info(f"Crawl complete: {len(found)} pages from {seed}")
