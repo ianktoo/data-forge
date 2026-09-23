@@ -7,6 +7,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
@@ -75,6 +76,14 @@ class PipelineSession(SQLModel, table=True):
 
 class DiscoveredURL(SQLModel, table=True):
     __tablename__ = "discovered_url"
+    # The scraper looks up (session_id, url) once per page; without this each
+    # lookup scanned the whole session, O(N^2) per run (#59). The url index
+    # serves the cross-session skip_known check. database.py also creates
+    # both on databases made before they existed.
+    __table_args__ = (
+        Index("ix_discovered_url_session_url", "session_id", "url"),
+        Index("ix_discovered_url_url", "url"),
+    )
 
     id: int | None   = Field(default=None, primary_key=True)
     session_id: str     = Field(index=True)

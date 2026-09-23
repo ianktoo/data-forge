@@ -11,6 +11,9 @@ from dataforge.storage import DiscoveredURL, URLSource, open_session
 
 from .base import BaseAgent, PipelineContext
 
+# SQLite allows 32,766 bound parameters (999 before 3.32); stay well below.
+_LOOKUP_BATCH = 500
+
 
 class ExplorerAgent(BaseAgent):
     name = "explorer"
@@ -102,15 +105,20 @@ class ExplorerAgent(BaseAgent):
 
     def _filter_already_scraped(self, urls: list[str]) -> list[str]:
         """Remove URLs that were successfully scraped in any prior session."""
+        # Look up only the URLs just discovered (indexed on url, #59), in
+        # batches under SQLite's parameter limit, instead of loading every URL
+        # ever scraped: the cost follows this discovery, not the history.
+        scraped: set[str] = set()
         with open_session(self.ctx.settings.db_path) as db:
-            scraped = {
-                r.url for r in db.exec(
-                    select(DiscoveredURL).where(
+            for i in range(0, len(urls), _LOOKUP_BATCH):
+                batch = urls[i:i + _LOOKUP_BATCH]
+                scraped.update(db.exec(
+                    select(DiscoveredURL.url).where(
+                        DiscoveredURL.url.in_(batch),  # type: ignore[attr-defined]
                         DiscoveredURL.scraped == True,  # noqa: E712
                         DiscoveredURL.session_id != self.ctx.session_id,
                     )
-                ).all()
-            }
+                ).all())
         before = len(urls)
         filtered = [u for u in urls if u not in scraped]
         skipped = before - len(filtered)
