@@ -5,6 +5,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.4.5] - 2026-09-23
+
+Discovery and crawling (#53, #59 to #65): a crawl without a sitemap now
+follows site navigation, visits the most useful pages first, uses the
+recipe's filters while crawling, and downloads each page once. Scraping is no
+longer quadratic in the number of URLs, every sitemap in `robots.txt` is
+read, and URL variants count as one page. No new dependencies.
+
 ### Performance
 Faster, politer discovery: fewer requests, and the crawl budget spent on the
 right pages. No new dependencies.
