@@ -1,7 +1,7 @@
 name: Tests
 
 # Every push to master and every pull request: lint, the test suite on each
-# OS with Python 3.11 (the only supported version), and the built package installed and smoke-tested as
+# OS and supported Python (3.11 to 3.14), and the built package installed and smoke-tested as
 # a user would run it (scripts/smoke_test.py, offline, spends nothing).
 # The release workflows call this too (workflow_call) and publish nothing
 # unless it passes, so a fix that breaks another component cannot ship.
@@ -40,7 +40,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ['3.11']   # the only supported Python (requires-python)
+        python: ['3.11', '3.12', '3.13', '3.14']   # keep in sync with pyproject classifiers
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -60,7 +60,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ['3.11']
+        python: ['3.11', '3.14']   # oldest and newest supported
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

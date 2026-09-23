@@ -15,7 +15,7 @@ and resumable. Quality and correctness take precedence over speed.
 
 | Layer          | Library                                      |
 |----------------|----------------------------------------------|
-| Runtime        | Python 3.11, uv                             |
+| Runtime        | Python 3.11 to 3.14, uv                             |
 | CLI framework  | Typer + Rich + Questionary                   |
 | HTTP           | HTTPX (async) + Tenacity (retries)           |
 | HTML parsing   | BeautifulSoup4 + lxml + Markdownify          |

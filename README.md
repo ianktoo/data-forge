@@ -3,7 +3,7 @@
 **Turn any website into a fine-tuning dataset — in one command.**
 
 [![PyPI](https://img.shields.io/pypi/v/llm-web-crawler)](https://pypi.org/project/llm-web-crawler/)
-[![Python](https://img.shields.io/badge/python-3.11-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 **Current release: 2.4.3.** AI agents can drive DataForge through a local MCP
@@ -48,7 +48,7 @@ optional:
 
 | | Required? | Notes |
 |---|---|---|
-| **Python 3.11** | ✅ Required | The only supported version (uv installs it for you). Or skip it entirely with a [standalone binary](docs/INSTALLATION.md#standalone-executables-no-python-required) — no interpreter needed. |
+| **Python 3.11 to 3.14** | ✅ Required | Tested on Linux, Windows and macOS. Or skip it entirely with a [standalone binary](docs/INSTALLATION.md#standalone-executables-no-python-required) — no interpreter needed. |
 | **An LLM to generate and score samples** | ✅ Required (one of the below) | This is what actually writes the Q&A pairs. |
 | — A hosted provider API key (OpenAI, Anthropic, Google, Groq, or Together) | One of these, or the local option below | `dataforge config` walks you through it; stored in `.env`. Content leaves your machine for generation. |
 | — A local model, no key | *or* fully local | **Ollama:** `ollama serve && ollama pull llama3.2`, then `dataforge config` → `ollama`. **Any OpenAI-compatible server** (LM Studio, vLLM, llama.cpp, Lemonade): set `DATAFORGE_LLM_PROVIDER=openai_compatible`, `DATAFORGE_LOCAL_BASE_URL=http://localhost:1234/v1` and `DATAFORGE_LLM_MODEL` to a model ID the server lists. Nothing leaves your machine. |

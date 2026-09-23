@@ -1,7 +1,7 @@
 name: Release smoke test
 
 # Install the version users actually get from PyPI, with pip and with uv, on
-# every OS with Python 3.11 (the only supported version), and smoke-test it
+# every OS and supported Python (3.11 to 3.14), and smoke-test it
 # (scripts/smoke_test.py, offline, spends nothing). Runs after each PyPI publish, on demand, and on PRs
 # that change this workflow or the smoke test.
 
@@ -31,7 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ['3.11']   # the only supported Python (requires-python)
+        python: ['3.11', '3.12', '3.13', '3.14']   # keep in sync with pyproject classifiers
         installer: [pip, uv-tool]
     steps:
       - uses: actions/checkout@v4

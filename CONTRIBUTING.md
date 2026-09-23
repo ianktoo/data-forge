@@ -39,14 +39,16 @@ Every change has to leave the rest of DataForge working. The rules:
    and passes with it, next to the tests for that component.
 2. **CI must be green before merging.** `.github/workflows/test.yml` runs on
    every pull request: ruff, the full test suite on Linux, Windows and macOS
-   with Python 3.11 (the only supported version), and the built package installed and
+   with Python 3.11, 3.12, 3.13 and 3.14, and the built package installed and
    smoke-tested. A failure on a platform you did not touch is still your
-   failure: behaviour can differ by OS (file ordering, paths, file locks).
+   failure: behaviour can differ by OS (file ordering, paths, file locks) and
+   by Python version. Supporting a new Python means adding it to the CI
+   matrix and the `pyproject.toml` classifiers together.
 3. **Releases are gated on the same suite.** Tagging `vX.Y.Z` runs it again
    before anything is published to PyPI or attached to a GitHub Release, and
    each standalone binary is smoke-tested before upload. After a PyPI publish,
    `release-smoke.yml` installs the release with pip and uv on every OS and
-   tests it again.
+   supported Python and tests it again.
 4. **Smoke-test the installed command, not just the source.** Before a
    release, or after touching packaging, entry points or the build:
    ```bash
