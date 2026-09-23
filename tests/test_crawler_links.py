@@ -136,14 +136,16 @@ async def test_content_links_are_queued_before_navigation():
 
 # ── #62: each page is queued once ────────────────────────────────────────────
 
-class _CountingDeque(crawler.deque):  # type: ignore[misc]
-    appended = 0
+class _CountingFrontier(crawler._Frontier):
+    pushed = 0
     peak = 0
 
-    def append(self, item):
-        type(self).appended += 1
-        super().append(item)
-        type(self).peak = max(type(self).peak, len(self))
+    def push(self, url, depth, **kw):
+        ok = super().push(url, depth, **kw)
+        if ok:
+            type(self).pushed += 1
+            type(self).peak = max(type(self).peak, len(self))
+        return ok
 
 
 async def test_each_page_is_queued_once_even_when_linked_everywhere(monkeypatch):
@@ -153,14 +155,14 @@ async def test_each_page_is_queued_once_even_when_linked_everywhere(monkeypatch)
     n = 12
     paths_ = ["/"] + [f"/p{i}" for i in range(1, n)]
     site = {p: page(p, nav=paths_) for p in paths_}
-    _CountingDeque.appended = _CountingDeque.peak = 0
-    monkeypatch.setattr(crawler, "deque", _CountingDeque)
+    _CountingFrontier.pushed = _CountingFrontier.peak = 0
+    monkeypatch.setattr(crawler, "_Frontier", _CountingFrontier)
 
     found = await crawl(FakeClient(site), f"{SITE}/", max_pages=100, max_depth=3)
 
     assert sorted(paths(found)) == sorted(paths_)
-    assert _CountingDeque.appended == n - 1      # every page but the seed, once
-    assert _CountingDeque.peak <= n - 1
+    assert _CountingFrontier.pushed == n         # every page once, seed included
+    assert _CountingFrontier.peak <= n
 
 
 # ── #63: the recipe's URL filter is applied during the crawl ─────────────────
@@ -189,10 +191,11 @@ async def test_filtered_crawl_spends_its_budget_on_wanted_pages():
 
 
 async def test_unfiltered_crawl_would_waste_the_same_budget():
-    """The same budget without the filter, as before #63: news pages crowd
-    out what the recipe wants, and the post-crawl filter keeps one page."""
+    """The same budget without the filter, as before #63: other pages crowd
+    out what the recipe wants. (Best-first ordering, #64, already reaches
+    the shallow /hazards hub, but none of the pages under it.)"""
     found = paths(await crawl(FakeClient(FILTER_SITE), f"{SITE}/", max_pages=4, max_depth=3))
-    assert [p for p in found if _only_hazards(p)] == []
+    assert len([p for p in found if _only_hazards(p)]) <= 1
 
 
 async def test_filtered_out_pages_at_the_depth_limit_are_never_fetched():
@@ -223,3 +226,61 @@ def test_recipe_url_matches_agrees_with_filter_urls():
             "https://example.org/news"]
     assert r.filter_urls(urls) == [u for u in urls if r.url_matches(u)]
     assert r.filter_urls(urls) == ["https://example.org/hazards/flood", "https://example.org/build/kit"]
+
+
+# ── #64: best-first frontier ─────────────────────────────────────────────────
+
+async def test_traps_are_demoted_under_a_tight_budget():
+    site = {
+        "/": page("Home", nav=["/blog/page/2", "/2024/05/13", "/calendar", "/search?q=x",
+                               "/login", "/list?sort=asc", "/guide", "/about"]),
+        "/guide": page("Guide"), "/about": page("About"),
+        "/blog/page/2": page("P2"), "/2024/05/13": page("Day"), "/calendar": page("Cal"),
+        "/search": page("S"), "/login": page("L"), "/list": page("List"),
+    }
+    found = paths(await crawl(FakeClient(site), f"{SITE}/", max_pages=3, max_depth=2))
+    assert found == ["/", "/guide", "/about"]
+
+
+async def test_traps_are_still_reached_when_the_budget_allows():
+    site = {"/": page("Home", nav=["/blog/page/2", "/guide"]),
+            "/guide": page("Guide"), "/blog/page/2": page("P2")}
+    found = paths(await crawl(FakeClient(site), f"{SITE}/", max_pages=10, max_depth=2))
+    assert found == ["/", "/guide", "/blog/page/2"]
+
+
+async def test_shallower_paths_first_within_a_depth():
+    site = {"/": page("Home", nav=["/a/b/c", "/a/b", "/a"]),
+            "/a": page("A"), "/a/b": page("AB"), "/a/b/c": page("ABC")}
+    found = paths(await crawl(FakeClient(site), f"{SITE}/", max_pages=2, max_depth=2))
+    assert found == ["/", "/a"]
+
+
+async def test_depth_still_comes_first():
+    """A trap at depth 1 is still visited before any page at depth 2, so
+    max_depth and level-by-level coverage mean what they did."""
+    site = {"/": page("Home", nav=["/guide", "/blog/page/2"]),
+            "/guide": page("Guide", nav=["/guide/deep"]),
+            "/guide/deep": page("Deep"), "/blog/page/2": page("P2")}
+    found = paths(await crawl(FakeClient(site), f"{SITE}/", max_pages=10, max_depth=3))
+    assert found == ["/", "/guide", "/blog/page/2", "/guide/deep"]
+
+
+async def test_crawl_is_deterministic():
+    runs = [paths(await crawl(FakeClient(FILTER_SITE), f"{SITE}/", max_pages=6, max_depth=3))
+            for _ in range(3)]
+    assert runs[0] == runs[1] == runs[2]
+
+
+@pytest.mark.parametrize("url, trap", [
+    ("https://e.org/blog/page/3", True), ("https://e.org/2023/11", True),
+    ("https://e.org/2023/11/02/", True), ("https://e.org/calendar/june", True),
+    ("https://e.org/events/2025/x", True), ("https://e.org/search", True),
+    ("https://e.org/list?page=2", True), ("https://e.org/list?sort=name", True),
+    ("https://e.org/login", True), ("https://e.org/feed/", True),
+    ("https://e.org/guides/floods", False), ("https://e.org/events/community-day", False),
+    ("https://e.org/page/about-us", False), ("https://e.org/searching-for-shelter", False),
+    ("https://e.org/list?id=4", False), ("https://e.org/2023-annual-report", False),
+])
+def test_trap_detection(url, trap):
+    assert crawler._is_trap(url) is trap
