@@ -112,8 +112,13 @@ judges are generally less consistent near a threshold, so set
   one split and verifies that property before writing, rather than
   assuming it.
 - Every export carries `page_id`, `chunk_id`, `chunk_index`, and
-  `source_url` alongside the messages, whether or not you split — that
-  lineage is what makes a correct split possible later.
+  `source_url` alongside the messages, whether or not you split; that
+  lineage is what makes a correct split possible later. The Unsloth file
+  (`*_unsloth.jsonl`, ShareGPT shape) has no room for it, so it gets a
+  sidecar, `*_unsloth.meta.jsonl`, where line *i* describes row *i*.
+- Rows are shuffled within each split (seeded from `export.split.seed`), so a
+  split file does not run page by page. Pages are still assigned largest
+  first, so which pages are held out depends on page size, not chance.
 
 ## Streaming design
 
