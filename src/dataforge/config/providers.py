@@ -36,6 +36,9 @@ PROVIDERS: dict[str, list[str]] = {
         "ollama/phi4",
         "ollama/deepseek-r1",
     ],
+    # Model IDs depend on what the local server has loaded, so none are listed;
+    # pick "custom" and enter the ID the server reports (GET <base_url>/models).
+    "openai_compatible": [],
 }
 
 
@@ -54,6 +57,10 @@ PROVIDER_INFO: dict[str, ProviderInfo] = {
     "groq":      ProviderInfo("Groq",        PROVIDERS["groq"],      True,  "GROQ_API_KEY"),
     "together":  ProviderInfo("Together",    PROVIDERS["together"],  True,  "TOGETHER_API_KEY"),
     "ollama":    ProviderInfo("Ollama",      PROVIDERS["ollama"],    False, ""),
+    "openai_compatible": ProviderInfo(
+        "OpenAI-compatible local server (LM Studio, vLLM, llama.cpp, Lemonade)",
+        PROVIDERS["openai_compatible"], False, "",
+    ),
 }
 
 
@@ -63,8 +70,27 @@ def litellm_model(provider: str, model: str) -> str:
         return model
     if provider == "anthropic":
         return model
+    if provider == "openai_compatible":
+        # litellm routes "openai/<id>" to the OpenAI-format endpoint at api_base.
+        return model if model.startswith("openai/") else f"openai/{model}"
     # groq, together already have prefix in model string
     return model
+
+
+def endpoint_kwargs(provider: str, settings) -> dict:
+    """Extra litellm arguments for providers served from a configurable URL."""
+    if provider == "openai_compatible":
+        if not settings.local_base_url:
+            raise ValueError(
+                "provider 'openai_compatible' needs DATAFORGE_LOCAL_BASE_URL "
+                "(for example http://localhost:1234/v1 for LM Studio)"
+            )
+        # The OpenAI client insists on a key; local servers usually ignore it.
+        return {"api_base": settings.local_base_url,
+                "api_key": settings.local_api_key or "not-needed"}
+    if provider == "ollama" and settings.ollama_base_url:
+        return {"api_base": settings.ollama_base_url}
+    return {}
 
 
 # Models that support extended thinking / reasoning tokens.

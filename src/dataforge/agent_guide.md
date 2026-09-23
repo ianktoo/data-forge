@@ -63,12 +63,16 @@ Settings come from environment variables or a `.env` file in the working
 directory. Minimum: a provider, a model and that provider's key.
 
 ```
-DATAFORGE_LLM_PROVIDER=openai          # openai | anthropic | google | groq | together | ollama
+DATAFORGE_LLM_PROVIDER=openai          # openai | anthropic | google | groq | together | ollama | openai_compatible
 DATAFORGE_LLM_MODEL=gpt-4o-mini
 OPENAI_API_KEY=...                     # or ANTHROPIC_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, TOGETHER_API_KEY
 ```
 
 Ollama needs no key (`OLLAMA_BASE_URL`, default `http://localhost:11434`).
+For LM Studio, vLLM, llama.cpp or any other OpenAI-compatible local server, use
+`DATAFORGE_LLM_PROVIDER=openai_compatible` with `DATAFORGE_LOCAL_BASE_URL`
+(its `/v1` address) and `DATAFORGE_LLM_MODEL` set to a model ID the server lists
+at `<base_url>/models`; `DATAFORGE_LOCAL_API_KEY` only if the server needs one.
 Never print, log or commit API keys. A recipe's `generation.model` /
 `quality.model` override the default model for that run.
 

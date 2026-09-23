@@ -49,12 +49,13 @@ optional:
 | **Python 3.11+** | ✅ Required | Or skip it entirely with a [standalone binary](docs/INSTALLATION.md#standalone-executables-no-python-required) — no interpreter needed. |
 | **An LLM to generate and score samples** | ✅ Required (one of the below) | This is what actually writes the Q&A pairs. |
 | — A hosted provider API key (OpenAI, Anthropic, Google, Groq, or Together) | One of these, or the local option below | `dataforge config` walks you through it; stored in `.env`. Content leaves your machine for generation. |
-| — Ollama running locally, no key | *or* fully local | `ollama serve && ollama pull llama3.2`, then `dataforge config` → `ollama`. Nothing leaves your machine. This is the only local-inference path wired in today — LM Studio, Lemonade and other OpenAI-compatible local servers aren't supported yet ([#22](https://github.com/ianktoo/data-forge/issues/22)). |
+| — A local model, no key | *or* fully local | **Ollama:** `ollama serve && ollama pull llama3.2`, then `dataforge config` → `ollama`. **Any OpenAI-compatible server** (LM Studio, vLLM, llama.cpp, Lemonade): set `DATAFORGE_LLM_PROVIDER=openai_compatible`, `DATAFORGE_LOCAL_BASE_URL=http://localhost:1234/v1` and `DATAFORGE_LLM_MODEL` to a model ID the server lists. Nothing leaves your machine. |
 | **A HuggingFace account** | ❌ Optional | Only if you set `export.targets: [huggingface]` to publish the finished dataset to the Hub. Needs `HUGGINGFACE_TOKEN`. |
 | **A Kaggle account** | ❌ Optional | Only if you set `export.targets: [kaggle]`. Needs `KAGGLE_USERNAME` / `KAGGLE_KEY`. |
 | **Nothing else** | — | Local JSONL/Parquet/CSV export (the default) needs no account at all — the whole pipeline runs against just an LLM provider. |
 
-In short: **one LLM (hosted key, or Ollama for zero-key/fully-local) is the
+In short: **one LLM (hosted key, or a local model through Ollama or any
+OpenAI-compatible server) is the
 only hard requirement.** Everything else — which provider, which export
 target, whether you need a HuggingFace or Kaggle account — is a choice you
 make in the recipe, not a prerequisite to get started. Full setup for each
@@ -69,7 +70,7 @@ option is in [docs/INSTALLATION.md](docs/INSTALLATION.md) and
 | **Unattended by default** | `dataforge run` needs no prompts. Cron it, or drive it interactively with `dataforge` when exploring a new site. |
 | **Streaming pipeline** | Generation starts on the first page instead of waiting for the last one, so the LLM and the crawler work at the same time. |
 | **Resumable, not restartable** | Every page, chunk and sample is checkpointed to SQLite. Interrupt a 5,000-page crawl and resume exactly where it stopped — nothing is re-fetched or re-billed. |
-| **Any model** | OpenAI, Anthropic, Google, Groq, Together, or fully local via Ollama — so sensitive content never has to leave your machine. |
+| **Any model** | OpenAI, Anthropic, Google, Groq, Together, or fully local via Ollama or any OpenAI-compatible server (LM Studio, vLLM, llama.cpp), so sensitive content never has to leave your machine. |
 | **Leak-free by design** | Train/validation/test splits are page-aware, not sample-aware, so paraphrases of the same source never land on both sides of a split. |
 | **Polite by construction** | `robots.txt` honoured, per-domain rate limiting, URL sanitisation, and PII/copyright guidance built in. |
 

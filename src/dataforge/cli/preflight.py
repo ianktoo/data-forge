@@ -30,6 +30,7 @@ _PROVIDER_KEY_MAP = {
     "groq":      "GROQ_API_KEY",
     "together":  "TOGETHER_API_KEY",
     "ollama":    None,   # local, no key needed
+    "openai_compatible": None,   # local server; key optional (DATAFORGE_LOCAL_API_KEY)
 }
 
 
@@ -80,6 +81,8 @@ def check_llm_credentials() -> tuple[bool, str | None]:
 
     if provider == "ollama":
         return _check_ollama(s.ollama_base_url)
+    if provider == "openai_compatible":
+        return _check_openai_compatible(s.local_base_url, s.local_api_key)
 
     if key_env and not os.getenv(key_env) and not getattr(s, key_env.lower(), ""):
         # Offer a live prompt before failing
@@ -94,6 +97,20 @@ def check_llm_credentials() -> tuple[bool, str | None]:
         return False, key_env
 
     return True, None
+
+
+def _check_openai_compatible(base_url: str, api_key: str = "") -> tuple[bool, str | None]:
+    """A server speaking the OpenAI API lists its models at <base_url>/models."""
+    if base_url:
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        try:
+            resp = httpx.get(f"{base_url.rstrip('/')}/models", headers=headers, timeout=3)
+            if resp.status_code == 200:
+                return True, None
+        except Exception:
+            pass
+    show_error("LOCAL_ENDPOINT_UNREACHABLE")
+    return False, "LOCAL_ENDPOINT_UNREACHABLE"
 
 
 def _check_ollama(base_url: str) -> tuple[bool, str | None]:

@@ -90,7 +90,9 @@ def _json_cli(*args: str) -> Any:
 
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-_PROGRESS = re.compile(r"scraped \d+/\d+\s+chunks \d+\s+samples \d+")
+# The live counter line, or a stage-completion line: whichever came last is
+# the latest progress (a small run can finish a stage before any counter line).
+_PROGRESS = re.compile(r"scraped \d+/\d+\s+chunks \d+\s+samples \d+|Stage '\w+' complete[^\n]*")
 
 
 def _clean(text: str) -> str:

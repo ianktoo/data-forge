@@ -242,8 +242,9 @@ stage entirely.
 \subsection{Generation}
 \label{sec:generation}
 Each chunk is passed to an LLM (via LiteLLM, giving provider portability
-across OpenAI, Anthropic, Google, Groq, Together AI, or a local Ollama
-model) with a format-specific prompt template --- \texttt{qa},
+across OpenAI, Anthropic, Google, Groq, Together AI, a local Ollama
+model, or any local server that speaks the OpenAI API, such as LM Studio,
+vLLM or llama.cpp) with a format-specific prompt template --- \texttt{qa},
 \texttt{instruction}, \texttt{conversation}, or a user-supplied custom
 system prompt --- and a recipe-level natural-language \texttt{goal}
 string that steers topical relevance without hand-writing a full prompt
@@ -334,16 +335,15 @@ published to the HuggingFace Hub or Kaggle. Every record carries
 \texttt{page\_id}, \texttt{chunk\_id}, \texttt{chunk\_index}, and
 \texttt{source\_url} regardless of whether a split is requested, because
 that lineage is what makes a correct split possible even after the
-fact. This lineage is not currently preserved uniformly across every
-export format, however: the Unsloth/ShareGPT-formatted companion export
-(\texttt{dataset\_unsloth.jsonl}) discards \texttt{page\_id},
-\texttt{chunk\_id}, \texttt{chunk\_index}, and \texttt{source\_url},
-retaining only the \texttt{conversations} array that loader format
-expects. A consumer training directly from that file specifically ---
-as opposed to the plain JSONL/Parquet/CSV exports, which retain full
-lineage --- loses the ability to cite a generated sample's source
-document, which matters wherever attribution or provenance is required
-downstream (Section~\ref{sec:limitations}, project issue \#19).
+fact. The Unsloth/ShareGPT-formatted companion export
+(\texttt{dataset\_unsloth.jsonl}) has room only for the
+\texttt{conversations} array that loader format expects, so its lineage
+travels in a sidecar, \texttt{dataset\_unsloth.meta.jsonl}, whose line
+$i$ gives \texttt{page\_id}, \texttt{chunk\_id}, \texttt{chunk\_index} and
+\texttt{source\_url} for row $i$ of the Unsloth file. Before
+version~2.4.2 the Unsloth file had no lineage at all (project issue
+\#19), so a consumer training from it lost the ability to cite a sample's
+source document.
 
 \subsubsection{Dataset introspection}
 \label{sec:introspection}
@@ -462,11 +462,11 @@ that prevents leakage. It does not, by itself, randomize row
 largest-first so that realized proportions track the configured targets
 closely (variance in achievable proportions grows as group sizes become
 uneven, and assigning the largest, most constraining groups while every
-split is still empty minimizes it), and each group's members are then
-written as a contiguous block. The resulting \texttt{dataset\_train.*}
-file therefore contains long runs of samples from the same source page,
-ordered by descending page size, rather than a random interleaving of
-rows.
+split is still empty minimizes it), and each group's members are
+appended as a contiguous block. Without a further step, the resulting
+\texttt{dataset\_train.*} file would contain long runs of samples from
+the same source page, ordered by descending page size, rather than a
+random interleaving of rows.
 
 Whether this matters depends on the consumer. Frameworks that shuffle
 examples before or during training (HuggingFace \texttt{datasets},
@@ -477,12 +477,13 @@ order is exposed to it directly: early batches within an epoch would be
 dominated by whichever page happened to be largest, which can bias
 early-training gradient statistics and any diagnostic computed
 batch-by-batch rather than over a full epoch. This is a distinct concern
-from group assignment and admits an independent fix: a deterministic,
-seeded shuffle of each split's row list --- separate from, and applied
-after, group assignment --- immediately before the file is written,
-reusing \texttt{export.split.seed} for reproducibility. Group
-boundaries are unaffected by this shuffle; only row order within a
-split changes. We considered, and rejected, generating samples
+from group assignment and has an independent fix, which DataForge
+applies: after group assignment and before the files are written, each
+split's rows are shuffled with their own seeded generator, derived from
+\texttt{export.split.seed} and the split's name, so the order is
+reproducible. Group boundaries are unaffected by this shuffle; only row
+order within a split changes. Before version~2.4.2 the shuffle was
+missing (project issue \#20). We considered, and rejected, generating samples
 independently per target split rather than splitting a single generated
 pool: that would require deciding a sample's split membership
 \emph{before} generation, which inverts the group-aware design above,
@@ -490,10 +491,7 @@ since the grouping key (the source page) is only well-defined once
 collection has already happened, and would either duplicate LLM calls
 per page across splits or simply recompute the same page-to-split
 assignment DataForge already makes, at additional cost and no benefit
-over shuffling the already-split result. At the time of writing this
-row-level shuffle is not yet implemented; it is tracked as an open item
-(Section~\ref{sec:limitations}, project issue \#20) rather than
-presented as shipped.
+over shuffling the already-split result.
 
 \section{Empirical evaluation}
 \label{sec:eval}
@@ -1043,16 +1041,16 @@ operator decision, surfaced in the recipe, rather than a hidden default.
 \textbf{Content laundering and provenance loss.} Because generation
 produces new text (a question and answer) rather than verbatim excerpts,
 the resulting dataset is one step removed from its source in a way that
-can obscure where the underlying facts came from, particularly once
-exported without its \texttt{source\_url} lineage (e.g., via the
-Unsloth-format export path noted in Section~\ref{sec:export}). This is a specific
+can obscure where the underlying facts came from, particularly if a
+consumer keeps a sample but drops its \texttt{source\_url} lineage (for
+example, by training from the Unsloth file of Section~\ref{sec:export}
+without its lineage sidecar). This is a specific
 instance of the broader dataset-provenance problem documented across the
 training-data ecosystem, where licensing and attribution information is
 frequently lost or misrepresented as data moves between hosting sites and
 downstream uses \cite{longpre2023provenance}. Preserving
-\texttt{source\_url} end to end, and treating an export format that drops
-it as a known gap rather than a cosmetic one, is the concrete mitigation
-available today; the ethical and legal obligation to have had permission
+\texttt{source\_url} end to end, in every export format, is the concrete
+mitigation available today; the ethical and legal obligation to have had permission
 to collect and redistribute the underlying content in the first place is
 not something the tool can verify on an operator's behalf.
 
@@ -1078,7 +1076,8 @@ withholds personally identifiable information, protected health
 information, or other sensitive material encountered incidentally during
 a crawl. Scoping a recipe's \texttt{source.include}/\texttt{exclude}
 patterns away from pages known or likely to contain such content, and
-using a local model (Ollama) rather than a cloud provider when source
+using a local model (through Ollama or any OpenAI-compatible local
+server) rather than a cloud provider when source
 material carries data-residency constraints, are operator-side
 mitigations documented in the project's ethics guidance; they are not
 enforced by the pipeline itself.
@@ -1111,17 +1110,13 @@ groups, rather than only within a session's chunks, is a natural
 extension.
 
 Two gaps identified during a post-hoc code review, rather than designed
-in from the start, remain open at the time of writing: the Unsloth-format
-export's loss of source lineage (Section~\ref{sec:export}), for which the fix is to
-carry lineage as a parallel, format-appropriate side channel (e.g. an
-adjacent \texttt{dataset\_unsloth.meta.jsonl} keyed by row index) rather
-than any change to splitting or generation logic; and the row-order
-artifact within a split's output file (Section~\ref{sec:row-shuffle}),
-for which the fix is an additional, independent shuffle step rather than
-a change to group assignment itself. Both are recorded here as a
-reminder that lineage and ordering guarantees need to be verified
-per output format and per pipeline stage, not assumed to hold uniformly
-once established for one.
+in from the start, were closed in version~2.4.2: the Unsloth-format
+export's loss of source lineage, now carried in a sidecar file
+(Section~\ref{sec:export}), and the page-by-page row order within a
+split's output file, now shuffled (Section~\ref{sec:row-shuffle}). Both
+are recorded here as a reminder that lineage and ordering guarantees
+need to be verified per output format and per pipeline stage, not
+assumed to hold uniformly once established for one.
 
 The most significant near-term extension, and the one we consider the
 project's actual next step rather than a background item, is support for

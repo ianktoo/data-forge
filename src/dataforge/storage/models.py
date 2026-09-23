@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 from sqlmodel import Field, SQLModel
@@ -63,6 +64,13 @@ class PipelineSession(SQLModel, table=True):
 
     def config(self) -> dict[str, Any]:
         return json.loads(self.config_json)
+
+    def session_dir(self, fallback_output_dir: Path) -> Path:
+        """Where this session's files live. A recipe can set its own
+        output_dir, so the folder recorded when the run started wins over the
+        current setting; sessions from before it was recorded use the fallback."""
+        recorded = self.config().get("output_dir")
+        return Path(recorded or fallback_output_dir) / "sessions" / self.id
 
 
 class DiscoveredURL(SQLModel, table=True):

@@ -201,14 +201,14 @@ async def test_full_headless_run_produces_an_export(
         f"{sum(not s.approved for s in samples)}/{len(samples)} samples rejected"
     )
 
-    # rglob("*.jsonl") also matches dataset_unsloth.jsonl, which has a
-    # different schema ({"conversations": [...]}, no "messages" key — see
-    # issue #19) and whose glob ordering isn't guaranteed across platforms.
-    # Pick the primary export explicitly rather than relying on order.
+    # rglob("*.jsonl") also matches dataset_unsloth.jsonl ({"conversations":
+    # [...]}, no "messages" key) and its lineage sidecar
+    # dataset_unsloth.meta.jsonl, and glob order isn't guaranteed across
+    # platforms. Pick the primary export explicitly rather than relying on order.
     exports = [
         p
         for p in isolated_settings.output_dir.rglob("*.jsonl")
-        if not p.stem.endswith("_unsloth")
+        if "_unsloth" not in p.name
     ]
     assert exports, "no primary JSONL export was written"
 
@@ -265,8 +265,8 @@ async def test_split_export_writes_train_val_test_without_leakage(
     # Reload what was actually written and prove no page spans two splits.
     splits = {}
     for p in isolated_settings.output_dir.rglob("dataset_*.jsonl"):
-        if p.name.endswith("_unsloth.jsonl"):
-            continue   # unsloth files carry no lineage by design
+        if "_unsloth" in p.name:
+            continue   # the Unsloth file and its lineage sidecar are not splits
         name = p.stem.replace("dataset_", "")
         splits[name] = [
             json.loads(line) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()

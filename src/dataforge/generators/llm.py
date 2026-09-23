@@ -9,7 +9,7 @@ from typing import Any
 import litellm
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from dataforge.config import get_settings, litellm_model, model_supports_thinking
+from dataforge.config import endpoint_kwargs, get_settings, litellm_model, model_supports_thinking
 from dataforge.utils import get_logger
 
 log = get_logger("llm")
@@ -95,6 +95,7 @@ class LLMClient:
         self._provider = provider_override or s.llm_provider
         raw_model      = model_override or s.llm_model
         self._model    = litellm_model(self._provider, raw_model)
+        self._endpoint = endpoint_kwargs(self._provider, s)
         self._temp     = s.llm_temperature
         self._max_tk   = s.llm_max_tokens
         self.usage     = UsageSummary()
@@ -133,6 +134,7 @@ class LLMClient:
         try:
             resp = await litellm.acompletion(
                 model=self._model,
+                **self._endpoint,
                 messages=messages,
                 # `is None`, not `or`: temperature=0.0 is a real request
                 # (the quality judge needs deterministic scoring).
@@ -169,6 +171,7 @@ class LLMClient:
                     "openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY",
                     "google": "GEMINI_API_KEY",
                     "groq": "GROQ_API_KEY", "together": "TOGETHER_API_KEY",
+                    "openai_compatible": "DATAFORGE_LOCAL_API_KEY",
                 }
                 key = _KEY_MAP.get(self._provider, "API key")
                 raise MissingCredentialError(key, self._provider) from exc
@@ -203,6 +206,7 @@ class LLMClient:
         req_max_tokens = max_tokens or self._max_tk
         kwargs: dict[str, Any] = {
             "model":       self._model,
+            **self._endpoint,
             "messages":    messages,
             "temperature": self._temp if temperature is None else temperature,
             "max_tokens":  req_max_tokens,
@@ -297,6 +301,7 @@ class LLMClient:
                     "openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY",
                     "google": "GEMINI_API_KEY",
                     "groq": "GROQ_API_KEY", "together": "TOGETHER_API_KEY",
+                    "openai_compatible": "DATAFORGE_LOCAL_API_KEY",
                 }
                 key = _KEY_MAP.get(self._provider, "API key")
                 raise MissingCredentialError(key, self._provider) from exc

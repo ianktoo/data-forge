@@ -5,6 +5,43 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+Closes every open issue (#19, #20, #22, #40, #41). No breaking changes.
+
+### Added
+- **OpenAI-compatible local servers** (#22): provider `openai_compatible` for
+  LM Studio, vLLM, llama.cpp, Lemonade or any server that speaks the OpenAI chat
+  API. Set `DATAFORGE_LOCAL_BASE_URL` (its `/v1` address), `DATAFORGE_LLM_MODEL`
+  (a model ID the server lists) and, only if the server needs one,
+  `DATAFORGE_LOCAL_API_KEY`. The preflight check confirms the server answers at
+  `<base_url>/models` and explains how to fix it if not.
+- **Lineage for the Unsloth export** (#19): each `*_unsloth.jsonl` now has a
+  `*_unsloth.meta.jsonl` sidecar whose line *i* gives `id`, `session_id`,
+  `page_id`, `chunk_id`, `chunk_index` and `source_url` for row *i*. The
+  Unsloth file keeps the standard ShareGPT shape.
+
+### Fixed
+- **Split files ran page by page, largest page first** (#20). Rows are now
+  shuffled within each split with a seeded generator (from `export.split.seed`
+  and the split name), so the order is reproducible. Which page lands in which
+  split is unchanged.
+- **`stats` / `session_stats` returned `split_counts: null`** when a recipe set
+  its own `output_dir` (#40). A session now records its output folder when it
+  starts, `resume` continues there, and `stats` also finds exports through
+  their export records, so sessions from before this change work too. The
+  checkpoint no longer erases keys other than its counters.
+- **No progress on small runs** (#41). The progress line now also prints on the
+  first event, when a new page finishes (at most every 5 seconds) and when the
+  last page is done; `run_status` falls back to the latest stage-completion
+  line.
+- **`OLLAMA_BASE_URL` was ignored by LLM calls.** It was read only by the
+  preflight check; it is now passed to every Ollama request, so Ollama on
+  another host or port works.
+- Lint: `storage/database.py` referenced `Engine` without importing it; six
+  unused imports and variables in tests.
+- A timing test for rate-limit jitter was flaky on Windows (about 16 ms
+  timers against a 0.2 s interval). It now uses a 0.5 s interval with a
+  threshold that still fails on the pre-fix limiter.
+
 ### Documentation
 - `CITATION.cff`: citation metadata (GitHub shows a "Cite this repository"
   button). The software is cited as MIT, version 2.4.1; the preferred citation

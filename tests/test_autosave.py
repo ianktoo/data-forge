@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from dataforge.agents.base import PipelineContext
 from dataforge.agents.orchestrator import Orchestrator
 from dataforge.storage import open_session
@@ -46,4 +44,6 @@ def test_checkpoint_skipped_when_autosave_disabled(tmp_settings):
 
     with open_session(tmp_settings.db_path) as db:
         session = db.get(PipelineSession, ctx.session_id)
-        assert session.config_json == "{}"
+        # _init_session records the output folder (#40); with autosave off the
+        # checkpoint must add none of its counters.
+        assert set(session.config()) == {"output_dir"}

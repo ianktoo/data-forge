@@ -235,14 +235,32 @@ def _write_run_summary(
 # -- Progress (line-based, safe for non-TTY logs) ----------------------------
 
 
-def _stream_progress(every: int = 25):
-    """Log a compact counter line periodically rather than animating a bar."""
-    state = {"n": 0}
+def _stream_progress(every: int = 25, min_interval: float = 5.0):
+    """Log a compact counter line periodically rather than animating a bar.
+
+    Printed on the first event, every *every* events, when a new page has been
+    scraped and at least *min_interval* seconds have passed, and when the last
+    page is scraped, so a small run (fewer than *every* events) still reports
+    progress and a large one is not flooded.
+    """
+    import time
+
+    state = {"n": 0, "scraped": -1, "last": 0.0}
 
     async def cb(counters: dict, item: str = "") -> None:
         state["n"] += 1
-        if state["n"] % every:
+        now = time.monotonic()
+        scraped, total = counters["scraped"], counters["urls_total"]
+        new_page = scraped != state["scraped"]
+        due = (
+            state["n"] == 1
+            or state["n"] % every == 0
+            or (new_page and scraped == total)
+            or (new_page and now - state["last"] >= min_interval)
+        )
+        if not due:
             return
+        state["scraped"], state["last"] = scraped, now
         ui.info(
             f"  scraped {counters['scraped']}/{counters['urls_total']}  "
             f"chunks {counters['chunks']}  samples {counters['samples']}"

@@ -338,6 +338,12 @@ async def _resume_session(session_id: str | None) -> None:
         ui.warn("Session already completed. Use 'dataforge export' to re-export.")
         return
 
+    # Continue in the folder the session started in (a recipe may have set
+    # its own output_dir), not wherever the current settings point.
+    recorded_output = session.config().get("output_dir")
+    if recorded_output:
+        s.output_dir = Path(recorded_output)
+
     from dataforge.agents import PipelineContext
     ctx = PipelineContext(
         session_id=session.id,
@@ -711,7 +717,7 @@ def stats(
     if not session:
         raise typer.Exit(code=1)
 
-    result = compute_session_stats(s.db_path, session.id, s.session_dir(session.id))
+    result = compute_session_stats(s.db_path, session.id, session.session_dir(s.output_dir))
 
     if _JSON_OUTPUT:
         typer.echo(json.dumps({

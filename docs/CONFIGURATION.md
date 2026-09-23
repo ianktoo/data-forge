@@ -12,7 +12,9 @@ Run `dataforge config` to set your provider and API key interactively.
 | `GEMINI_API_KEY` | — | Google AI (Gemini) key |
 | `GROQ_API_KEY` | — | Groq key |
 | `TOGETHER_API_KEY` | — | Together AI key |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint (no key needed) |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint (no key needed); passed to every Ollama call |
+| `DATAFORGE_LOCAL_BASE_URL` | — | Base URL of an OpenAI-compatible local server, including `/v1` (LM Studio `http://localhost:1234/v1`, vLLM `http://localhost:8000/v1`, llama.cpp `http://localhost:8080/v1`). Required for provider `openai_compatible`. |
+| `DATAFORGE_LOCAL_API_KEY` | — | Optional key for an OpenAI-compatible server that requires one |
 | `DATAFORGE_LLM_PROVIDER` | `openai` | Active provider |
 | `DATAFORGE_LLM_MODEL` | `gpt-4o-mini` | Model name |
 | `DATAFORGE_RATE_LIMIT` | `2.0` | Requests/sec per domain |
