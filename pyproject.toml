@@ -3,7 +3,7 @@ name = "llm-web-crawler"
 version = "2.4.3"
 description = "LLM data collection and synthetic fine-tuning dataset pipeline"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "typer>=0.12",
     "rich>=13",

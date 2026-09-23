@@ -10,7 +10,7 @@ Runs on every push to `master`, every pull request, and on demand.
 
 - **lint**: `ruff check src tests scripts`
 - **test**: `pytest -m "not integration"` on ubuntu, windows and macos, with
-  Python 3.11, 3.12, 3.13 and 3.14
+  Python 3.11 (the only supported version)
 - **package**: builds the wheel, installs it with pip into a clean venv, and
   runs `scripts/smoke_test.py --mcp --e2e` against the installed `dataforge`
 
@@ -27,8 +27,8 @@ python scripts/smoke_test.py dataforge --mcp --e2e
 ### Release smoke test (`release-smoke.yml`)
 
 After each PyPI publish (and on demand, with an optional version), installs
-the released package with pip and with `uv tool` on every OS and Python 3.11
-to 3.14, and runs the smoke test against it.
+the released package with pip and with `uv tool` on every OS with Python
+3.11, and runs the smoke test against it.
 
 ### 1. Build Executables (`build-executables.yml`)
 

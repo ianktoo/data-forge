@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Python 3.11 is the only supported version.** `requires-python` is now
+  `>=3.11,<3.12`, and CI tests 3.11 only. pip refuses to install DataForge on
+  Python 3.12 or newer; `uv tool install llm-web-crawler` fetches 3.11 by
+  itself, and the standalone binaries need no Python.
+
 ### Fixed
 - **Standalone binaries could not run a pipeline, and failed silently** (#54).
   PyInstaller left out `agent_guide.md`, litellm's model price table (read at
@@ -22,7 +28,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 - **CI tests** (#55). `test.yml` runs on every push to master and every PR:
-  ruff, the test suite on Linux, Windows and macOS with Python 3.11 to 3.14,
+  ruff, the test suite on Linux, Windows and macOS with Python 3.11,
   and the built wheel installed with pip and smoke-tested.
   `scripts/smoke_test.py` drives any installed `dataforge` as a black box:
   everyday commands, pure-JSON `--json` output, `update`/`uninstall` refusing
@@ -30,7 +36,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and without a sitemap, a fake OpenAI-compatible LLM) through crawl,
   chunking, generation, the judge and export. It spends nothing. Binaries are
   smoke-tested before upload, and `release-smoke.yml` installs each PyPI
-  release with pip and uv on every OS and Python and tests it.
+  release with pip and uv on every OS and tests it.
 - **Releases are gated on the full suite.** Both release workflows call
   `test.yml` and publish nothing to PyPI or GitHub Releases unless it passes.
   CONTRIBUTING gains "Keeping one fix from breaking another", and PRs get a
