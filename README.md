@@ -130,12 +130,19 @@ dataforge run my.yaml --dry-run     # validate and print the plan, run nothing
 dataforge run my.yaml               # execute end-to-end, no prompts
 ```
 
+To update or remove DataForge, run `dataforge update` or `dataforge uninstall`
+yourself, in your own terminal. Both close DataForge first, so nothing is
+replaced while in use; `uninstall` asks whether to keep your data. Read the
+[release notes](https://github.com/ianktoo/data-forge/releases) before
+updating: a new version can change recipes, outputs or commands. See
+[Updating and uninstalling](docs/INSTALLATION.md#updating-and-uninstalling-from-dataforge).
+
 Prefer to explore a site interactively first? `dataforge` launches the
 guided wizard with a per-stage review. Full install options (uv, pip,
 standalone binaries, local models via Ollama), every CLI command, all
 environment variables and the complete recipe schema are in the docs:
 
-- **[Installation](docs/INSTALLATION.md)** — uv / pip / source / standalone binaries / Ollama
+- **[Installation](docs/INSTALLATION.md)** — uv / pip / source / standalone binaries / Ollama, plus [known issues and workarounds](docs/INSTALLATION.md#known-issues-and-workarounds)
 - **[Configuration](docs/CONFIGURATION.md)** — environment variables and full recipe reference
 - **[Architecture](docs/ARCHITECTURE.md)** — how discovery, streaming, quality and export fit together
 - **[Development](docs/DEVELOPMENT.md)** — project layout, testing, releasing
@@ -173,6 +180,11 @@ The agent then gets typed tools (explore a site, validate a recipe, start and
 monitor a run, read session stats and samples) instead of parsing terminal
 output. Runs started this way must have a spending cap, and a recipe that
 disables `robots.txt` is refused.
+
+Agents may never update, upgrade or uninstall DataForge. `dataforge update` and
+`dataforge uninstall` refuse to run without a terminal or inside an agent
+session, and the agent guide tells agents to leave it to you, after you have
+read the release notes.
 
 ## What makes it different
 
