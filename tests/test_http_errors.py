@@ -290,13 +290,16 @@ async def test_jitter_never_shortens_the_gap_below_the_interval(monkeypatch):
     jitters = itertools.cycle([0.15, 0.0])
     monkeypatch.setattr(rate_limiter.random, "uniform", lambda a, b: next(jitters))
     lim = RateLimiter(default_rps=1000.0)
-    lim.set_domain_limit("slow.test", 5.0)            # 0.2s interval, burst of 5
+    # A 0.5s interval (burst of 2) so the effect dwarfs timer noise: the old
+    # bug gave gaps of 0.5 - 0.075 = 0.425s; correct code gives >= 0.5s.
+    # Windows timers are ~16ms coarse, which made a 0.2s version flaky.
+    lim.set_domain_limit("slow.test", 2.0)
     stamps = []
-    for _ in range(11):
+    for _ in range(6):
         await lim.wait("https://slow.test/")
         stamps.append(time.monotonic())
-    gaps = [b - a for a, b in zip(stamps[5:], stamps[6:])]   # after the burst
-    assert min(gaps) >= 0.2 * 0.95, [round(g, 3) for g in gaps]
+    gaps = [b - a for a, b in zip(stamps[2:], stamps[3:])]   # after the burst
+    assert min(gaps) >= 0.47, [round(g, 3) for g in gaps]
 
 
 def test_pipeline_context_shares_one_rate_limiter(tmp_settings):

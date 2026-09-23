@@ -10,14 +10,13 @@ Regression coverage for two related gaps:
 from __future__ import annotations
 
 import pytest
-from sqlmodel import select
 
 from dataforge.agents.base import PipelineContext
 from dataforge.agents.orchestrator import Orchestrator
 from dataforge.cli import app as cli_app
 from dataforge.cli import dataforge_file
-from dataforge.storage.models import DataFormat, PipelineSession, PipelineStage, SessionStatus
 from dataforge.storage import open_session
+from dataforge.storage.models import DataFormat, PipelineSession, PipelineStage, SessionStatus
 
 
 def _make_ctx(tmp_settings, session_id="s1"):
@@ -45,7 +44,7 @@ async def test_interrupt_in_stage_hook_marks_session_paused(tmp_settings):
         return agent_self.ctx
     orch._build_agent = lambda stage: type("A", (), {"run": _fake_run, "ctx": ctx})()
 
-    result = await orch.run()
+    await orch.run()
 
     with open_session(tmp_settings.db_path) as db:
         session = db.get(PipelineSession, ctx.session_id)

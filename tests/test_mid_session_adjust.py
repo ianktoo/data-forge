@@ -10,9 +10,9 @@ from __future__ import annotations
 import pytest
 
 from dataforge.agents.base import PipelineContext
-from dataforge.storage.models import DataFormat
 from dataforge.cli import app as cli_app
 from dataforge.cli import prompts
+from dataforge.storage.models import DataFormat
 
 
 @pytest.fixture

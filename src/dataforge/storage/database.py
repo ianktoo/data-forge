@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from pathlib import Path
 
+from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from .models import (  # noqa: F401 — ensure models are registered
@@ -15,7 +16,7 @@ from .models import (  # noqa: F401 — ensure models are registered
     SyntheticSample,
 )
 
-_engines: dict[str, "Engine"] = {}
+_engines: dict[str, Engine] = {}
 
 
 # Columns added after a table's first release. create_all() only creates
