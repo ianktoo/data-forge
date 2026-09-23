@@ -5,6 +5,27 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **`dataforge scrape`: pages and tables, no AI** (#69, first part). Fetch one
+  or more URLs and save each page's text (`pages.jsonl`, `page_NNN.md`) and
+  every HTML table as CSV and JSON (`page_NNN_table_K.csv`/`.json`, all in
+  `tables.jsonl` with `source_url`). No LLM, API key, session or database;
+  robots.txt, the rate limit and `Crawl-delay` apply as everywhere. Options:
+  `--no-tables`, `-f jsonl|md|csv`, `-o <folder>`, `--check` (rule-based:
+  empty or very short pages, duplicate text). Each URL reports its status
+  (`ok`, `blocked by robots.txt`, `http 404`, `not html`, errors); exit 1 if
+  nothing was scraped. `--json` prints a summary for scripts and agents.
+- **Table extraction** (`collectors/tables.py`): headers from `<th>`,
+  `<thead>` or a bold first row (common on hand-made pages); `colspan` and
+  `rowspan` expanded so every row has every column; nested tables kept
+  separate; layout tables skipped.
+- **MCP tool `scrape_page`**: one page's title, Markdown (capped by
+  `max_chars`) and tables, read-only. The agent guide points agents at
+  `scrape` / `scrape_page` when a user wants content or table data rather
+  than a fine-tuning dataset.
+- `scripts/smoke_test.py` checks `scrape` (a table saved as CSV, a
+  robots.txt refusal, a 404) and the new MCP tool.
+
 ### Performance
 Faster, politer discovery: fewer requests, and the crawl budget spent on the
 right pages. No new dependencies.

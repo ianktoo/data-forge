@@ -27,7 +27,8 @@ chat does nothing). `claude mcp list` shows whether the server connects. If
 register the full path to the executable instead:
 `claude mcp add dataforge -- /path/to/.venv/bin/dataforge mcp`.
 
-Tools: `explore_site`, `validate_recipe`, `start_run` + `run_status` (a run
+Tools: `scrape_page` (one page's text and tables, no AI), `explore_site`,
+`validate_recipe`, `start_run` + `run_status` (a run
 takes minutes, so it runs in the background), `list_sessions`,
 `session_stats`, `view_samples`. `start_run` refuses a recipe with no spending
 cap unless you pass `allow_uncapped_spend`, and always refuses
@@ -39,6 +40,7 @@ Several commands open interactive menus that will hang a non-TTY shell. Use:
 
 | Command | What it does |
 |---|---|
+| `dataforge --json scrape <url>... -o <folder>` | Just the pages: text as Markdown, every table as CSV/JSON. No AI, no API key, spends nothing. Use this when the user wants a page's content or table data, not a fine-tuning dataset. |
 | `dataforge init-recipe <file.yaml>` | Write an annotated starter recipe (`--force` to overwrite) |
 | `dataforge explore <url-or-sitemap>` | List the URLs a site exposes, before committing to a crawl |
 | `dataforge run <file.yaml> --dry-run` | Validate a recipe and print the plan; spends nothing |

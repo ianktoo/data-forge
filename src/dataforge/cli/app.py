@@ -47,6 +47,7 @@ def _typer_error_handler(error: Exception) -> None:
         _VALID_COMMANDS = [
             "pipeline", "explore", "resume", "sessions",
             "export", "view", "config", "providers", "info", "test-llm", "update", "uninstall", "plan",
+            "scrape",
         ]
         # Try to find the closest match
         import difflib
@@ -173,6 +174,86 @@ def pipeline() -> None:
     if not _QUIET:
         ui.banner()
     asyncio.run(_interactive_pipeline())
+
+
+# ── scrape command ────────────────────────────────────────────────────────────
+
+@app.command()
+def scrape(
+    urls: list[str] = typer.Argument(..., help="One or more page URLs"),
+    tables: bool = typer.Option(True, "--tables/--no-tables", help="Extract HTML tables as CSV/JSON"),
+    out: Path | None = typer.Option(
+        None, "--out", "-o", help="Output folder (default: ./scrape/<date-time>)"),
+    fmt: list[str] = typer.Option(
+        ["jsonl", "md", "csv"], "--format", "-f",
+        help="What to write: jsonl (pages.jsonl, tables.jsonl), md (one file per page), "
+             "csv (each table as CSV and JSON). Repeat to pick several."),
+    check: bool = typer.Option(
+        False, "--check", help="Rule-based checks, no AI: empty or very short pages, duplicate text"),
+) -> None:
+    """Fetch pages and save their text and tables. No AI, no API key, spends nothing.
+
+    Obeys robots.txt, the rate limit and Crawl-delay like every other request.
+    """
+    import sys as _sys
+
+    from loguru import logger
+
+    from dataforge import scrape as qs
+
+    bad = [f for f in fmt if f not in qs.FORMATS]
+    if bad:
+        _report_error(f"unknown --format {', '.join(bad)}; choose from {', '.join(qs.FORMATS)}")
+        raise typer.Exit(code=2)
+    # No session, database or log files: warnings only, to stderr.
+    logger.remove()
+    logger.add(_sys.stderr, level="WARNING", format="{level}: {message}")
+
+    s = get_settings()
+    pages = asyncio.run(qs.scrape_urls(urls, rate_limit=s.rate_limit, tables=tables, check=check))
+    from datetime import datetime
+
+    out_dir = out or Path("scrape") / datetime.now().strftime("%Y%m%d-%H%M%S")
+    written = qs.write_outputs(pages, out_dir, tuple(fmt))
+
+    ok = [p for p in pages if p.ok]
+    if _JSON_OUTPUT:
+        typer.echo(json.dumps({
+            "output_dir": str(out_dir.resolve()),
+            "pages": [p.to_dict(include_text=False) for p in pages],
+            "files": written,
+        }, indent=2, ensure_ascii=False))
+    else:
+        for p in pages:
+            if p.ok:
+                ui.success(f"{p.url}  [dim]{p.title[:60]}[/]  {p.word_count} words, "
+                           f"{len(p.tables)} table{'s' if len(p.tables) != 1 else ''}")
+                for w in p.warnings:
+                    ui.warn(f"  {w}")
+            else:
+                ui.error(f"{p.url}  {p.status}")
+        for p in ok:
+            for k, t in enumerate(p.tables[:3], 1):
+                _print_table_preview(t, f"{p.title or p.url}: table {k}")
+        n_tables = sum(len(p.tables) for p in ok)
+        ui.info(f"{len(ok)}/{len(pages)} page(s), {n_tables} table(s) saved to "
+                f"[bold]{out_dir.resolve()}[/]")
+    if not ok:
+        raise typer.Exit(code=1)
+
+
+def _print_table_preview(table, title: str, max_rows: int = 8) -> None:
+    from rich.table import Table as RichTable
+
+    headers = table.headers or [f"column_{i + 1}" for i in range(table.width)]
+    t = RichTable(title=title, show_lines=False, title_justify="left")
+    for h in headers:
+        t.add_column(h, overflow="fold")
+    for row in table.rows[:max_rows]:
+        t.add_row(*row)
+    ui.console.print(t)
+    if len(table.rows) > max_rows:
+        ui.console.print(f"  … {len(table.rows) - max_rows} more row(s)", style="dim")
 
 
 # ── explore command ───────────────────────────────────────────────────────────

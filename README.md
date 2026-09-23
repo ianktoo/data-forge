@@ -132,6 +132,24 @@ dataforge run my.yaml --dry-run     # validate and print the plan, run nothing
 dataforge run my.yaml               # execute end-to-end, no prompts
 ```
 
+**Just need the pages, or a table on them?** `dataforge scrape` fetches pages
+and saves their text as Markdown and every table as CSV and JSON. It needs no
+AI, no API key and spends nothing, and it obeys `robots.txt` and rate limits
+like everything else:
+
+```bash
+dataforge scrape https://www.husd.us/schools/middle-schools -o schools
+# schools/page_001_table_1.csv:
+# Middle Schools,Address,Phone,Fax
+# Anthony Ochoa,"2121 Depot Road Hayward, CA 94545-2428",(510) 723-3130,(510) 786-0559
+# ...
+```
+
+Add `--check` for rule-based checks (empty or very short pages, duplicate
+text), `-f csv` to write only the tables, and `--json` before the command for
+a machine-readable summary. AI agents get the same through the MCP tool
+`scrape_page`.
+
 To update or remove DataForge, run `dataforge update` or `dataforge uninstall`
 yourself, in your own terminal. Both close DataForge first, so nothing is
 replaced while in use; `uninstall` asks whether to keep your data. Read the
@@ -178,7 +196,7 @@ Claude Code picks up a newly added server only in a new session: exit with
 `/exit`, then run `claude --continue` in your terminal to reopen the same
 conversation with the DataForge tools loaded.
 
-The agent then gets typed tools (explore a site, validate a recipe, start and
+The agent then gets typed tools (scrape a page's text and tables, explore a site, validate a recipe, start and
 monitor a run, read session stats and samples) instead of parsing terminal
 output. Runs started this way must have a spending cap, and a recipe that
 disables `robots.txt` is refused.

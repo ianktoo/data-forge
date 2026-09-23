@@ -34,7 +34,7 @@ try:
 except Exception:
     pass
 
-MCP_TOOLS = {"explore_site", "validate_recipe", "start_run", "run_status",
+MCP_TOOLS = {"scrape_page", "explore_site", "validate_recipe", "start_run", "run_status",
              "list_sessions", "session_stats", "view_samples"}
 
 PAGE = """<html><head><title>{title}</title></head><body>
@@ -48,7 +48,11 @@ a waterproof container and agree an evacuation route to higher ground.</p>
 <p>Never walk, swim or drive through flood waters. Six inches of moving water
 can knock a person down and one foot can sweep away a vehicle. Wait for the
 official all clear before returning home.</p>
-</article></body></html>"""
+{table}</article></body></html>"""
+
+KIT_TABLE = """<table><tr><th>Item</th><th>Amount</th></tr>
+<tr><td>Water</td><td>1 gallon per person per day</td></tr>
+<tr><td>Food</td><td>3-day supply</td></tr></table>"""
 
 # path -> (title, links). The sitemap lists every page; the crawl test starts
 # at "/" and must follow links down to depth 2 (/guides/floods -> /guides/floods/kit).
@@ -71,7 +75,7 @@ class Site(BaseHTTPRequestHandler):
     def do_GET(self):
         host = f"http://{self.headers['Host']}"
         if self.path == "/robots.txt":
-            return self._send("User-agent: *\nAllow: /\n", "text/plain")
+            return self._send("User-agent: *\nDisallow: /private\nAllow: /\n", "text/plain")
         if self.path == "/sitemap.xml" and self.sitemap:
             urls = "".join(f"<url><loc>{host}{p}</loc></url>" for p in PAGES if p != "/")
             return self._send('<?xml version="1.0"?><urlset xmlns='
@@ -80,7 +84,8 @@ class Site(BaseHTTPRequestHandler):
         if self.path in PAGES:
             title, links = PAGES[self.path]
             nav = " ".join(f'<a href="{host}{link}">{link}</a>' for link in links)
-            return self._send(PAGE.format(title=title, nav=nav), "text/html")
+            table = KIT_TABLE if self.path.endswith("/kit") else ""
+            return self._send(PAGE.format(title=title, nav=nav, table=table), "text/html")
         self.send_response(404)
         self.end_headers()
 
@@ -237,6 +242,30 @@ class Smoke:
                    f"{detail} tools={tools} stderr={err}")
 
     # ── offline end-to-end runs ──────────────────────────────────────────
+    def quick_scrape(self):
+        """`dataforge scrape`: no AI, tables as CSV, robots.txt obeyed (#69)."""
+        site, url = serve(Site)
+        out = os.path.join(self.work, "scrape-out")
+        try:
+            code, stdout, err = self.run(
+                "--json", "scrape", f"{url}/guides/floods/kit", f"{url}/private/page",
+                f"{url}/missing", "-o", out, "--check")
+        finally:
+            site.shutdown()
+        result = json.loads(stdout) if _is_json(stdout) else {}
+        statuses = [p.get("status") for p in result.get("pages", [])]
+        self.check("scrape: exit 0, statuses ok / blocked by robots.txt / http 404",
+                   code == 0 and statuses == ["ok", "blocked by robots.txt", "http 404"],
+                   f"exit {code}: {statuses} {stdout[-600:]}{err[-600:]}")
+        csv_path = os.path.join(out, "page_001_table_1.csv")
+        try:
+            with open(csv_path, encoding="utf-8-sig") as f:
+                first = f.readline().strip()
+        except OSError:
+            first = ""
+        self.check("scrape: table saved as CSV with its headers", first == "Item,Amount",
+                   f"{csv_path}: {first!r}; files {os.listdir(out) if os.path.isdir(out) else []}")
+
     def e2e(self):
         llm, llm_url = serve(FakeLLM)
         env = {**self.env,
@@ -357,6 +386,7 @@ def main():
     exe = shutil.which(a.exe) or a.exe
     s = Smoke(os.path.abspath(exe))
     s.basics(a.version)
+    s.quick_scrape()
     if a.mcp:
         s.mcp()
     if a.e2e:
