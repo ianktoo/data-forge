@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -31,6 +32,13 @@ from dataforge.cli import app as cli_app
 from dataforge.cli import self_manage
 
 runner = CliRunner()
+
+
+def plain(text: str) -> str:
+    """Output without ANSI styling. Rich colours version numbers piecewise
+    when FORCE_COLOR is set (some terminals and agent shells set it), which
+    breaks plain substring checks such as "2.4.2" in output."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 UV_LOCKED_LAUNCHER = (
     "Updated llm-web-crawler v2.4.1 -> v2.4.2\n"
@@ -78,7 +86,7 @@ def test_update_reports_success_when_uv_cannot_replace_running_launcher(monkeypa
 
     assert cli_app._run_update()  # must not raise
 
-    out = capsys.readouterr().out
+    out = plain(capsys.readouterr().out)
     assert "2.4.2" in out
     assert "Update failed" not in out
     assert "uv tool install --force llm-web-crawler" in out
@@ -96,7 +104,7 @@ def test_update_warns_when_uv_install_is_pinned(monkeypatch, capsys):
 
     assert cli_app._run_update()
 
-    out = capsys.readouterr().out
+    out = plain(capsys.readouterr().out)
     assert "Already up to date" not in out
     assert "pinned" in out
     assert "llm-web-crawler@latest" in out
@@ -158,8 +166,8 @@ def test_refused_without_a_terminal(monkeypatch, handoffs, args):
     result = runner.invoke(cli_app.app, args)
 
     assert result.exit_code == 2
-    assert "refused" in result.output
-    assert "release notes" in result.output
+    assert "refused" in plain(result.output)
+    assert "release notes" in plain(result.output)
     assert handoffs == [] and ran == []
 
 
@@ -170,7 +178,7 @@ def test_refused_inside_claude_code_even_with_a_terminal(monkeypatch, handoffs, 
     result = runner.invoke(cli_app.app, args)
 
     assert result.exit_code == 2
-    assert "AI agent" in result.output
+    assert "AI agent" in plain(result.output)
     assert handoffs == [] and person.asked == []
 
 
@@ -199,10 +207,10 @@ def test_update_in_place_exits_nonzero_and_shows_reason_on_failure(monkeypatch, 
     result = runner.invoke(cli_app.app, ["update", "--in-place"])
 
     assert result.exit_code == 1
-    assert "Update failed" in result.output
-    assert "Failed to fetch" in result.output
-    assert "No module named pip" not in result.output  # expected noise in a uv env
-    assert "dataforge update" in result.output  # told to check again
+    assert "Update failed" in plain(result.output)
+    assert "Failed to fetch" in plain(result.output)
+    assert "No module named pip" not in plain(result.output)  # expected noise in a uv env
+    assert "dataforge update" in plain(result.output)  # told to check again
 
 
 def test_update_does_not_close_when_already_latest(monkeypatch, handoffs, person):
@@ -212,7 +220,7 @@ def test_update_does_not_close_when_already_latest(monkeypatch, handoffs, person
     result = runner.invoke(cli_app.app, ["update"])
 
     assert result.exit_code == 0
-    assert "Already up to date" in result.output
+    assert "Already up to date" in plain(result.output)
     assert handoffs == [] and person.asked == []
 
 
@@ -222,9 +230,9 @@ def test_update_close_first_shows_release_notes_and_hands_off(handoffs, person):
     result = runner.invoke(cli_app.app, ["update"])
 
     assert result.exit_code == 0
-    assert "release notes" in result.output
-    assert "major version change" in result.output  # 2.x -> 99.0.0
-    assert "DataForge will close now" in result.output
+    assert "release notes" in plain(result.output)
+    assert "major version change" in plain(result.output)  # 2.x -> 99.0.0
+    assert "DataForge will close now" in plain(result.output)
     assert [c for c, _ in handoffs] == [["uv", "tool", "upgrade", "llm-web-crawler"]]
 
 
@@ -243,7 +251,7 @@ def test_update_from_source_checkout_does_not_touch_the_install(monkeypatch, han
     result = runner.invoke(cli_app.app, ["update"])
 
     assert result.exit_code == 0
-    assert "git pull" in result.output
+    assert "git pull" in plain(result.output)
     assert handoffs == []
 
 

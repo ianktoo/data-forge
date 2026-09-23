@@ -50,6 +50,16 @@ jobs:
           fi
           echo "VERSION=$V" >> "$GITHUB_ENV"
           echo "Testing llm-web-crawler==$V"
+      # On a PR, test the published release with the smoke test it shipped
+      # with. The PR's own smoke test may check a fix that release lacks
+      # (e.g. #53), which would fail here until the next release. The PR's
+      # changes are smoke-tested by test.yml's package job instead.
+      - name: Use the smoke test from the release being tested
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          git fetch --depth=1 origin "refs/tags/v$VERSION:refs/tags/v$VERSION"
+          git checkout "v$VERSION" -- scripts/smoke_test.py
       - name: Install from PyPI (retry while the release propagates)
         shell: bash
         run: |

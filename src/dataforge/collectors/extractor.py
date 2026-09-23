@@ -31,6 +31,24 @@ class PageContent:
     links: list[str]
 
 
+def extract_links(html: str, url: str) -> list[str]:
+    """Every link on the page, absolute, in document order, for crawling.
+
+    Unlike ``extract().links`` (links inside the main content only, with
+    ``<nav>``/``<header>``/``<footer>`` stripped), this reads the whole
+    document: site navigation is exactly what a crawler needs to follow (#53).
+    """
+    soup = BeautifulSoup(html, "lxml")
+    base_tag = soup.find("base", href=True)
+    base = urljoin(url, base_tag["href"]) if base_tag else url
+    links = [
+        urljoin(base, a["href"].strip())
+        for a in soup.find_all("a", href=True)
+        if not a["href"].strip().lower().startswith(("#", "mailto:", "tel:", "javascript:", "data:"))
+    ]
+    return list(dict.fromkeys(links))
+
+
 def extract(html: str, url: str) -> PageContent:
     soup = BeautifulSoup(html, "lxml")
 
