@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.4.3] - 2026-09-22
+
+Updating and uninstalling (#45, #46, #47). `update` now closes DataForge
+first by default, and AI agents and scripts can no longer update or uninstall
+it. No changes to crawling, generation, quality or export.
+
 ### Added
 - **`dataforge uninstall`** (#46, also in the main menu): asks **Keep your data?**,
   warns that DataForge will close, then exits and removes itself with the
