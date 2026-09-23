@@ -5,6 +5,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-09-23
+
+Quick scrape (#69, first part): `dataforge scrape` and the MCP tool
+`scrape_page` fetch pages and save their text and tables (CSV, JSON), with no
+AI, API key or cost. The first step toward a modular pipeline where each stage
+can run and export on its own. No breaking changes.
+
 ### Added
 - **`dataforge scrape`: pages and tables, no AI** (#69, first part). Fetch one
   or more URLs and save each page's text (`pages.jsonl`, `page_NNN.md`) and
