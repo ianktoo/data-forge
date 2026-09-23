@@ -40,3 +40,4 @@ Convention going forward:
 | 2026-09-22 | Update bug report (Windows) | [#46](https://github.com/ianktoo/data-forge/issues/46) | `update` replaced DataForge while running; no `uninstall` command | [PR #49](https://github.com/ianktoo/data-forge/pull/49) |
 | 2026-09-22 | Update bug report (Windows) | [#47](https://github.com/ianktoo/data-forge/issues/47) | AI agents could update or uninstall DataForge without anyone reading the release notes | [PR #49](https://github.com/ianktoo/data-forge/pull/49) |
 | 2026-09-22 | Update bug report (Windows) | [#48](https://github.com/ianktoo/data-forge/issues/48) | Input sources beyond websites: PDFs, documents, audio | open |
+| 2026-09-22 | 2.4.3 release check | [#51](https://github.com/ianktoo/data-forge/issues/51) | Release binaries overwrote each other: no macOS binary, ambiguous names | [PR #52](https://github.com/ianktoo/data-forge/pull/52) |
