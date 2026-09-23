@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 from dataforge.utils import get_logger
 from dataforge.utils.url_sanitiser import is_page_url, sanitise_many
 
-from .extractor import extract
+from .extractor import extract, extract_links
 from .http import USER_AGENT
 from .sitemap import filter_urls
 
@@ -74,6 +74,17 @@ async def _playwright_fetch(client, url: str) -> str | None:
         return None
 
 
+def _crawl_links(content_links: list[str], html: str, url: str) -> list[str]:
+    """Links to follow from a page: main-content links first, then the rest
+    of the page (navigation, header, footer, sidebar).
+
+    Following only main-content links missed site navigation, so a crawl
+    without a sitemap often stopped at the home page (#53). Content links go
+    first so that, under ``max_pages``, article links win over footer links.
+    """
+    return list(dict.fromkeys([*content_links, *extract_links(html, url)]))
+
+
 async def crawl(
     client,
     seed: str,
@@ -116,7 +127,7 @@ async def crawl(
 
         page = extract(html, url)
         # Sanitise extracted links before filtering — zero trust on page content
-        clean_links = sanitise_many(page.links)
+        clean_links = sanitise_many(_crawl_links(page.links, html, url))
         same_domain = [u for u in filter_urls(clean_links, url_pattern, base_domain)
                        if is_page_url(u)]
 
@@ -126,7 +137,8 @@ async def crawl(
             rendered = await _playwright_fetch(client, url)
             if rendered:
                 rendered_page = extract(rendered, url)
-                rendered_links = sanitise_many(rendered_page.links)
+                rendered_links = sanitise_many(
+                    _crawl_links(rendered_page.links, rendered, url))
                 rendered_same = [u for u in filter_urls(rendered_links, url_pattern, base_domain)
                                  if is_page_url(u)]
                 if len(rendered_same) > len(same_domain):

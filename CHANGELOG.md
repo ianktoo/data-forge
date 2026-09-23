@@ -5,6 +5,23 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **A crawl without a sitemap missed site navigation** (#53). The fallback
+  crawler followed only links inside a page's main content, after `<nav>`,
+  `<header>` and `<footer>` had been stripped, so on most sites it found the
+  home page and stopped, whatever `crawl.max_crawl_depth` allowed. It now
+  follows every same-domain link on the page, queuing main-content links
+  first so a tight `crawl.max_crawl_pages` budget favours article pages.
+  Content extraction is unchanged: navigation text and links still never
+  reach the dataset. Sites without a sitemap now yield more pages, still
+  bounded by `max_crawl_depth` (default 3) and `max_crawl_pages` (default 50).
+- `tests/test_update_command.py` failed when `FORCE_COLOR` was set (Rich
+  colours version numbers piecewise); assertions now strip ANSI codes.
+
+### Documentation
+- `docs/TECHNICAL.tex`: the discovery section says the fallback crawl follows
+  every same-domain link, navigation included, content links first.
+
 ## [2.4.4] - 2026-09-23
 
 The standalone binaries work again (#54), and every change is now tested on

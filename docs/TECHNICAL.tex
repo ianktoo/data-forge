@@ -180,7 +180,10 @@ Candidate URLs are enumerated from \texttt{sitemap.xml} (including
 sitemap indexes) and any \texttt{Sitemap:} directive in
 \texttt{robots.txt}, before a single content page is fetched. Sites
 without a usable sitemap fall back to a breadth-first crawl bounded by
-depth and page count, and so does a seed deeper than the site root (such
+depth and page count, which follows every same-domain link on a page
+(site navigation included), queuing links in the main content first so
+that a tight page budget favours article pages. The same fallback applies
+to a seed deeper than the site root (such
 as \texttt{/3/tutorial/}) when the sitemap lists nothing under the seed's
 path. Pages that look JavaScript-rendered (few raw links relative to body
 size) can be retried through a headless browser (Playwright) when it is

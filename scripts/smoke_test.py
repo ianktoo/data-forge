@@ -38,8 +38,7 @@ MCP_TOOLS = {"explore_site", "validate_recipe", "start_run", "run_status",
              "list_sessions", "session_stats", "view_samples"}
 
 PAGE = """<html><head><title>{title}</title></head><body>
-<article><h1>{title}</h1>
-<p>See also: {nav}</p>
+<nav>{nav}</nav><article><h1>{title}</h1>
 <p>{title}: floods are among the most common and costly natural disasters. Know
 your flood risk before a storm arrives and sign up for your community's warning
 system so that official alerts reach you quickly.</p>
@@ -53,7 +52,7 @@ official all clear before returning home.</p>
 
 # path -> (title, links). The sitemap lists every page; the crawl test starts
 # at "/" and must follow links down to depth 2 (/guides/floods -> /guides/floods/kit).
-# Links sit inside <article>: the crawler only follows main-content links (#53).
+# Links sit in <nav> only, as on most sites: the crawl must follow navigation (#53).
 PAGES = {
     "/": ("Home", ["/hazards", "/guides/floods"]),
     "/hazards": ("Hazards Overview", ["/hazards/wildfires"]),
