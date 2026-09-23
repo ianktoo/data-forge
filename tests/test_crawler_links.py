@@ -284,3 +284,38 @@ async def test_crawl_is_deterministic():
 ])
 def test_trap_detection(url, trap):
     assert crawler._is_trap(url) is trap
+
+
+# ── #65: the crawl hands its downloads to the scrape stage ───────────────────
+
+async def test_crawl_caches_kept_pages_only():
+    cache: dict[str, str] = {}
+    found = await crawl(FakeClient(FILTER_SITE), f"{SITE}/", max_pages=10, max_depth=3,
+                        keep=_only_hazards, cache=cache)
+    from dataforge.utils import canonical_key
+    assert set(cache) == {canonical_key(u) for u in found}       # hubs are not cached
+    assert "<title>Flood</title>" in cache[canonical_key(f"{SITE}/hazards/flood")]
+
+
+async def test_scraper_uses_the_cache_and_fetches_only_on_a_miss(tmp_path):
+    from dataforge.agents.base import PipelineContext
+    from dataforge.agents.scraper import ScraperAgent
+    from dataforge.config.settings import Settings
+    from dataforge.storage import init_db
+    from dataforge.storage.models import DataFormat
+    from dataforge.utils import canonical_key
+
+    s = Settings(db_path=tmp_path / "s.db", output_dir=tmp_path / "out")
+    init_db(s.db_path)
+    ctx = PipelineContext(session_id="s", session_name="s", goal="", format=DataFormat.qa,
+                          seed_urls=[], settings=s)
+    ctx.page_cache[canonical_key(f"{SITE}/hazards/flood/")] = page("Flood")   # variant key
+    client = FakeClient(FILTER_SITE)
+    scraper = ScraperAgent(ctx)
+
+    assert await scraper.fetch_and_store(client, f"{SITE}/hazards/flood", tmp_path, 0)
+    assert client.fetched == []                   # served from the cache
+    assert ctx.page_cache == {}                   # and removed from it
+
+    assert await scraper.fetch_and_store(client, f"{SITE}/hazards/fire", tmp_path, 1)
+    assert client.fetched == ["/hazards/fire"]    # a miss is fetched as before

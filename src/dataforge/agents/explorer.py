@@ -113,6 +113,7 @@ class ExplorerAgent(BaseAgent):
             max_pages=self.ctx.settings.max_crawl_pages,
             max_depth=self.ctx.settings.max_crawl_depth,
             keep=self.ctx.url_filter,
+            cache=self.ctx.page_cache,
         )
         return (crawled if crawled else [seed], URLSource.crawl)
 

@@ -170,6 +170,7 @@ async def crawl(
     url_pattern: str | None = None,
     keep: Callable[[str], bool] | None = None,
     max_fetches: int | None = None,
+    cache: dict[str, str] | None = None,
 ) -> list[str]:
     """Best-first crawl from *seed*, staying on the same domain.
 
@@ -186,6 +187,10 @@ async def crawl(
     nowhere, so it is never fetched. *max_fetches* (default four times
     *max_pages*) caps every request, kept or not, so filtering cannot turn
     the crawl into an unbounded one.
+
+    *cache*, if given, receives the HTML of every page returned, keyed by
+    :func:`canonical_key`, so the scrape stage need not download it again
+    (#65). Filtered-out hubs are not cached: they are never scraped.
     """
     base_domain = urlparse(seed).netloc
     frontier = _Frontier()
@@ -209,6 +214,8 @@ async def crawl(
         html = response.text
         if keep is None or keep(url):
             found.append(url)
+            if cache is not None:
+                cache[canonical_key(url)] = html
             log.debug(f"Crawled ({len(found)}/{max_pages}) depth={depth}: {url}")
         else:
             log.debug(f"Visited (filtered out, following its links) depth={depth}: {url}")

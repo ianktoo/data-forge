@@ -4,12 +4,13 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from types import SimpleNamespace
 
 from sqlmodel import select
 
 from dataforge.collectors import HTTPClient, extract
 from dataforge.storage import DiscoveredURL, ScrapedPage, open_session
-from dataforge.utils import concurrency_ceiling
+from dataforge.utils import canonical_key, concurrency_ceiling
 
 from .base import BaseAgent, PipelineContext
 
@@ -58,6 +59,7 @@ class ScraperAgent(BaseAgent):
                 self.ctx.pause_requested = True
                 self.log.info(f"Scraping interrupted after {done}/{len(urls)} URLs — partial results saved")
 
+        self.ctx.page_cache.clear()  # pages not selected for scraping (#65)
         self.log.info(f"Scraped {len(self.ctx.scraped_page_ids)}/{len(urls)} pages")
         return self.ctx
 
@@ -74,7 +76,12 @@ class ScraperAgent(BaseAgent):
         from a worker pool, where the pool size — not a semaphore — bounds
         concurrency.
         """
-        resp = await client.get_safe(url)
+        # The fallback crawl may already have downloaded this page (#65).
+        cached = self.ctx.page_cache.pop(canonical_key(url), None)
+        if cached is not None:
+            resp = SimpleNamespace(text=cached, status_code=200)
+        else:
+            resp = await client.get_safe(url)
         if resp is None:
             self.ctx.add_error(f"Failed to fetch {url}")
             return None

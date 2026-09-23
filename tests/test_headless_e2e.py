@@ -301,3 +301,46 @@ async def test_default_export_still_carries_lineage(
     assert rows
     assert {"page_id", "chunk_id", "chunk_index", "source_url"} <= set(rows[0])
     assert len({r["page_id"] for r in rows}) > 1, "expected samples from several pages"
+
+
+# ── #65: a crawl's downloads are reused, not fetched again ──────────────────
+
+class _CountingNoSitemapHandler(_Handler):
+    """The same site with no sitemap (so discovery crawls from "/"), where
+    "/" links to every page from <nav>, and every GET is counted."""
+    hits: dict[str, int] = {}
+
+    def do_GET(self):
+        type(self).hits[self.path] = type(self).hits.get(self.path, 0) + 1
+        if self.path == "/sitemap.xml" or self.path.startswith("/sitemap"):
+            self.send_response(404)
+            self.end_headers()
+            return
+        if self.path == "/":
+            nav = " ".join(f'<a href="{p}">{p}</a>' for p in PAGES)
+            return self._send(f"<html><body><nav>{nav}</nav><main><p>Home.</p></main></body></html>",
+                              "text/html")
+        return super().do_GET()
+
+
+async def test_no_sitemap_run_fetches_each_page_once(tmp_path, isolated_settings, fake_llm):
+    _CountingNoSitemapHandler.hits = {}
+    server = HTTPServer(("127.0.0.1", 0), _CountingNoSitemapHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    site = f"http://127.0.0.1:{server.server_port}"
+    try:
+        path = _recipe(tmp_path, site, source={"urls": [f"{site}/"],
+                                               "include": ["/hazard", "/plan", "/kit"],
+                                               "exclude": ["/es/", "/press-release"]},
+                       crawl={"max_crawl_depth": 1})
+        assert await run_recipe(path) == EXIT_OK
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    hits = _CountingNoSitemapHandler.hits
+    wanted = ["/hazard/floods", "/hazard/wildfires", "/plan/family", "/kit/basics"]
+    assert all(hits.get(p) == 1 for p in wanted), hits          # crawl only, no re-fetch
+    # Filtered out by the recipe and at the depth limit (1), so they could
+    # lead nowhere: never fetched (#63).
+    assert "/press-release/2026" not in hits and "/es/hazard/floods" not in hits, hits
