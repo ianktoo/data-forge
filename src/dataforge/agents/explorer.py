@@ -6,10 +6,21 @@ from urllib.parse import urlparse
 
 from sqlmodel import select
 
-from dataforge.collectors import HTTPClient, crawl, discover_sitemap_url, filter_urls, parse_sitemap
+from dataforge.collectors import (
+    HTTPClient,
+    crawl,
+    discover_sitemap_urls,
+    filter_urls,
+    parse_sitemap,
+    parse_sitemaps,
+)
 from dataforge.storage import DiscoveredURL, URLSource, open_session
+from dataforge.utils import canonical_key
 
 from .base import BaseAgent, PipelineContext
+
+# SQLite allows 32,766 bound parameters (999 before 3.32); stay well below.
+_LOOKUP_BATCH = 500
 
 
 class ExplorerAgent(BaseAgent):
@@ -21,6 +32,7 @@ class ExplorerAgent(BaseAgent):
         all_urls: list[str] = []
 
         source_map: dict[str, str] = {}  # url -> URLSource value
+        seen_keys: set[str] = set()      # canonical keys: URL variants are one page (#61)
 
         async with HTTPClient(limiter, ignore_robots=self.ctx.ignore_robots) as client:
             # Parallelize seed URL exploration
@@ -28,7 +40,9 @@ class ExplorerAgent(BaseAgent):
             results = await asyncio.gather(*tasks)
             for (urls, source) in results:
                 for url in urls:
-                    if url not in source_map:
+                    key = canonical_key(url)
+                    if key not in seen_keys:
+                        seen_keys.add(key)
                         source_map[url] = source
                         all_urls.append(url)
 
@@ -56,10 +70,11 @@ class ExplorerAgent(BaseAgent):
             urls = await parse_sitemap(client, seed)
             return (urls if urls else [seed], URLSource.sitemap)
 
-        # 2. Try to discover sitemap
-        sitemap_url = await discover_sitemap_url(client, base)
-        if sitemap_url:
-            raw_urls = await parse_sitemap(client, sitemap_url)
+        # 2. Try to discover sitemaps (every one robots.txt lists, #60)
+        sitemap_urls = await discover_sitemap_urls(client, base)
+        sitemap_url = ", ".join(sitemap_urls)
+        if sitemap_urls:
+            raw_urls = await parse_sitemaps(client, sitemap_urls)
             if raw_urls:
                 # filter to same domain by default
                 filtered = filter_urls(raw_urls, pattern=None, base_domain=parsed.netloc)
@@ -97,20 +112,27 @@ class ExplorerAgent(BaseAgent):
             seed,
             max_pages=self.ctx.settings.max_crawl_pages,
             max_depth=self.ctx.settings.max_crawl_depth,
+            keep=self.ctx.url_filter,
+            cache=self.ctx.page_cache,
         )
         return (crawled if crawled else [seed], URLSource.crawl)
 
     def _filter_already_scraped(self, urls: list[str]) -> list[str]:
         """Remove URLs that were successfully scraped in any prior session."""
+        # Look up only the URLs just discovered (indexed on url, #59), in
+        # batches under SQLite's parameter limit, instead of loading every URL
+        # ever scraped: the cost follows this discovery, not the history.
+        scraped: set[str] = set()
         with open_session(self.ctx.settings.db_path) as db:
-            scraped = {
-                r.url for r in db.exec(
-                    select(DiscoveredURL).where(
+            for i in range(0, len(urls), _LOOKUP_BATCH):
+                batch = urls[i:i + _LOOKUP_BATCH]
+                scraped.update(db.exec(
+                    select(DiscoveredURL.url).where(
+                        DiscoveredURL.url.in_(batch),  # type: ignore[attr-defined]
                         DiscoveredURL.scraped == True,  # noqa: E712
                         DiscoveredURL.session_id != self.ctx.session_id,
                     )
-                ).all()
-            }
+                ).all())
         before = len(urls)
         filtered = [u for u in urls if u not in scraped]
         skipped = before - len(filtered)

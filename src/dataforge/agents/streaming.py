@@ -187,6 +187,7 @@ class StreamingAgent(BaseAgent):
                     *scrapers, *processors, *generators, return_exceptions=True
                 )
 
+        self.ctx.page_cache.clear()  # pages not selected for scraping (#65)
         self._finalise(llm)
         return self.ctx
 

@@ -12,12 +12,13 @@ from .errors import (
 from .logger import get_logger, setup_logging
 from .rate_limiter import RateLimiter
 from .system import concurrency_ceiling, system_info
-from .url_sanitiser import is_page_url, sanitise, sanitise_many
+from .url_sanitiser import canonical_key, is_page_url, sanitise, sanitise_many
 
 __all__ = [
     "get_logger",
     "setup_logging",
     "RateLimiter",
+    "canonical_key",
     "concurrency_ceiling",
     "system_info",
     "DataForgeError",

@@ -44,3 +44,14 @@ Convention going forward:
 | 2026-09-22 | 2.4.3 stability check | [#53](https://github.com/ianktoo/data-forge/issues/53) | No-sitemap crawl only follows links in the main content, so it misses site navigation | [PR #58](https://github.com/ianktoo/data-forge/pull/58) |
 | 2026-09-22 | 2.4.3 stability check | [#54](https://github.com/ianktoo/data-forge/issues/54) | Standalone binaries crash silently: missing data files (agent guide, litellm, tiktoken) | [PR #56](https://github.com/ianktoo/data-forge/pull/56) |
 | 2026-09-22 | 2.4.3 stability check | [#55](https://github.com/ianktoo/data-forge/issues/55) | No CI tests: lint, tests and a package smoke test on every OS and Python | [PR #56](https://github.com/ianktoo/data-forge/pull/56) |
+| 2026-09-23 | Crawl and discovery review | [#59](https://github.com/ianktoo/data-forge/issues/59) | Scraping was O(N²) per session: no index on discovered_url (session_id, url) | this PR |
+| 2026-09-23 | Crawl and discovery review | [#60](https://github.com/ianktoo/data-forge/issues/60) | Only the first robots.txt Sitemap: line was used | this PR |
+| 2026-09-23 | Crawl and discovery review | [#61](https://github.com/ianktoo/data-forge/issues/61) | URL variants (trailing slash, www, scheme, ports, query order) treated as different pages | this PR |
+| 2026-09-23 | Crawl and discovery review | [#62](https://github.com/ianktoo/data-forge/issues/62) | Crawler queued a page once per link: queue O(links), not O(pages) | this PR |
+| 2026-09-23 | Crawl and discovery review | [#63](https://github.com/ianktoo/data-forge/issues/63) | Recipe filters applied only after the crawl, wasting its page budget | this PR |
+| 2026-09-23 | Crawl and discovery review | [#64](https://github.com/ianktoo/data-forge/issues/64) | Plain BFS crawl: budget spent by link order; no crawl-trap handling | this PR |
+| 2026-09-23 | Crawl and discovery review | [#65](https://github.com/ianktoo/data-forge/issues/65) | Every page downloaded twice on sites without a sitemap | this PR |
+| 2026-09-23 | Crawl and discovery review | [#66](https://github.com/ianktoo/data-forge/issues/66) | Fetch a few pages at once in the fallback crawl and sitemap indexes | open |
+| 2026-09-23 | Crawl and discovery review | [#67](https://github.com/ianktoo/data-forge/issues/67) | Stream-parse sitemaps (iterparse, gzip) instead of loading them whole | open |
+| 2026-09-23 | Crawl and discovery review | [#68](https://github.com/ianktoo/data-forge/issues/68) | Near-duplicates across pages: MinHash + LSH over the whole session | open |
+| 2026-09-23 | Crawl and discovery review | [#69](https://github.com/ianktoo/data-forge/issues/69) | Modular pipeline: choose stages, quick scrape (no AI), tables, export any stage | open |

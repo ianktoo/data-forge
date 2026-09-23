@@ -141,7 +141,7 @@ in Section~\ref{sec:leakage}.
     Stage & Consumes & Produces & Execution & Key mechanism \\
     \midrule
     Discovery  & Seed URLs & Candidate URLs & Batch &
-      Sitemap and \texttt{robots.txt} parsing; bounded BFS fallback;
+      Sitemap and \texttt{robots.txt} parsing; bounded best-first crawl fallback;
       headless retry for JS-rendered pages \\
     Collection & URLs & Pages (Markdown) & Batch or stream &
       Per-domain rate limit; transient vs.\ permanent status handling;
@@ -177,12 +177,22 @@ log.
 \subsection{Discovery}
 \label{sec:discovery}
 Candidate URLs are enumerated from \texttt{sitemap.xml} (including
-sitemap indexes) and any \texttt{Sitemap:} directive in
-\texttt{robots.txt}, before a single content page is fetched. Sites
-without a usable sitemap fall back to a breadth-first crawl bounded by
-depth and page count, which follows every same-domain link on a page
-(site navigation included), queuing links in the main content first so
-that a tight page budget favours article pages. The same fallback applies
+sitemap indexes) and every \texttt{Sitemap:} directive in
+\texttt{robots.txt}, before a single content page is fetched, and are
+deduplicated by a canonical key (trailing slash, \texttt{www.}, scheme,
+default port, query order and tracking parameters ignored) while the URL
+itself is kept as published. Sites without a usable sitemap fall back to
+a best-first crawl bounded by depth and page count. It follows every
+same-domain link on a page (site navigation included) from a priority
+queue ordered by depth and then, within a depth, by preferring real
+pages over likely crawl traps (pagination, date archives, search and
+filter URLs), pages matching the recipe's include, exclude and language
+filters over hubs that do not, main-content links over navigation, and
+shallower paths; a counter keeps the order deterministic. Filtered-out
+hubs are visited only when they can lead further and do not count toward
+the page budget, a hard cap bounds total requests, each page is queued
+once, and the collection stage reuses the crawl's downloads instead of
+fetching each page twice. The same fallback applies
 to a seed deeper than the site root (such
 as \texttt{/3/tutorial/}) when the sitemap lists nothing under the seed's
 path. Pages that look JavaScript-rendered (few raw links relative to body
@@ -1102,7 +1112,7 @@ the threshold at proportionally higher cost, and using a different model
 from the generator would reduce self-preference. Its agreement with human judgement is not yet measured: the
 blind audit of Section~\ref{sec:eval-limits} is built but its labels are
 pending, and in the benchmark the same model generated and judged every
-sample. The BFS fallback crawler and SPA (JavaScript-rendered page)
+sample. The fallback crawler and SPA (JavaScript-rendered page)
 detection are heuristic rather than guaranteed to find all in-scope
 content on sites without a sitemap. Group-aware splitting addresses
 leakage from the generation stage's own repeated sampling per chunk, but

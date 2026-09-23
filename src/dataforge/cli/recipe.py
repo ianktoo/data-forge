@@ -303,23 +303,29 @@ class Recipe(BaseModel):
         anything else is a plain substring, matching the interactive URL
         review's filter syntax.
         """
-        out = urls
-
-        if self.source.language:
-            want = self.source.language.lower()
-            if want == "en":
-                # English is served from the root on both FEMA and Ready.gov.
-                out = [u for u in out if not url_locale(u)]
-            else:
-                out = [u for u in out if url_locale(u) == want]
-
-        if self.source.include:
-            out = [u for u in out if any(_matches(p, u) for p in self.source.include)]
-        if self.source.exclude:
-            out = [u for u in out if not any(_matches(p, u) for p in self.source.exclude)]
+        out = [u for u in urls if self.url_matches(u)]
         if self.source.max_urls:
             out = out[: self.source.max_urls]
         return out
+
+    def url_matches(self, url: str) -> bool:
+        """True if *url* passes the language, include and exclude filters.
+
+        :meth:`filter_urls` is this plus the ``max_urls`` cap. The fallback
+        crawl also uses it, so its page budget is spent on pages the recipe
+        keeps (#63).
+        """
+        if self.source.language:
+            want = self.source.language.lower()
+            locale = url_locale(url)
+            # English is served from the root on both FEMA and Ready.gov.
+            if (locale != "") if want == "en" else (locale != want):
+                return False
+        if self.source.include and not any(_matches(p, url) for p in self.source.include):
+            return False
+        if self.source.exclude and any(_matches(p, url) for p in self.source.exclude):
+            return False
+        return True
 
     def export_kwargs(self) -> dict[str, Any]:
         e = self.export

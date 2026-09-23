@@ -282,3 +282,97 @@ class TestDiscoverSitemapUrl:
 
         result = await discover_sitemap_url(client, "https://example.com")
         assert result == "https://example.com/sitemap.xml"
+
+
+class TestMultipleSitemaps:
+    """#60: every Sitemap: line in robots.txt is used, not just the first."""
+
+    @staticmethod
+    def _client(robots: str, sitemaps: dict[str, str]):
+        client = MagicMock()
+        fetched: list[str] = []
+
+        async def get(url, **kw):
+            r = MagicMock()
+            r.text = robots if url.endswith("/robots.txt") else ""
+            return r
+
+        async def get_safe(url, **kw):
+            fetched.append(url)
+            if url not in sitemaps:
+                return None
+            r = MagicMock()
+            r.status_code = 200
+            r.text = sitemaps[url]
+            return r
+
+        client.get = AsyncMock(side_effect=get)
+        client.get_safe = AsyncMock(side_effect=get_safe)
+        client.fetched = fetched
+        return client
+
+    @staticmethod
+    def _urlset(*locs):
+        body = "".join(f"<url><loc>{u}</loc></url>" for u in locs)
+        return f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</urlset>'
+
+    @pytest.mark.asyncio
+    async def test_all_robots_sitemaps_are_returned_in_order(self):
+        from dataforge.collectors.sitemap import discover_sitemap_urls
+        robots = ("User-agent: *\nSitemap: https://example.com/pages.xml\n"
+                  "  sitemap: https://example.com/news.xml\n"
+                  "Sitemap: https://example.com/pages.xml\n"      # duplicate
+                  "Sitemap: /relative.xml\n")
+        client = self._client(robots, {})
+        assert await discover_sitemap_urls(client, "https://example.com") == [
+            "https://example.com/pages.xml",
+            "https://example.com/news.xml",
+            "https://example.com/relative.xml",
+        ]
+        # robots.txt named sitemaps, so the common paths are not probed.
+        assert client.fetched == []
+
+    @pytest.mark.asyncio
+    async def test_first_sitemap_helper_still_returns_one(self):
+        robots = "Sitemap: https://example.com/a.xml\nSitemap: https://example.com/b.xml\n"
+        client = self._client(robots, {})
+        assert await discover_sitemap_url(client, "https://example.com") == "https://example.com/a.xml"
+
+    @pytest.mark.asyncio
+    async def test_parse_sitemaps_merges_and_dedupes(self):
+        from dataforge.collectors.sitemap import parse_sitemaps
+        index = ('<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                 "<sitemap><loc>https://example.com/pages.xml</loc></sitemap></sitemapindex>")
+        client = self._client("", {
+            "https://example.com/pages.xml": self._urlset("https://example.com/a", "https://example.com/b"),
+            "https://example.com/news.xml": self._urlset("https://example.com/b", "https://example.com/n"),
+            "https://example.com/index.xml": index,
+        })
+        urls = await parse_sitemaps(client, [
+            "https://example.com/pages.xml",
+            "https://example.com/news.xml",
+            "https://example.com/index.xml",   # points back at pages.xml
+        ])
+        assert urls == ["https://example.com/a", "https://example.com/b", "https://example.com/n"]
+        assert client.fetched.count("https://example.com/pages.xml") == 1
+
+    @pytest.mark.asyncio
+    async def test_explorer_uses_pages_from_every_sitemap(self, tmp_path):
+        from unittest.mock import patch as _patch
+
+        from dataforge.agents.base import PipelineContext
+        from dataforge.agents.explorer import ExplorerAgent
+        from dataforge.config.settings import Settings
+        from dataforge.storage.models import DataFormat
+
+        robots = "Sitemap: https://example.com/pages.xml\nSitemap: https://example.com/news.xml\n"
+        client = self._client(robots, {
+            "https://example.com/pages.xml": self._urlset("https://example.com/a"),
+            "https://example.com/news.xml": self._urlset("https://example.com/n"),
+        })
+        ctx = PipelineContext(session_id="t", session_name="t", goal="", format=DataFormat.qa,
+                              seed_urls=[], settings=Settings(db_path=tmp_path / "x.db"))
+        with _patch("dataforge.agents.explorer.crawl", AsyncMock()) as crawl:
+            urls, _ = await ExplorerAgent(ctx)._explore_seed(client, "https://example.com/")
+        crawl.assert_not_awaited()
+        assert urls == ["https://example.com/a", "https://example.com/n"]

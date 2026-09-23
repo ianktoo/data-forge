@@ -7,7 +7,7 @@ from urllib.parse import urljoin, urlparse
 
 import xmltodict
 
-from dataforge.utils import get_logger
+from dataforge.utils import canonical_key, get_logger
 
 log = get_logger("sitemap")
 
@@ -19,26 +19,57 @@ def _strip_www(domain: str) -> str:
     return domain.removeprefix("www.")
 
 
-async def discover_sitemap_url(client, base_url: str) -> str | None:
-    """Try common sitemap paths; also check robots.txt Sitemap directive."""
-    # robots.txt
+async def discover_sitemap_urls(client, base_url: str) -> list[str]:
+    """Every sitemap the site declares, else the first common path that works.
+
+    robots.txt may list any number of ``Sitemap:`` lines, and large sites
+    often split sitemaps by section or language; taking only the first one
+    missed every page listed only in the others (#60).
+    """
+    found: list[str] = []
     try:
         r = await client.get(urljoin(base_url, "/robots.txt"), check_robots=False)
         for line in r.text.splitlines():
+            line = line.strip()
             if line.lower().startswith("sitemap:"):
-                url = line.split(":", 1)[1].strip()
-                log.info(f"Found sitemap in robots.txt: {url}")
-                return url
+                url = urljoin(base_url, line.split(":", 1)[1].strip())
+                if url and url not in found:
+                    found.append(url)
     except Exception:
         pass
+    if found:
+        log.info(f"Found {len(found)} sitemap(s) in robots.txt: {', '.join(found)}")
+        return found
 
     for path in _SITEMAP_PATHS:
         url = urljoin(base_url, path)
         r = await client.get_safe(url)
         if r and r.status_code == 200 and ("<urlset" in r.text or "<sitemapindex" in r.text):
             log.info(f"Found sitemap: {url}")
-            return url
-    return None
+            return [url]
+    return []
+
+
+async def discover_sitemap_url(client, base_url: str) -> str | None:
+    """The first sitemap :func:`discover_sitemap_urls` finds, or None."""
+    urls = await discover_sitemap_urls(client, base_url)
+    return urls[0] if urls else None
+
+
+async def parse_sitemaps(client, sitemap_urls: list[str]) -> list[str]:
+    """Page URLs from several sitemaps, deduplicated in first-seen order.
+    One ``visited`` set is shared, so an index listed twice (or two indexes
+    pointing at the same child) is fetched once."""
+    visited: set[str] = set()
+    seen: set[str] = set()
+    out: list[str] = []
+    for sm in sitemap_urls:
+        for u in await parse_sitemap(client, sm, visited):
+            key = canonical_key(u)  # URL variants are one page (#61)
+            if key not in seen:
+                seen.add(key)
+                out.append(u)
+    return out
 
 
 async def parse_sitemap(client, sitemap_url: str, visited: set[str] | None = None) -> list[str]:

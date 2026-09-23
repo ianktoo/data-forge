@@ -28,6 +28,15 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
 ]
 
 
+# Indexes added after a table's first release. create_all() creates a
+# table's indexes only together with the table, so databases made before an
+# index existed get it here. CREATE INDEX IF NOT EXISTS is idempotent.
+_ADDITIVE_INDEXES: list[tuple[str, str, str]] = [
+    ("ix_discovered_url_session_url", "discovered_url", "session_id, url"),  # #59
+    ("ix_discovered_url_url", "discovered_url", "url"),                      # #59
+]
+
+
 def _apply_additive_migrations(engine) -> None:  # type: ignore[no-untyped-def]
     with engine.connect() as conn:
         for table, column, ddl_type in _ADDITIVE_COLUMNS:
@@ -36,6 +45,8 @@ def _apply_additive_migrations(engine) -> None:  # type: ignore[no-untyped-def]
             }
             if column not in existing:
                 conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
+        for name, table, columns in _ADDITIVE_INDEXES:
+            conn.exec_driver_sql(f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({columns})")
         conn.commit()
 
 
