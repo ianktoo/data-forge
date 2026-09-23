@@ -205,7 +205,7 @@ attribution is appreciated but not required:
 ```
 Too, I. K. (2026). DataForge: A Streaming, Leak-Aware Pipeline for Synthetic
 LLM Fine-Tuning Datasets (Technical Note). Zenodo.
-https://doi.org/10.5281/zenodo.22906072
+https://doi.org/10.5281/zenodo.22906071
 ```
 
 ```bibtex
@@ -216,10 +216,15 @@ https://doi.org/10.5281/zenodo.22906072
   type        = {Technical Note},
   institution = {Zenodo},
   year        = {2026},
-  doi         = {10.5281/zenodo.22906072},
-  url         = {https://doi.org/10.5281/zenodo.22906072}
+  doi         = {10.5281/zenodo.22906071},
+  url         = {https://doi.org/10.5281/zenodo.22906071}
 }
 ```
 
 GitHub's "Cite this repository" button reads the same details from
 [`CITATION.cff`](CITATION.cff).
+
+That DOI covers every version of the technical note and always resolves to
+the latest. To cite one exact version, use its own DOI: v1.1.0 is
+[10.5281/zenodo.22908858](https://doi.org/10.5281/zenodo.22908858) and v1.0.0
+is [10.5281/zenodo.22906072](https://doi.org/10.5281/zenodo.22906072).

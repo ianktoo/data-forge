@@ -3,6 +3,18 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Documentation
+- The technical note is published on Zenodo. README and `CITATION.cff` now cite
+  its concept DOI, 10.5281/zenodo.22906071, which always resolves to the latest
+  version; the README also lists each version's own DOI (v1.0.0:
+  10.5281/zenodo.22906072; v1.1.0: 10.5281/zenodo.22908858).
+- `docs/TECHNICAL.tex`: title page carries the v1.1.0 DOI,
+  10.5281/zenodo.22908858. v1.1.0 adds the author's full name, affiliation and
+  ORCID and the 2.4.2 changes (Unsloth lineage sidecar, within-split shuffle,
+  OpenAI-compatible local servers).
+
 ## [2.4.2] - 2026-09-22
 
 Closes every open issue (#19, #20, #22, #40, #41). No breaking changes.
