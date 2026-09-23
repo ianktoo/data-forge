@@ -210,6 +210,9 @@ class Orchestrator:
                     stage=PipelineStage.discovery,
                     status=SessionStatus.active,
                     seed_urls=json.dumps(self.ctx.seed_urls),
+                    # A recipe may set its own output_dir; later commands
+                    # (stats, resume) need it to find this session's files.
+                    config_json=json.dumps({"output_dir": str(s.output_dir.resolve())}),
                 ))
                 db.commit()
 
@@ -238,7 +241,8 @@ class Orchestrator:
                     "samples":    len(self.ctx.synthetic_sample_ids),
                     "approved":   len(self.ctx.approved_sample_ids),
                 }
-                merged = {k: max(existing.get(k, 0), v) for k, v in new.items()}
+                # Keep every other key (e.g. output_dir); max-merge the counters.
+                merged = {**existing, **{k: max(existing.get(k, 0), v) for k, v in new.items()}}
                 session.updated_at = datetime.now(UTC)
                 session.config_json = json.dumps(merged)
                 db.add(session)

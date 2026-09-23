@@ -15,7 +15,7 @@ from pathlib import Path
 from sqlmodel import select
 
 from .database import open_session
-from .models import SyntheticSample
+from .models import ExportRecord, SyntheticSample
 
 _HISTOGRAM_BUCKETS = 5  # score histogram: 5 buckets over [0, 1]
 
@@ -96,6 +96,17 @@ def _score_stats(values: list[float]) -> ScoreStats:
     )
 
 
+def _split_counts_in(run_dir: Path) -> dict[str, int] | None:
+    """Rows per split file in one export folder, or None if it has none."""
+    counts: dict[str, int] = {}
+    for split_name in ("train", "validation", "test"):
+        f = run_dir / f"dataset_{split_name}.jsonl"
+        if f.exists():
+            with f.open(encoding="utf-8") as fh:
+                counts[split_name] = sum(1 for line in fh if line.strip())
+    return counts or None
+
+
 def _latest_split_counts(session_dir: Path) -> dict[str, int] | None:
     """Count lines in the most recent dataset_{train,validation,test}.jsonl
     export, if one exists. Returns None if this session was never exported
@@ -106,12 +117,24 @@ def _latest_split_counts(session_dir: Path) -> dict[str, int] | None:
         return None
     run_dirs = sorted((d for d in exports_dir.iterdir() if d.is_dir()), reverse=True)
     for run_dir in run_dirs:
-        counts: dict[str, int] = {}
-        for split_name in ("train", "validation", "test"):
-            f = run_dir / f"dataset_{split_name}.jsonl"
-            if f.exists():
-                with f.open(encoding="utf-8") as fh:
-                    counts[split_name] = sum(1 for line in fh if line.strip())
+        counts = _split_counts_in(run_dir)
+        if counts:
+            return counts
+    return None
+
+
+def _split_counts_from_export_records(db_path: Path, session_id: str) -> dict[str, int] | None:
+    """Fallback for sessions whose folder is not where the settings point (a
+    recipe with its own output_dir, recorded before sessions stored it): every
+    local export records its exact folder."""
+    with open_session(db_path) as db:
+        records = db.exec(
+            select(ExportRecord)
+            .where(ExportRecord.session_id == session_id)
+            .where(ExportRecord.destination == "local")
+        ).all()
+    for rec in sorted(records, key=lambda r: r.exported_at, reverse=True):
+        counts = _split_counts_in(Path(rec.path_or_url))
         if counts:
             return counts
     return None
@@ -150,5 +173,6 @@ def compute_session_stats(db_path: Path, session_id: str, session_dir: Path) -> 
         question_length=_length_stats(q_lengths),
         answer_length=_length_stats(a_lengths),
         score=_score_stats(scores),
-        split_counts=_latest_split_counts(session_dir),
+        split_counts=_latest_split_counts(session_dir)
+        or _split_counts_from_export_records(db_path, session_id),
     )
