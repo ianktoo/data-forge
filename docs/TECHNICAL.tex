@@ -813,7 +813,7 @@ shell commands can drive the CLI, provided it knows which commands are
 safe to call without a terminal. \texttt{dataforge agent-guide} prints a
 guide shipped inside the installed package, so it is available after
 \texttt{pip install} without the source repository. It separates the
-non-interactive commands (\texttt{run}, \texttt{run --dry-run},
+non-interactive commands (\texttt{scrape}, \texttt{run}, \texttt{run --dry-run},
 \texttt{init-recipe}, \texttt{explore}, and the \texttt{--json} forms of
 \texttt{sessions}, \texttt{stats} and \texttt{view}) from those that open
 interactive menus and would hang a non-TTY shell, and states the
@@ -831,7 +831,7 @@ the client launches the server as a subprocess and exchanges messages over
 its standard streams \cite{mcpspec2026}. \texttt{dataforge mcp} is such a
 server; in Claude Code, for example, it is registered with
 \texttt{claude mcp add dataforge -{}- dataforge mcp}
-\cite{claudecodemcp}. The server exposes seven tools
+\cite{claudecodemcp}. The server exposes eight tools
 (Table~\ref{tab:mcp-tools}).
 
 \begin{table}[h]
@@ -843,6 +843,7 @@ server; in Claude Code, for example, it is registered with
     \toprule
     Tool & Effect & Purpose \\
     \midrule
+    \texttt{scrape\_page}     & Network read   & One page's text and tables, no LLM (when only the content is wanted) \\
     \texttt{explore\_site}    & Network read   & List a site's sitemap URLs before a recipe is written \\
     \texttt{validate\_recipe} & Read-only      & Dry-run a recipe and return the execution plan \\
     \texttt{start\_run}       & Crawls, spends & Launch \texttt{dataforge run} in the background; return a run ID \\

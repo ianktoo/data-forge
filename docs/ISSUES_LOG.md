@@ -54,4 +54,4 @@ Convention going forward:
 | 2026-09-23 | Crawl and discovery review | [#66](https://github.com/ianktoo/data-forge/issues/66) | Fetch a few pages at once in the fallback crawl and sitemap indexes | open |
 | 2026-09-23 | Crawl and discovery review | [#67](https://github.com/ianktoo/data-forge/issues/67) | Stream-parse sitemaps (iterparse, gzip) instead of loading them whole | open |
 | 2026-09-23 | Crawl and discovery review | [#68](https://github.com/ianktoo/data-forge/issues/68) | Near-duplicates across pages: MinHash + LSH over the whole session | open |
-| 2026-09-23 | Crawl and discovery review | [#69](https://github.com/ianktoo/data-forge/issues/69) | Modular pipeline: choose stages, quick scrape (no AI), tables, export any stage | open |
+| 2026-09-23 | Crawl and discovery review | [#69](https://github.com/ianktoo/data-forge/issues/69) | Modular pipeline: choose stages, quick scrape (no AI), tables, export any stage | part 1 (quick scrape, tables, MCP): this PR; stages and per-stage export open |

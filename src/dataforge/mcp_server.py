@@ -133,6 +133,26 @@ async def explore_site(url: str, limit: int = 200) -> dict:
             "total": len(urls), "urls": urls[:limit]}
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
+async def scrape_page(url: str, tables: bool = True, max_chars: int = 20000) -> dict:
+    """Fetch one page and return its text and tables. No AI, spends nothing.
+
+    Use this when the user wants a page's content or the data in its tables
+    (a list, a directory, a price table), not a fine-tuning dataset. Obeys
+    robots.txt and the rate limit. Each table comes back as `headers` plus
+    `rows`; `markdown` is cut to `max_chars`. For many pages, or files on
+    disk, run `dataforge --json scrape <url>... -o <folder>` instead.
+    """
+    from dataforge.scrape import scrape_urls
+
+    s = get_settings()
+    (page,) = await scrape_urls([url], rate_limit=s.rate_limit, tables=tables, check=True)
+    out = page.to_dict(include_text=False)
+    out["markdown"] = page.markdown[:max_chars]
+    out["truncated"] = len(page.markdown) > max_chars
+    return out
+
+
 @mcp.tool(annotations=_READ_ONLY)
 def validate_recipe(recipe_path: str) -> dict:
     """Validate a recipe and return the plan `dataforge run` would execute. Spends nothing."""
