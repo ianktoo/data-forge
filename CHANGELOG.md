@@ -31,6 +31,16 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   chunking, generation, the judge and export. It spends nothing. Binaries are
   smoke-tested before upload, and `release-smoke.yml` installs each PyPI
   release with pip and uv on every OS and Python and tests it.
+- **Releases are gated on the full suite.** Both release workflows call
+  `test.yml` and publish nothing to PyPI or GitHub Releases unless it passes.
+  CONTRIBUTING gains "Keeping one fix from breaking another", and PRs get a
+  checklist template.
+
+### Fixed (tests)
+- `test_full_headless_run_produces_an_export` read the first `*.jsonl` under
+  the output folder, which on Linux and macOS was a chunk file, not the
+  dataset export. It passed on Windows only because of file ordering; it now
+  picks `dataset*.jsonl`.
 
 ### Documentation
 - `docs/INSTALLATION.md`, `CICD.md`: the real binary names, no Intel Mac

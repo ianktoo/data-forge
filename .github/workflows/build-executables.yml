@@ -17,6 +17,11 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # On a release tag, the full CI suite must pass before the release is made.
+  tests:
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/test.yml
+
   build:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -84,7 +89,7 @@ jobs:
           if-no-files-found: error
 
   create-release:
-    needs: build
+    needs: [tests, build]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

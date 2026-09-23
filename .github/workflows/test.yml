@@ -3,15 +3,20 @@ name: Tests
 # Every push to master and every pull request: lint, the test suite on each
 # OS and supported Python, and the built package installed and smoke-tested as
 # a user would run it (scripts/smoke_test.py, offline, spends nothing).
+# The release workflows call this too (workflow_call) and publish nothing
+# unless it passes, so a fix that breaks another component cannot ship.
 
 on:
   push:
     branches: [master]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
-  group: tests-${{ github.ref }}
+  # github.workflow is the caller's name under workflow_call, so the two
+  # release workflows running on the same tag do not cancel each other.
+  group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:

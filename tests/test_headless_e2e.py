@@ -205,9 +205,12 @@ async def test_full_headless_run_produces_an_export(
     # [...]}, no "messages" key) and its lineage sidecar
     # dataset_unsloth.meta.jsonl, and glob order isn't guaranteed across
     # platforms. Pick the primary export explicitly rather than relying on order.
+    # Match the export's name too: the session folder also holds the stages'
+    # own JSONL files (chunks have "content", not "messages"), and on Linux
+    # and macOS rglob returned one of those first.
     exports = [
         p
-        for p in isolated_settings.output_dir.rglob("*.jsonl")
+        for p in isolated_settings.output_dir.rglob("dataset*.jsonl")
         if "_unsloth" not in p.name
     ]
     assert exports, "no primary JSONL export was written"
