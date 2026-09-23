@@ -67,7 +67,8 @@ def sanitise(url: str) -> str | None:
     # Strip fragment (never sent to server; useless for crawling)
     fragment = ""
 
-    # Strip tracking query params, keep the rest in stable sorted order
+    # Strip tracking query params; keep the rest in their original order
+    # (canonical_key sorts them when comparing URLs)
     qs_pairs = [(k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True)
                 if k.lower() not in _TRACKING_PARAMS]
     query = urlencode(qs_pairs)
@@ -103,3 +104,32 @@ def is_page_url(url: str) -> bool:
     """Return False for URLs that point to non-HTML resources (images, PDFs, etc.)."""
     path = urlparse(url).path
     return not _SKIP_EXTENSIONS.search(path)
+
+
+_DEFAULT_PORTS = {"http": "80", "https": "443"}
+
+
+def canonical_key(url: str) -> str:
+    """A key that is equal for URL variants that are almost always one page.
+
+    Used only to decide "have we seen this page?" (crawl frontier, discovery
+    dedup), never to rewrite the URL that is fetched or stored: a few servers
+    do treat ``/a`` and ``/a/`` differently, so the URL as written is kept.
+    Variants that share a key (#61):
+
+    - scheme: ``http`` and ``https``
+    - host: case, a leading ``www.``, the default port
+    - path: a trailing slash (except the root ``/``); empty path is ``/``
+    - query: parameter order, and tracking parameters (via :func:`sanitise`)
+    - fragment: dropped
+    """
+    parsed = urlparse(sanitise(url) or url.strip())
+    host = (parsed.hostname or "").lower().removeprefix("www.")
+    port = parsed.port
+    if port is not None and str(port) != _DEFAULT_PORTS.get(parsed.scheme.lower()):
+        host = f"{host}:{port}"
+    path = parsed.path or "/"
+    if len(path) > 1:
+        path = path.rstrip("/") or "/"
+    query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)))
+    return f"{host}{path}" + (f"?{query}" if query else "")

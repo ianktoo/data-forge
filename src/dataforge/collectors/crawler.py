@@ -12,7 +12,7 @@ from collections import deque
 from urllib.parse import urlparse
 
 from dataforge.utils import get_logger
-from dataforge.utils.url_sanitiser import is_page_url, sanitise_many
+from dataforge.utils.url_sanitiser import canonical_key, is_page_url, sanitise_many
 
 from .extractor import extract, extract_links
 from .http import USER_AGENT
@@ -106,9 +106,10 @@ async def crawl(
 
     while queue and len(found) < max_pages:
         url, depth = queue.popleft()
-        if url in visited:
+        key = canonical_key(url)  # /a and /a/, www., http(s) are one page (#61)
+        if key in visited:
             continue
-        visited.add(url)
+        visited.add(key)
 
         response = await client.get_safe(url)
         if not response or response.status_code != 200:
@@ -146,7 +147,7 @@ async def crawl(
                     same_domain = rendered_same
 
         for link in same_domain:
-            if link not in visited:
+            if canonical_key(link) not in visited:
                 queue.append((link, depth + 1))
 
     log.info(f"Crawl complete: {len(found)} pages from {seed}")

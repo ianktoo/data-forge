@@ -15,6 +15,7 @@ from dataforge.collectors import (
     parse_sitemaps,
 )
 from dataforge.storage import DiscoveredURL, URLSource, open_session
+from dataforge.utils import canonical_key
 
 from .base import BaseAgent, PipelineContext
 
@@ -31,6 +32,7 @@ class ExplorerAgent(BaseAgent):
         all_urls: list[str] = []
 
         source_map: dict[str, str] = {}  # url -> URLSource value
+        seen_keys: set[str] = set()      # canonical keys: URL variants are one page (#61)
 
         async with HTTPClient(limiter, ignore_robots=self.ctx.ignore_robots) as client:
             # Parallelize seed URL exploration
@@ -38,7 +40,9 @@ class ExplorerAgent(BaseAgent):
             results = await asyncio.gather(*tasks)
             for (urls, source) in results:
                 for url in urls:
-                    if url not in source_map:
+                    key = canonical_key(url)
+                    if key not in seen_keys:
+                        seen_keys.add(key)
                         source_map[url] = source
                         all_urls.append(url)
 

@@ -7,7 +7,7 @@ from urllib.parse import urljoin, urlparse
 
 import xmltodict
 
-from dataforge.utils import get_logger
+from dataforge.utils import canonical_key, get_logger
 
 log = get_logger("sitemap")
 
@@ -65,8 +65,9 @@ async def parse_sitemaps(client, sitemap_urls: list[str]) -> list[str]:
     out: list[str] = []
     for sm in sitemap_urls:
         for u in await parse_sitemap(client, sm, visited):
-            if u not in seen:
-                seen.add(u)
+            key = canonical_key(u)  # URL variants are one page (#61)
+            if key not in seen:
+                seen.add(key)
                 out.append(u)
     return out
 
