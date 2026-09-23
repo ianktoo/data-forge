@@ -9,6 +9,7 @@ further links from that URL.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
 from urllib.parse import urlparse
 
 from dataforge.utils import get_logger
@@ -23,6 +24,8 @@ log = get_logger("crawler")
 # A page with fewer discovered links than this, but more than _SPA_MIN_BODY_LEN
 # characters of body text, is treated as a potential SPA and retried with Playwright.
 _SPA_LINK_THRESHOLD = 3
+# With a URL filter, at most this many fetches per page kept (see crawl()).
+_FETCH_CAP_FACTOR = 4
 _SPA_MIN_BODY_LEN = 500
 
 
@@ -92,12 +95,22 @@ async def crawl(
     max_pages: int = 50,
     max_depth: int = 3,
     url_pattern: str | None = None,
+    keep: Callable[[str], bool] | None = None,
+    max_fetches: int | None = None,
 ) -> list[str]:
     """BFS crawl starting from *seed*, staying on the same domain.
 
     Uses the existing HTTPClient (robots.txt + rate limiting already included).
     Falls back to Playwright for pages that look like SPAs (few links, rich body).
     Returns a deduplicated list of discovered URLs in visit order.
+
+    *keep* is the recipe's URL filter (#63). Pages that fail it are still
+    visited when they can lead further (a hub such as the home page often
+    links to what is wanted), but they are not returned and do not count
+    toward *max_pages*. One that fails it at the depth limit could lead
+    nowhere, so it is never fetched. *max_fetches* (default four times
+    *max_pages*) caps every request, kept or not, so filtering cannot turn
+    the crawl into an unbounded one.
     """
     base_domain = urlparse(seed).netloc
     # Canonical keys of every URL ever queued (#61: /a and /a/, www.,
@@ -108,8 +121,12 @@ async def crawl(
     found: list[str] = []
     queue: deque[tuple[str, int]] = deque([(seed, 0)])
 
-    while queue and len(found) < max_pages:
+    fetch_cap = max_fetches if max_fetches is not None else max_pages * _FETCH_CAP_FACTOR
+    fetches = 0
+
+    while queue and len(found) < max_pages and fetches < fetch_cap:
         url, depth = queue.popleft()
+        fetches += 1
 
         response = await client.get_safe(url)
         if not response or response.status_code != 200:
@@ -120,8 +137,11 @@ async def crawl(
             continue
 
         html = response.text
-        found.append(url)
-        log.debug(f"Crawled ({len(found)}/{max_pages}) depth={depth}: {url}")
+        if keep is None or keep(url):
+            found.append(url)
+            log.debug(f"Crawled ({len(found)}/{max_pages}) depth={depth}: {url}")
+        else:
+            log.debug(f"Visited (filtered out, following its links) depth={depth}: {url}")
 
         if depth >= max_depth:
             continue
@@ -146,11 +166,15 @@ async def crawl(
                     log.info(f"Playwright found {len(rendered_same)} links vs {len(same_domain)} from static fetch")
                     same_domain = rendered_same
 
+        next_is_leaf = depth + 1 >= max_depth  # its links will not be followed
         for link in same_domain:
             key = canonical_key(link)
-            if key not in seen:
-                seen.add(key)
-                queue.append((link, depth + 1))
+            if key in seen:
+                continue
+            if next_is_leaf and keep is not None and not keep(link):
+                continue  # filtered out and could lead nowhere: never fetch it
+            seen.add(key)
+            queue.append((link, depth + 1))
 
     log.info(f"Crawl complete: {len(found)} pages from {seed}")
     return found

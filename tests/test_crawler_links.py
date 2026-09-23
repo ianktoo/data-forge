@@ -161,3 +161,65 @@ async def test_each_page_is_queued_once_even_when_linked_everywhere(monkeypatch)
     assert sorted(paths(found)) == sorted(paths_)
     assert _CountingDeque.appended == n - 1      # every page but the seed, once
     assert _CountingDeque.peak <= n - 1
+
+
+# ── #63: the recipe's URL filter is applied during the crawl ─────────────────
+
+# A hub home page links to news and about pages (filtered out by the recipe)
+# and to /hazards, whose pages are what the recipe wants.
+FILTER_SITE = {
+    "/": page("Home", nav=["/news/1", "/news/2", "/news/3", "/about", "/hazards"]),
+    "/news/1": page("N1"), "/news/2": page("N2"), "/news/3": page("N3"),
+    "/about": page("About", nav=["/about/team"]),
+    "/about/team": page("Team"),
+    "/hazards": page("Hazards", nav=["/hazards/flood", "/hazards/fire", "/hazards/heat"]),
+    "/hazards/flood": page("Flood"), "/hazards/fire": page("Fire"), "/hazards/heat": page("Heat"),
+}
+
+
+def _only_hazards(url: str) -> bool:
+    return "/hazards" in url
+
+
+async def test_filtered_crawl_spends_its_budget_on_wanted_pages():
+    found = paths(await crawl(FakeClient(FILTER_SITE), f"{SITE}/", max_pages=4,
+                              max_depth=3, keep=_only_hazards))
+    # The home page is visited as a hub but not returned or counted.
+    assert found == ["/hazards", "/hazards/flood", "/hazards/fire", "/hazards/heat"]
+
+
+async def test_unfiltered_crawl_would_waste_the_same_budget():
+    """The same budget without the filter, as before #63: news pages crowd
+    out what the recipe wants, and the post-crawl filter keeps one page."""
+    found = paths(await crawl(FakeClient(FILTER_SITE), f"{SITE}/", max_pages=4, max_depth=3))
+    assert [p for p in found if _only_hazards(p)] == []
+
+
+async def test_filtered_out_pages_at_the_depth_limit_are_never_fetched():
+    client = FakeClient(FILTER_SITE)
+    await crawl(client, f"{SITE}/", max_pages=50, max_depth=1, keep=_only_hazards)
+    # Depth 1 is the limit: /news/* and /about could lead nowhere, so they
+    # are skipped outright; /hazards is kept.
+    assert sorted(client.fetched) == ["/", "/hazards"]
+
+
+async def test_fetch_cap_bounds_a_filter_that_matches_nothing():
+    client = FakeClient(FILTER_SITE)
+    found = await crawl(client, f"{SITE}/", max_pages=50, max_depth=3,
+                        keep=lambda u: False, max_fetches=3)
+    assert found == []
+    assert len(client.fetched) == 3
+
+
+def test_recipe_url_matches_agrees_with_filter_urls():
+    from dataforge.cli.recipe import Recipe
+    r = Recipe.model_validate({
+        "version": 1, "name": "t",
+        "source": {"urls": ["https://example.org/"], "language": "en",
+                   "include": ["/hazards", "re:/kit$"], "exclude": ["/hazards/old"]},
+    })
+    urls = ["https://example.org/hazards/flood", "https://example.org/es/hazards/flood",
+            "https://example.org/hazards/old", "https://example.org/build/kit",
+            "https://example.org/news"]
+    assert r.filter_urls(urls) == [u for u in urls if r.url_matches(u)]
+    assert r.filter_urls(urls) == ["https://example.org/hazards/flood", "https://example.org/build/kit"]

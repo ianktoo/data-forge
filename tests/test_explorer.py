@@ -305,3 +305,24 @@ class TestSeedPathNotInSitemap:
             urls, source = await self._agent()._explore_seed(MagicMock(), "https://www.ready.gov/floods")
         crawl.assert_not_awaited()
         assert urls == sitemap
+
+
+async def test_explorer_passes_the_recipe_filter_to_the_crawl(tmp_path):
+    """#63: with no sitemap, the crawl receives the recipe's URL filter."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from dataforge.agents.base import PipelineContext
+    from dataforge.agents.explorer import ExplorerAgent
+    from dataforge.config.settings import Settings
+    from dataforge.storage.models import DataFormat
+
+    def keep(u):
+        return "/hazards" in u
+
+    ctx = PipelineContext(session_id="t", session_name="t", goal="", format=DataFormat.qa,
+                          seed_urls=[], settings=Settings(db_path=tmp_path / "x.db"),
+                          url_filter=keep)
+    with patch("dataforge.agents.explorer.discover_sitemap_urls", AsyncMock(return_value=[])), \
+         patch("dataforge.agents.explorer.crawl", AsyncMock(return_value=["https://e.org/hazards"])) as crawl:
+        await ExplorerAgent(ctx)._explore_seed(MagicMock(), "https://e.org/")
+    assert crawl.await_args.kwargs["keep"] is keep

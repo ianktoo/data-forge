@@ -72,6 +72,7 @@ async def run_recipe(recipe_path: str | Path, *, dry_run: bool = False) -> int:
         n_per_chunk=recipe.generation.n_per_chunk,
         ignore_robots=recipe.source.ignore_robots,
         skip_known=recipe.source.skip_known,
+        url_filter=recipe.url_matches,
         quality_threshold=recipe.quality.threshold,
         quality_llm_judge=recipe.quality.llm_judge,
         quality_min_judge_score=recipe.quality.min_judge_score,
@@ -92,6 +93,7 @@ async def run_recipe(recipe_path: str | Path, *, dry_run: bool = False) -> int:
 async def resume_recipe(ctx: PipelineContext, recipe: Recipe, start_from: str) -> int:
     """Resume an existing session under a recipe's configuration."""
     recipe.apply_to_settings(ctx.settings)
+    ctx.url_filter = recipe.url_matches
     return await _drive(ctx, recipe, start_from=start_from)
 
 

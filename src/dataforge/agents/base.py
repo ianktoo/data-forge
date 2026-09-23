@@ -40,6 +40,9 @@ class PipelineContext:
     n_per_chunk: int = 3
     ignore_robots: bool = False
     skip_known: bool = False  # skip URLs already scraped in prior sessions
+    # The recipe's language/include/exclude check. The fallback crawl spends
+    # its page budget only on URLs that pass it (#63). None = keep all.
+    url_filter: Callable[[str], bool] | None = None
 
     # Quality control
     quality_threshold: float = 0.5   # min score to approve a sample
