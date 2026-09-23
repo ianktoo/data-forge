@@ -59,9 +59,12 @@ chmod +x dataforge-linux-x64          # or dataforge-macos-arm64
 xattr -d com.apple.quarantine dataforge-macos-arm64   # macOS only
 ```
 
-Releases up to 2.4.2 carried only `dataforge` (the Linux build) and
-`dataforge.exe`, with no macOS binary (#51). 2.4.3 was repaired to carry all
-three files named above.
+Use the binaries from **2.4.4 or later**. Earlier binaries cannot run a
+pipeline: they were built without data files they need and crash on `run`
+and `agent-guide` (#54). Releases up to 2.4.2 also carried only `dataforge`
+(the Linux build) and `dataforge.exe`, with no macOS binary (#51). From 2.4.4
+every binary is smoke-tested, including two offline pipeline runs, before it
+is attached to a release.
 
 ## Using Ollama (fully local, no API key)
 

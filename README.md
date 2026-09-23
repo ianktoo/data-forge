@@ -6,13 +6,14 @@
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**Current release: 2.4.3.** AI agents can drive DataForge through a local MCP
-server or the built-in `dataforge agent-guide` (but never update or uninstall
-it), robots.txt `Crawl-delay` is enforced in every stage, local models run
-through Ollama or any OpenAI-compatible server (LM Studio, vLLM, llama.cpp),
-split files are shuffled with source lineage kept in every export format, and
-`dataforge update` / `dataforge uninstall` close DataForge before touching
-it. See the [changelog](CHANGELOG.md#243---2026-09-22).
+**Current release: 2.4.4.** Tested on Linux, Windows and macOS with Python
+3.11 to 3.14, with working standalone binaries for Windows, Linux and Apple
+Silicon Macs. AI agents can drive DataForge through a local MCP server or the
+built-in `dataforge agent-guide` (but never update or uninstall it),
+robots.txt `Crawl-delay` is enforced in every stage, local models run through
+Ollama or any OpenAI-compatible server (LM Studio, vLLM, llama.cpp), and split
+files are shuffled with source lineage kept in every export format. See the
+[changelog](CHANGELOG.md#244---2026-09-23).
 
 Fine-tuning needs data, and good domain data is trapped in documentation
 sites, knowledge bases and public archives. Getting it out usually means
