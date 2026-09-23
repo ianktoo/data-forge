@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     groq_api_key: str = Field("", alias="GROQ_API_KEY")
     together_api_key: str = Field("", alias="TOGETHER_API_KEY")
     ollama_base_url: str = Field("http://localhost:11434", alias="OLLAMA_BASE_URL")
+    # Any server that speaks the OpenAI chat-completions API (LM Studio,
+    # Lemonade, vLLM, llama.cpp server, ...): provider "openai_compatible".
+    # Env: DATAFORGE_LOCAL_BASE_URL, e.g. http://localhost:1234/v1, and an
+    # optional DATAFORGE_LOCAL_API_KEY for servers that require one.
+    local_base_url: str = ""
+    local_api_key: str = ""
 
     @field_validator("output_dir", "db_path", mode="before")
     @classmethod

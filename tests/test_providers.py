@@ -16,7 +16,11 @@ from dataforge.config.providers import (
     model_supports_thinking,
 )
 
-EXPECTED_PROVIDERS = {"openai", "anthropic", "google", "groq", "together", "ollama"}
+EXPECTED_PROVIDERS = {"openai", "anthropic", "google", "groq", "together", "ollama", "openai_compatible"}
+
+# Model IDs for a local OpenAI-compatible server depend on what it has loaded,
+# so it deliberately lists none (the picker offers a custom ID).
+NO_FIXED_MODELS = {"openai_compatible"}
 
 
 def test_provider_info_covers_every_provider():
@@ -25,7 +29,7 @@ def test_provider_info_covers_every_provider():
 
 def test_every_provider_has_at_least_one_model():
     for name, info in PROVIDER_INFO.items():
-        assert info.models, f"{name} has no models configured"
+        assert info.models or name in NO_FIXED_MODELS, f"{name} has no models configured"
         assert info.models == PROVIDERS[name], f"{name} PROVIDER_INFO.models drifted from PROVIDERS"
 
 
@@ -37,9 +41,9 @@ def test_key_requirement_is_consistent_with_key_env():
             assert info.key_env == "", f"{name} does not require a key but declares one"
 
 
-def test_only_ollama_does_not_require_a_key():
+def test_only_local_providers_do_not_require_a_key():
     no_key = {name for name, info in PROVIDER_INFO.items() if not info.requires_key}
-    assert no_key == {"ollama"}
+    assert no_key == {"ollama", "openai_compatible"}
 
 
 @pytest.mark.parametrize(

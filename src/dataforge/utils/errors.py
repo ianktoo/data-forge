@@ -91,6 +91,15 @@ _GUIDANCE: dict[str, tuple[str, list[str], list[str]]] = {
          "2. Add to .env:  TOGETHER_API_KEY=...",
          "3. Or switch provider:  dataforge config"],
     ),
+    "LOCAL_ENDPOINT_UNREACHABLE": (
+        "OpenAI-compatible server not reachable",
+        ["DataForge is configured to use a local OpenAI-compatible server",
+         "(provider openai_compatible), but it did not answer at DATAFORGE_LOCAL_BASE_URL."],
+        ["1. Start the server (LM Studio: Developer > Start Server; vLLM: vllm serve <model>;",
+         "   llama.cpp: llama-server -m <model.gguf>)",
+         "2. Set DATAFORGE_LOCAL_BASE_URL to its /v1 address, e.g. http://localhost:1234/v1",
+         "3. Set DATAFORGE_LLM_MODEL to a model ID the server lists at <base_url>/models"],
+    ),
     "OLLAMA_UNREACHABLE": (
         "Ollama is not running",
         ["DataForge is configured to use Ollama (local), but cannot connect.",
