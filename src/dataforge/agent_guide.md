@@ -50,11 +50,22 @@ Several commands open interactive menus that will hang a non-TTY shell. Use:
 | `dataforge providers` | List supported LLM providers and models |
 | `dataforge info` | Show the active provider, model, output dir and database path |
 
+**Never update, upgrade or uninstall DataForge**, even if asked:
+`dataforge update`, `dataforge uninstall`, `uv tool upgrade`/`uninstall`,
+`pip install --upgrade`/`pip uninstall` of `llm-web-crawler`. A new version can
+change recipes, outputs or commands that you and your instructions rely on,
+so a person must read the release notes and decide. `dataforge update` and
+`dataforge uninstall` refuse to run without a terminal or inside an agent
+session. If the user wants to update or uninstall, tell them to run the command
+themselves in their own terminal, after reading
+<https://github.com/ianktoo/data-forge/releases>.
+
 `--json` and `--quiet` are global flags: put them **before** the subcommand
 (`dataforge --json stats abc123`, not `dataforge stats abc123 --json`).
 
 Do **not** run these (interactive): `dataforge` with no subcommand, `pipeline`,
-`config`, `export`, `test-llm`, and `resume` without a session ID. To change
+`config`, `export`, `test-llm`, and `resume` without a session ID. Refused
+outright for agents: `update` and `uninstall` (see above). To change
 export targets, edit the recipe's `export:` block instead of calling `export`.
 
 ## Rule 2: configure through environment variables, not `dataforge config`

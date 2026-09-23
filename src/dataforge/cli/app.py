@@ -46,7 +46,7 @@ def _typer_error_handler(error: Exception) -> None:
     if "No such command" in msg or "no such option" in msg.lower():
         _VALID_COMMANDS = [
             "pipeline", "explore", "resume", "sessions",
-            "export", "view", "config", "providers", "info", "test-llm", "update", "plan",
+            "export", "view", "config", "providers", "info", "test-llm", "update", "uninstall", "plan",
         ]
         # Try to find the closest match
         import difflib
@@ -913,11 +913,20 @@ async def _test_llm() -> None:
 
 # ── update command ───────────────────────────────────────────────────────────
 
-@app.command()
-def update() -> None:
-    """Update DataForge to the latest version."""
+# uv prints this once the new version is in the tool environment, even when a
+# later step (refreshing the launcher in its bin directory) fails.
+_UV_UPDATED_RE = re.compile(r"Updated llm-web-crawler v(\S+) -> v(\S+)")
+
+
+def _output_tail(out: str, lines: int = 6) -> None:
+    """Print the last few lines of an installer's output, unstyled."""
+    for line in [ln for ln in out.splitlines() if ln.strip()][-lines:]:
+        ui.console.print(f"  {line}", style="dim", markup=False, highlight=False)
+
+
+def _run_update() -> bool:
+    """Upgrade DataForge in place. Returns False only when the upgrade failed."""
     import subprocess
-    import sys
     from importlib.metadata import PackageNotFoundError
     from importlib.metadata import version as _pkg_version
 
@@ -934,7 +943,7 @@ def update() -> None:
             "Running as a standalone executable. "
             "Download the latest release from: [cyan]https://github.com/ianktoo/data-forge/releases[/]"
         )
-        return
+        return True
 
     ui.info("Checking for updates…")
 
@@ -948,28 +957,39 @@ def update() -> None:
         return r.returncode == 0, r.stdout + r.stderr
 
     # 1. Try uv tool upgrade (preferred for uv-installed tools)
-    ok, out = _try_update(["uv", "tool", "upgrade", "llm-web-crawler"])
-    if ok:
-        if "already" in out.lower() or "up-to-date" in out.lower():
-            ui.success(f"Already up to date (v{current_ver})")
-        else:
-            try:
-                new_ver = _pkg_version("llm-web-crawler")
-            except PackageNotFoundError:
-                new_ver = current_ver
-            ui.success(
-                f"Updated via uv: [dim]{current_ver}[/] → [bold green]{new_ver}[/]"
-                if new_ver != current_ver else f"Already up to date (v{current_ver})"
+    ok, uv_out = _try_update(["uv", "tool", "upgrade", "llm-web-crawler"])
+    m = _UV_UPDATED_RE.search(uv_out)
+    if m and m.group(1) != m.group(2):
+        ui.success(f"Updated via uv: [dim]{m.group(1)}[/] → [bold green]{m.group(2)}[/]")
+        if not ok:
+            # The new version is installed; only a follow-up step failed. On
+            # Windows this is uv failing to overwrite the dataforge.exe that
+            # is running this very command (os error 32).
+            ui.warn(
+                "uv installed the new version but could not finish refreshing "
+                "the `dataforge` launcher (usually because it was in use). "
+                "DataForge works as normal; if a new command is missing, run: "
+                "[cyan]uv tool install --force llm-web-crawler[/]"
             )
-        return
+            _output_tail(uv_out, lines=3)
+        return True
+    if ok:
+        if "pinned" in uv_out.lower():
+            # Installed with an exact version (`uv tool install llm-web-crawler==X`),
+            # so uv upgrades nothing; say so rather than claiming we're current.
+            ui.warn(f"Not upgraded: v{current_ver} is pinned. uv says:")
+            _output_tail(uv_out, lines=3)
+        else:
+            ui.success(f"Already up to date (v{current_ver})")
+        return True
 
     # 2. Fall back to pip
-    ok, out = _try_update(
+    ok, pip_out = _try_update(
         [sys.executable, "-m", "pip", "install", "--upgrade", "llm-web-crawler"]
     )
     if ok:
         new_ver = current_ver
-        for line in out.splitlines():
+        for line in pip_out.splitlines():
             if "Successfully installed" in line:
                 for token in line.split():
                     if token.lower().startswith("llm-web-crawler-"):
@@ -979,11 +999,267 @@ def update() -> None:
             ui.success(f"Updated: [dim]{current_ver}[/] → [bold green]{new_ver}[/]")
         else:
             ui.success(f"Already up to date (v{current_ver})")
-        return
+        return True
 
-    ui.error("Update failed. Try manually:")
+    ui.error("Update failed.")
+    if uv_out != "uv not found":
+        ui.console.print("  uv said:", style="dim")
+        _output_tail(uv_out)
+    if "No module named pip" not in pip_out:
+        # A uv tool environment has no pip; that failure is expected noise.
+        ui.console.print("  pip said:", style="dim")
+        _output_tail(pip_out)
+    ui.console.print("Try manually:", style="dim")
     ui.console.print("  uv tool upgrade llm-web-crawler", style="dim")
     ui.console.print("  pip install --upgrade llm-web-crawler", style="dim")
+    return False
+
+
+def _has_terminal() -> bool:
+    """True when prompts can be shown. stdin alone is not enough: on Windows
+    `NUL` (`< /dev/null`) reports isatty(), and prompts also need a console
+    to draw on, which a piped stdout (agents, scripts) is not."""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+_RELEASES_URL = "https://github.com/ianktoo/data-forge/releases"
+
+
+def _self_manage_refused(action: str) -> bool:
+    """Updating and uninstalling are for a person at a terminal, never an agent.
+
+    A new release can change recipes, outputs or commands that an agent (and
+    the prompts driving it) rely on, so someone should read the release notes
+    before deciding to move. Returns True, after explaining, when refused.
+    """
+    if os.getenv("CLAUDECODE"):
+        reason = "it is running inside an AI agent session (Claude Code)"
+    elif not _has_terminal():
+        reason = "there is no interactive terminal (scripts and AI agents)"
+    else:
+        return False
+    ui.error(f"`dataforge {action}` refused: {reason}.")
+    ui.info(
+        "Updating and uninstalling are only done by a person, in their own terminal. "
+        "A new version can change what recipes, outputs and commands look like, so "
+        f"read the release notes first: [cyan]{_RELEASES_URL}[/]"
+    )
+    return True
+
+
+def _warn_other_instances() -> bool:
+    """Warn about other DataForge processes holding this install's files.
+    Returns True if there were any."""
+    from dataforge.cli import self_manage
+    others = self_manage.other_instances()
+    if not others:
+        return False
+    ui.warn(
+        f"{len(others)} other DataForge process(es) are running from this install "
+        "(for example an MCP client running `dataforge mcp`). Close them first, "
+        "or the installer may fail with 'file in use':"
+    )
+    for pid, cmd in others:
+        ui.console.print(f"  PID {pid}: {cmd}", style="dim", markup=False, highlight=False)
+    return True
+
+
+def _source_checkout_note() -> None:
+    ui.info(
+        "This DataForge runs from a source checkout (editable install). "
+        "Update it with [bold]git pull[/] and [bold]uv sync[/]; remove it by "
+        "deleting the cloned folder."
+    )
+
+
+async def _update_flow(in_place: bool) -> int:
+    """Returns an exit code. Exits the process itself when handing off."""
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _pkg_version
+
+    import questionary
+
+    from dataforge.cli import self_manage
+
+    if _self_manage_refused("update"):
+        return 2
+    kind = self_manage.detect_install()
+    if kind == "frozen":
+        return 0 if _run_update() else 1  # prints the releases-page message
+    if kind == "editable":
+        _source_checkout_note()
+        return 0
+
+    try:
+        current_ver = _pkg_version(self_manage.PACKAGE)
+    except PackageNotFoundError:
+        current_ver = "unknown"
+    ui.info(f"Current version: [bold]{current_ver}[/]")
+    with ui.console.status("[bold cyan]Checking PyPI for the latest release…[/]"):
+        latest = self_manage.latest_version()
+    if latest and current_ver != "unknown" and not self_manage.is_newer(latest, current_ver):
+        ui.success(f"Already up to date (v{current_ver})")
+        return 0
+    if latest:
+        ui.info(f"Latest release: [bold green]{latest}[/]")
+        if current_ver != "unknown" and self_manage.is_major_jump(latest, current_ver):
+            ui.warn(
+                f"This is a major version change ({current_ver} → {latest}): expect "
+                "breaking changes to recipes, outputs or commands."
+            )
+    else:
+        ui.warn("Could not reach PyPI to check the latest release; trying anyway.")
+    ui.info(f"Read the release notes before updating: [cyan]{_RELEASES_URL}[/]")
+
+    choice = await questionary.select(
+        "How should DataForge update?",
+        choices=[
+            questionary.Choice("Close DataForge, then update (recommended)", value="exit"),
+            questionary.Choice("Update in place (may end with an error; check again after)",
+                               value="in_place"),
+            questionary.Choice("Cancel", value="cancel"),
+        ],
+        default="in_place" if in_place else "exit",
+        **prompts._q(),
+    ).ask_async()
+    if choice in (None, "cancel"):
+        ui.info("Cancelled.")
+        return 0
+
+    if choice == "in_place":
+        ui.warn(
+            "Updating DataForge while it is running. On Windows this often ends "
+            "with an error about a file being in use even though the update "
+            "worked. Afterwards, run [bold]dataforge update[/] again to check."
+        )
+        ok = _run_update()
+        ui.info("Run [bold]dataforge update[/] again to confirm you are on the latest version.")
+        return 0 if ok else 1
+
+    cmd = self_manage.installer_command(kind, "update")
+    if cmd is None:
+        ui.error("No installer found for this environment (neither pip nor uv). Update manually:")
+        ui.console.print(f"  pip install --upgrade {self_manage.PACKAGE}", style="dim")
+        return 1
+    _warn_other_instances()
+    ui.warn(
+        "DataForge will close now so the update can replace it"
+        + (" (progress opens in a new window)." if os.name == "nt" else ".")
+        + " When it finishes, run [bold]dataforge update[/] again to check."
+    )
+    self_manage.hand_off(
+        cmd,
+        start="Updating DataForge…",
+        ok="Update finished. Run `dataforge update` again to check the version.",
+        fail=("Update failed. Close every DataForge process (including MCP clients "
+              "running `dataforge mcp`) and run: " + " ".join(cmd)),
+    )
+    raise typer.Exit(0)
+
+
+@app.command()
+def update(
+    in_place: bool = typer.Option(
+        False, "--in-place",
+        help="Preselect updating while DataForge runs. On Windows expect a 'file in use' error; run update again to check.",
+    ),
+) -> None:
+    """Update DataForge (a person at a terminal only; agents are refused)."""
+    code = asyncio.run(_update_flow(in_place))
+    if code:
+        raise typer.Exit(code=code)
+
+
+# ── uninstall command ────────────────────────────────────────────────────────
+
+async def _uninstall_flow(keep_data: bool | None) -> int:
+    """Returns an exit code. Exits the process itself when handing off."""
+    import questionary
+
+    from dataforge.cli import self_manage
+
+    if _self_manage_refused("uninstall"):
+        return 2
+    kind = self_manage.detect_install()
+    if kind == "frozen":
+        ui.info(
+            f"This is a standalone executable. To uninstall, delete it: [dim]{sys.executable}[/]\n"
+            "  Your data (dataforge.db, output/, .dataforge in each project folder) is not touched."
+        )
+        return 0
+    if kind == "editable":
+        _source_checkout_note()
+        return 0
+    cmd = self_manage.installer_command(kind, "uninstall")
+    if cmd is None:
+        ui.error("No installer found for this environment (neither pip nor uv). Uninstall manually:")
+        ui.console.print(f"  pip uninstall {self_manage.PACKAGE}", style="dim")
+        return 1
+
+    cwd = Path.cwd()
+    s = get_settings()
+    _apply_project_file(s, cwd)
+    deletable, outside = self_manage.data_paths(cwd, s.db_path, s.output_dir)
+
+    if deletable:
+        ui.info(f"DataForge data in this folder ([dim]{cwd}[/]):")
+        for p in deletable:
+            ui.console.print(f"  {p}", style="dim", markup=False, highlight=False)
+        if keep_data is None:
+            keep_data = await questionary.confirm(
+                "Keep your data?", default=True, **prompts._q(),
+            ).ask_async()
+            if keep_data is None:
+                ui.info("Cancelled.")
+                return 0
+        if not keep_data:
+            sure = await questionary.confirm(
+                "Permanently delete the files above once DataForge is uninstalled?",
+                default=False, **prompts._q(),
+            ).ask_async()
+            keep_data = not sure
+    keep_data = True if keep_data is None else keep_data
+    to_delete = [] if keep_data else deletable
+    if outside:
+        ui.info("Not deleted (outside this folder; remove by hand if you want):")
+        for p in outside:
+            ui.console.print(f"  {p}", style="dim", markup=False, highlight=False)
+    ui.info("Your .env file is never deleted; it may hold keys other tools use.")
+
+    _warn_other_instances()
+    ui.warn(
+        "DataForge will close now to uninstall itself"
+        + (" (progress opens in a new window)." if os.name == "nt" else ".")
+        + (" Data is kept." if keep_data else " The data listed above is deleted after the uninstall.")
+    )
+    go = await questionary.confirm("Uninstall DataForge now?", default=False, **prompts._q()).ask_async()
+    if not go:
+        ui.info("Cancelled.")
+        return 0
+    self_manage.hand_off(
+        cmd,
+        start="Uninstalling DataForge…",
+        ok="DataForge is uninstalled.",
+        fail=("Uninstall failed. Close every DataForge process (including MCP clients "
+              "running `dataforge mcp`) and run: " + " ".join(cmd)),
+        delete=to_delete,
+    )
+    raise typer.Exit(0)
+
+
+@app.command()
+def uninstall(
+    delete_data: bool = typer.Option(
+        None, "--delete-data/--keep-data",
+        help="Preselect whether to delete this folder's DataForge data (dataforge.db, output/, .dataforge). Default: ask.",
+        show_default=False,
+    ),
+) -> None:
+    """Uninstall DataForge (a person at a terminal only; agents are refused)."""
+    keep = None if delete_data is None else not delete_data
+    code = asyncio.run(_uninstall_flow(keep))
+    if code:
+        raise typer.Exit(code=code)
 
 
 # ── plan command ─────────────────────────────────────────────────────────────
@@ -1409,7 +1685,11 @@ async def _interactive_pipeline() -> None:
                 _show_info()
                 continue
             if action == "update":
-                update()
+                # Not update(): a failed upgrade must not exit the menu.
+                await _update_flow(in_place=False)
+                continue
+            if action == "uninstall":
+                await _uninstall_flow(keep_data=None)
                 continue
             if action == "exit":
                 raise typer.Exit()
@@ -1910,6 +2190,7 @@ async def _main_menu() -> str:
         questionary.Choice("Configure LLM provider",    value="config"),
         questionary.Choice("System info",               value="info"),
         questionary.Choice("Update DataForge",          value="update"),
+        questionary.Choice("Uninstall DataForge",       value="uninstall"),
         questionary.Choice("Exit",                      value="exit"),
     ]
 

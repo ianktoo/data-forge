@@ -5,7 +5,52 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **`dataforge uninstall`** (#46, also in the main menu): asks **Keep your data?**,
+  warns that DataForge will close, then exits and removes itself with the
+  right installer (uv tool, pip, or uv pip). Data you chose to delete
+  (`dataforge.db`, `output/`, `.dataforge` in the current folder) is removed
+  only after the uninstall succeeds; nothing outside the folder, and never
+  `.env`. `--delete-data` / `--keep-data` preselect the first answer.
+
+### Changed
+- **`update` and `uninstall` refuse AI agents and scripts** (#47). A new release can
+  change recipes, outputs or commands an agent relies on, so only a person, in
+  their own terminal, after reading the release notes, may update or
+  uninstall. Both commands exit 2 without an interactive terminal or inside a
+  Claude Code session (`CLAUDECODE`), and no flag skips their prompts. The
+  agent guide tells agents never to update, upgrade or uninstall DataForge by
+  any route, and to point the user at the release notes instead.
+- **`dataforge update` closes DataForge first by default** (#46). A program should
+  not replace itself while it runs (on Windows the files are locked), so
+  `update` now checks PyPI, stops if you are current, links the release notes
+  (warning on a major version change), and otherwise hands the install to a
+  helper that waits for DataForge to exit. The old behaviour is still
+  available as **update in place** (the second choice; `--in-place`
+  preselects it), with a warning to expect an error on Windows and to run
+  `dataforge update` again to check. Both commands warn when another
+  DataForge process (such as `dataforge mcp`) still holds the install, and do
+  nothing to a source checkout.
+
+### Fixed
+- **`dataforge update` reported "Update failed" on Windows although the update
+  worked** (#45), and a second run then passed. uv installs the new version, then
+  fails to overwrite the running `dataforge.exe` launcher (os error 32) and
+  exits 1; the pip fallback cannot work in a uv tool environment (no pip). The
+  command now reads uv's `Updated ... vA -> vB` line, reports the update, and
+  warns that the launcher could not be refreshed.
+- **`dataforge update` said "Already up to date" on a pinned uv install.** It
+  now says the version is pinned and shows uv's hint
+  (`uv tool install llm-web-crawler@latest`).
+- **`dataforge update` exited 0 on failure and hid the reason.** It now exits
+  1 and prints the last lines of uv's and pip's output. From the interactive
+  menu a failure returns to the menu instead of exiting.
+
 ### Documentation
+- `docs/INSTALLATION.md`: new "Updating and uninstalling from DataForge" and
+  "Known issues and workarounds" sections (updating
+  or uninstalling while DataForge runs on Windows, pinned installs, `uv sync`
+  failing while `dataforge mcp` runs from the repo `.venv`).
 - The technical note is published on Zenodo. README and `CITATION.cff` now cite
   its concept DOI, 10.5281/zenodo.22906071, which always resolves to the latest
   version; the README also lists each version's own DOI (v1.0.0:
