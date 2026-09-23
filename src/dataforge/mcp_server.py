@@ -118,17 +118,19 @@ async def explore_site(url: str, limit: int = 200) -> dict:
     """
     from urllib.parse import urlparse
 
-    from dataforge.collectors import HTTPClient, discover_sitemap_url, parse_sitemap
+    from dataforge.collectors import HTTPClient, discover_sitemap_urls, parse_sitemaps
     from dataforge.utils import RateLimiter
 
     s = get_settings()
     async with HTTPClient(RateLimiter(s.rate_limit)) as client:
         parsed = urlparse(url)
-        sitemap = url if url.endswith(".xml") else await discover_sitemap_url(
+        sitemaps = [url] if url.endswith(".xml") else await discover_sitemap_urls(
             client, f"{parsed.scheme}://{parsed.netloc}"
         )
-        urls = await parse_sitemap(client, sitemap) if sitemap else []
-    return {"sitemap": sitemap, "total": len(urls), "urls": urls[:limit]}
+        urls = await parse_sitemaps(client, sitemaps) if sitemaps else []
+    # "sitemap" keeps its old meaning (the first, or None) for existing clients.
+    return {"sitemap": sitemaps[0] if sitemaps else None, "sitemaps": sitemaps,
+            "total": len(urls), "urls": urls[:limit]}
 
 
 @mcp.tool(annotations=_READ_ONLY)

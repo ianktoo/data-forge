@@ -6,7 +6,14 @@ from urllib.parse import urlparse
 
 from sqlmodel import select
 
-from dataforge.collectors import HTTPClient, crawl, discover_sitemap_url, filter_urls, parse_sitemap
+from dataforge.collectors import (
+    HTTPClient,
+    crawl,
+    discover_sitemap_urls,
+    filter_urls,
+    parse_sitemap,
+    parse_sitemaps,
+)
 from dataforge.storage import DiscoveredURL, URLSource, open_session
 
 from .base import BaseAgent, PipelineContext
@@ -59,10 +66,11 @@ class ExplorerAgent(BaseAgent):
             urls = await parse_sitemap(client, seed)
             return (urls if urls else [seed], URLSource.sitemap)
 
-        # 2. Try to discover sitemap
-        sitemap_url = await discover_sitemap_url(client, base)
-        if sitemap_url:
-            raw_urls = await parse_sitemap(client, sitemap_url)
+        # 2. Try to discover sitemaps (every one robots.txt lists, #60)
+        sitemap_urls = await discover_sitemap_urls(client, base)
+        sitemap_url = ", ".join(sitemap_urls)
+        if sitemap_urls:
+            raw_urls = await parse_sitemaps(client, sitemap_urls)
             if raw_urls:
                 # filter to same domain by default
                 filtered = filter_urls(raw_urls, pattern=None, base_domain=parsed.netloc)

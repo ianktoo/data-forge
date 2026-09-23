@@ -289,8 +289,8 @@ class TestSeedPathNotInSitemap:
         # docs.python.org's sitemap lists only version roots, not /3/tutorial/ pages.
         sitemap = ["https://docs.python.org/3.13/", "https://docs.python.org/3/"]
         seed = "https://docs.python.org/3/tutorial/"
-        with patch("dataforge.agents.explorer.discover_sitemap_url", AsyncMock(return_value="https://docs.python.org/sitemap.xml")), \
-             patch("dataforge.agents.explorer.parse_sitemap", AsyncMock(return_value=sitemap)), \
+        with patch("dataforge.agents.explorer.discover_sitemap_urls", AsyncMock(return_value=["https://docs.python.org/sitemap.xml"])), \
+             patch("dataforge.agents.explorer.parse_sitemaps", AsyncMock(return_value=sitemap)), \
              patch("dataforge.agents.explorer.crawl", AsyncMock(return_value=[seed, seed + "introduction.html"])) as crawl:
             urls, source = await self._agent()._explore_seed(MagicMock(), seed)
         crawl.assert_awaited_once()
@@ -299,8 +299,8 @@ class TestSeedPathNotInSitemap:
 
     async def test_covered_seed_path_uses_sitemap(self):
         sitemap = ["https://www.ready.gov/floods", "https://www.ready.gov/floods/after"]
-        with patch("dataforge.agents.explorer.discover_sitemap_url", AsyncMock(return_value="https://www.ready.gov/sitemap.xml")), \
-             patch("dataforge.agents.explorer.parse_sitemap", AsyncMock(return_value=sitemap)), \
+        with patch("dataforge.agents.explorer.discover_sitemap_urls", AsyncMock(return_value=["https://www.ready.gov/sitemap.xml"])), \
+             patch("dataforge.agents.explorer.parse_sitemaps", AsyncMock(return_value=sitemap)), \
              patch("dataforge.agents.explorer.crawl", AsyncMock()) as crawl:
             urls, source = await self._agent()._explore_seed(MagicMock(), "https://www.ready.gov/floods")
         crawl.assert_not_awaited()

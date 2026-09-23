@@ -185,7 +185,7 @@ def explore(url: str = typer.Argument(..., help="URL or sitemap URL to explore")
 
 
 async def _run_explore(url: str) -> None:
-    from dataforge.collectors import HTTPClient, discover_sitemap_url, parse_sitemap
+    from dataforge.collectors import HTTPClient, discover_sitemap_urls, parse_sitemaps
     from dataforge.utils import RateLimiter
 
     s = get_settings()
@@ -198,13 +198,13 @@ async def _run_explore(url: str) -> None:
         base = f"{parsed.scheme}://{parsed.netloc}"
 
         if url.endswith(".xml"):
-            sitemap_url = url
+            sitemap_urls = [url]
         else:
-            sitemap_url = await discover_sitemap_url(client, base)
+            sitemap_urls = await discover_sitemap_urls(client, base)
 
-        if sitemap_url:
-            ui.info(f"Sitemap: {sitemap_url}")
-            urls = await parse_sitemap(client, sitemap_url)
+        if sitemap_urls:
+            ui.info(f"Sitemap{'s' if len(sitemap_urls) > 1 else ''}: {', '.join(sitemap_urls)}")
+            urls = await parse_sitemaps(client, sitemap_urls)
         else:
             ui.warn("No sitemap found. Showing seed URL only.")
             urls = [url]
