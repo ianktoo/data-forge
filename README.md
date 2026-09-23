@@ -6,11 +6,12 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**Current release: 2.4.1.** AI agents can drive DataForge through a local MCP
+**Current release: 2.4.2.** AI agents can drive DataForge through a local MCP
 server or the built-in `dataforge agent-guide`, robots.txt `Crawl-delay` is
-enforced in every stage, and the MCP inspection tools (`session_stats`,
-`view_samples`) now work after a real run. See the
-[changelog](CHANGELOG.md#241---2026-09-22).
+enforced in every stage, local models run through Ollama or any
+OpenAI-compatible server (LM Studio, vLLM, llama.cpp), and split files are
+shuffled with source lineage kept in every export format. See the
+[changelog](CHANGELOG.md#242---2026-09-22).
 
 Fine-tuning needs data, and good domain data is trapped in documentation
 sites, knowledge bases and public archives. Getting it out usually means
