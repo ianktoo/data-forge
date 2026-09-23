@@ -5,6 +5,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Release binaries overwrote each other** (#51). The Linux and macOS builds
+  were both uploaded as `dataforge`, so releases had no macOS binary and an
+  ambiguous `dataforge` file (the Linux build). Each build is now named for its
+  platform: `dataforge-windows-x64.exe`, `dataforge-linux-x64` and
+  `dataforge-macos-arm64` (`macos-latest` runners are Apple Silicon, so the old
+  planned name `dataforge-macos-x64` was wrong too). The v2.4.3 release was
+  repaired from its build artifacts.
+
+### Documentation
+- `docs/INSTALLATION.md`, `CICD.md`: the real binary names, no Intel Mac
+  binary, `chmod +x` and clearing the macOS quarantine flag.
+
 ## [2.4.3] - 2026-09-22
 
 Updating and uninstalling (#45, #46, #47). `update` now closes DataForge

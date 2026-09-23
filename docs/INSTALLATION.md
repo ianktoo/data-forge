@@ -45,9 +45,23 @@ Download pre-built binaries for your platform from [GitHub Releases](https://git
 
 | Platform | File |
 |---|---|
-| Windows | `dataforge-windows-x64.exe` |
-| macOS | `dataforge-macos-x64` |
-| Linux | `dataforge-linux-x64` |
+| Windows (x64) | `dataforge-windows-x64.exe` |
+| macOS (Apple Silicon) | `dataforge-macos-arm64` |
+| Linux (x64) | `dataforge-linux-x64` |
+
+There is no binary for Intel Macs; install with uv or pip instead.
+
+On macOS and Linux, make the download executable first. macOS also marks
+downloaded files as quarantined; clear that flag or Gatekeeper blocks it:
+
+```bash
+chmod +x dataforge-linux-x64          # or dataforge-macos-arm64
+xattr -d com.apple.quarantine dataforge-macos-arm64   # macOS only
+```
+
+Releases up to 2.4.2 carried only `dataforge` (the Linux build) and
+`dataforge.exe`, with no macOS binary (#51). 2.4.3 was repaired to carry all
+three files named above.
 
 ## Using Ollama (fully local, no API key)
 

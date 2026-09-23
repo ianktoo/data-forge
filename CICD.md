@@ -17,8 +17,13 @@ Triggered when a version tag is pushed (e.g., `git tag v0.1.3`).
 
 **Outputs:**
 - `dataforge-windows-x64.exe` (Windows)
-- `dataforge-macos-x64` (macOS)
+- `dataforge-macos-arm64` (macOS, Apple Silicon: `macos-latest` runners are arm64)
 - `dataforge-linux-x64` (Linux)
+
+Each job copies PyInstaller's `dist/dataforge[.exe]` to its platform name
+before uploading. The release step uploads files by their own name, so without
+that copy the Linux and macOS builds (both `dataforge`) overwrote each other
+(#51).
 
 These are attached to the GitHub Release.
 

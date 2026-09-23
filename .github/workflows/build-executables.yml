@@ -21,9 +21,10 @@ jobs:
           - os: windows-latest
             artifact_name: dataforge.exe
             asset_name: dataforge-windows-x64.exe
+          # macos-latest runners are Apple Silicon, so this build is arm64.
           - os: macos-latest
             artifact_name: dataforge
-            asset_name: dataforge-macos-x64
+            asset_name: dataforge-macos-arm64
 
     steps:
       - uses: actions/checkout@v4
@@ -41,11 +42,19 @@ jobs:
         env:
           PYTHONPATH: src
 
+      # The release uploads files by their own name, not the artifact's, and
+      # the Linux and macOS builds are both `dataforge`: without this copy one
+      # overwrote the other and the release had no macOS binary (#51).
+      - name: Name the binary for its platform
+        shell: bash
+        run: cp "dist/${{ matrix.artifact_name }}" "dist/${{ matrix.asset_name }}"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: dist/${{ matrix.artifact_name }}
+          path: dist/${{ matrix.asset_name }}
+          if-no-files-found: error
 
   create-release:
     needs: build
@@ -61,6 +70,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
+          fail_on_unmatched_files: true
           draft: false
           prerelease: false
         env:
