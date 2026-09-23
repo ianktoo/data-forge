@@ -6,6 +6,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **Standalone binaries could not run a pipeline, and failed silently** (#54).
+  PyInstaller left out `agent_guide.md`, litellm's model price table (read at
+  import, so every run crashed) and tiktoken's encoding plugin (chunking
+  crashed). The build now bundles them, and the binary's entry point
+  (`main.py`) prints the traceback and exits 1 instead of exiting 2 with no
+  output. pip/uv installs were not affected.
 - **Release binaries overwrote each other** (#51). The Linux and macOS builds
   were both uploaded as `dataforge`, so releases had no macOS binary and an
   ambiguous `dataforge` file (the Linux build). Each build is now named for its
@@ -13,6 +19,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `dataforge-macos-arm64` (`macos-latest` runners are Apple Silicon, so the old
   planned name `dataforge-macos-x64` was wrong too). The v2.4.3 release was
   repaired from its build artifacts.
+
+### Added
+- **CI tests** (#55). `test.yml` runs on every push to master and every PR:
+  ruff, the test suite on Linux, Windows and macOS with Python 3.11 to 3.14,
+  and the built wheel installed with pip and smoke-tested.
+  `scripts/smoke_test.py` drives any installed `dataforge` as a black box:
+  everyday commands, pure-JSON `--json` output, `update`/`uninstall` refusing
+  scripts, the MCP handshake, and two offline pipeline runs (a local site with
+  and without a sitemap, a fake OpenAI-compatible LLM) through crawl,
+  chunking, generation, the judge and export. It spends nothing. Binaries are
+  smoke-tested before upload, and `release-smoke.yml` installs each PyPI
+  release with pip and uv on every OS and Python and tests it.
 
 ### Documentation
 - `docs/INSTALLATION.md`, `CICD.md`: the real binary names, no Intel Mac

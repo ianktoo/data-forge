@@ -4,6 +4,14 @@ on:
   push:
     tags:
       - 'v*'
+  # Build and smoke-test the binaries (without releasing) when a PR changes
+  # how they are built, or on demand.
+  pull_request:
+    paths:
+      - '.github/workflows/build-executables.yml'
+      - 'scripts/smoke_test.py'
+      - 'src/dataforge/main.py'
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -12,6 +20,7 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         include:
@@ -37,8 +46,18 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --extra dev
 
+      # PyInstaller only follows imports, so data files and plugins must be
+      # named. Without them the binaries crashed on `agent-guide` (the guide
+      # file), on any run (litellm's model price table) and on chunking
+      # (tiktoken's encoding plugin); main.py then hid the crash.
       - name: Build executable
-        run: uv run pyinstaller --onefile --name dataforge --exclude-module kaggle src/dataforge/main.py
+        run: >-
+          uv run pyinstaller --onefile --name dataforge --exclude-module kaggle
+          --collect-data dataforge
+          --collect-data litellm
+          --hidden-import tiktoken_ext
+          --hidden-import tiktoken_ext.openai_public
+          src/dataforge/main.py
         env:
           PYTHONPATH: src
 
@@ -49,6 +68,14 @@ jobs:
         shell: bash
         run: cp "dist/${{ matrix.artifact_name }}" "dist/${{ matrix.asset_name }}"
 
+      # Everyday commands, the MCP server, and two offline pipeline runs
+      # against a local site and a fake LLM. A broken binary is never uploaded.
+      - name: Smoke test the binary
+        shell: bash
+        run: |
+          VERSION=$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)
+          uv run python scripts/smoke_test.py "dist/${{ matrix.asset_name }}" --version "$VERSION" --mcp --e2e
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -58,6 +85,7 @@ jobs:
 
   create-release:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
