@@ -15,6 +15,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Content extraction is unchanged: navigation text and links still never
   reach the dataset. Sites without a sitemap now yield more pages, still
   bounded by `max_crawl_depth` (default 3) and `max_crawl_pages` (default 50).
+- `release-smoke.yml` on a pull request now tests the published release with
+  the smoke test that release shipped with. With the PR's own smoke test, a
+  new check for a fix the release lacks (such as #53) failed every PR until
+  the next release. The PR's changes are smoke-tested by `test.yml`.
 - `tests/test_update_command.py` failed when `FORCE_COLOR` was set (Rich
   colours version numbers piecewise); assertions now strip ANSI codes.
 
