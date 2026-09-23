@@ -5,6 +5,41 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Performance
+Faster, politer discovery: fewer requests, and the crawl budget spent on the
+right pages. No new dependencies.
+
+- **Scraping was O(N²) in a session** (#59). Each page looked up its
+  `discovered_url` row by URL with no index, scanning the session. New
+  indexes on `(session_id, url)` and `url` are also added to existing
+  databases when they are opened. `source.skip_known` now looks up only the
+  newly discovered URLs, instead of loading every URL ever scraped.
+- **Each page is downloaded once** (#65). Without a sitemap, the crawl
+  fetched every page to find links and the scrape stage fetched it again.
+  The crawl now hands its downloads to the scrape stage, halving requests
+  and time on such sites.
+- **The crawl spends its budget on pages the recipe wants** (#63).
+  `source.include`, `exclude` and `language` now apply during the crawl:
+  pages that fail them are visited only as hubs when they can lead further,
+  do not count toward `crawl.max_crawl_pages`, and are never fetched at the
+  depth limit. A hard cap (four times the page budget) bounds all requests.
+- **Best-first crawl** (#64). The crawl queue is a priority queue: level by
+  level as before, but within a level real pages come before likely traps
+  (pagination, date archives, calendars, search and filter URLs, login,
+  print, feeds), wanted pages before hubs, main-content links before
+  navigation, and shallower paths first. Deterministic.
+- **Each page is queued once** (#62): the crawl queue grows with pages, not
+  links.
+
+### Fixed
+- **Only the first `Sitemap:` line in `robots.txt` was used** (#60). Every
+  listed sitemap is now read and merged; `dataforge explore` and the MCP
+  `explore_site` tool (new `sitemaps` field) do the same.
+- **URL variants were separate pages** (#61). `/a` and `/a/`, `www.` and the
+  bare host, `http` and `https`, default ports, query parameter order and
+  tracking parameters could make one page be fetched and sampled twice. They
+  now share a canonical key; the URL itself is kept as the site wrote it.
+
 ### Fixed
 - **A crawl without a sitemap missed site navigation** (#53). The fallback
   crawler followed only links inside a page's main content, after `<nav>`,
@@ -23,8 +58,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   colours version numbers piecewise); assertions now strip ANSI codes.
 
 ### Documentation
-- `docs/TECHNICAL.tex`: the discovery section says the fallback crawl follows
-  every same-domain link, navigation included, content links first.
+- `docs/TECHNICAL.tex`: the discovery section describes the best-first
+  fallback crawl, the recipe filters during the crawl, canonical URL
+  deduplication, all `robots.txt` sitemaps and download reuse.
+- `docs/ARCHITECTURE.md`: a "fallback crawl" section with the data structures
+  used and their costs.
+- `docs/CONFIGURATION.md`: what `max_crawl_pages` and `max_crawl_depth` count.
+- `docs/THIRD_PARTY.md`: adds `truststore` (a runtime dependency that was
+  missing), `packaging`, the optional `mcp`, `unsloth` and `playwright`, and
+  the standard-library structures behind the crawl.
 
 ## [2.4.4] - 2026-09-23
 

@@ -10,7 +10,7 @@ sample set at once.
 
 | Stage | Consumes | Produces | Execution | Key mechanism |
 |---|---|---|---|---|
-| 1. Discovery | Seed URLs | Candidate URLs | Batch | Sitemap + `robots.txt` parsing, bounded BFS fallback, Playwright retry for JS-rendered pages |
+| 1. Discovery | Seed URLs | Candidate URLs | Batch | Sitemap + `robots.txt` parsing, bounded best-first crawl fallback, Playwright retry for JS-rendered pages |
 | 2. Collection | URLs | Pages (Markdown) | Batch or stream | Per-domain rate limit, transient vs. permanent status handling, `Crawl-delay` |
 | 3. Processing | Pages | Token-bounded chunks | Batch or stream | Boilerplate stripping, overlapping `tiktoken`-sized chunks |
 | 4. Generation | Chunks | Candidate samples | Batch or stream | LiteLLM provider portability, `n_per_chunk` samples, shared cost/call budget |
@@ -35,16 +35,63 @@ enabled and vice versa.
 
 ### 1. Discovery
 Finds candidate URLs before a single page is fetched:
-- Parses `sitemap.xml` (including sitemap indexes) and checks `robots.txt`
-  for `Sitemap:` directives.
-- Falls back to a BFS crawl (configurable depth/page limit) when no sitemap
-  exists.
+- Parses `sitemap.xml` (including sitemap indexes) and every `Sitemap:`
+  line in `robots.txt`, merged and deduplicated.
+- Falls back to a crawl from the seed when no usable sitemap exists (see
+  below).
 - Detects JavaScript-rendered pages (few links, rich body) and retries with
   Playwright if installed.
 - Runs in parallel across multiple seed URLs.
+- Deduplicates by a canonical URL key: `/a` and `/a/`, `www.` and the bare
+  host, `http` and `https`, default ports, query parameter order and
+  tracking parameters count as one page. The URL is kept as the site wrote
+  it; only the comparison is normalised.
 - Interactive mode adds a checklist review step (substring / glob / regex
   filter, per-URL toggle, persisted across resume); recipes replace this
   with `source.include` / `source.exclude` / `source.max_urls`.
+
+#### The fallback crawl
+
+Used when a site has no usable sitemap, or when the seed is deeper than the
+root and the sitemap lists nothing under it (`collectors/crawler.py`).
+
+- **Bounded:** `crawl.max_crawl_depth` (default 3; the seed is depth 0) and
+  `crawl.max_crawl_pages` (default 50) limit what is kept, and a hard cap on
+  total requests (four times the page budget) limits what is fetched. Same
+  domain only; `robots.txt`, rate limits and `Crawl-delay` as everywhere.
+- **Follows every link on a page**, navigation, header and footer included.
+  Content extraction still ignores navigation, so it never reaches the
+  dataset.
+- **Best-first frontier:** a binary heap keyed by
+  `(depth, is_trap, filtered_out, not_in_content, path_segments, order)`.
+  - Depth comes first, so coverage stays level by level and
+    `max_crawl_depth` means what it says.
+  - Within a depth:
+    1. real pages before likely crawl traps (pagination, date archives,
+       calendars, search, sort and filter URLs, login, print, feeds); traps
+       are demoted, never forbidden
+    2. pages the recipe wants before hubs it does not
+    3. main-content links before navigation
+    4. shallower paths first
+  - The final counter keeps ties in page order, so a crawl is deterministic.
+- **Uses the recipe's filters while crawling.** `source.include`,
+  `source.exclude` and `source.language` decide which pages count toward the
+  page budget. A page that fails them is still visited when it can lead
+  further (a hub such as the home page often links to what you want), but is
+  not kept. A failing page at the depth limit is never fetched.
+- **Each page is queued once:** URLs are marked as seen when queued, so the
+  queue grows with the number of pages, not the number of links.
+- **Each page is downloaded once:** the crawl keeps the HTML of the pages it
+  keeps, and the collection stage uses it instead of fetching the page again.
+
+| Structure | Used for | Cost |
+|---|---|---|
+| Binary heap (`heapq`) | Crawl frontier | O(log n) per push/pop |
+| Hash set of canonical keys | "Seen this page?" in discovery and the crawl | O(1) |
+| Dict, canonical key to HTML | Crawl downloads reused by collection | O(1); at most `max_crawl_pages` entries |
+| SQLite index `(session_id, url)` | Per-page lookup while scraping | O(log n), was a scan of the session |
+| SQLite index `url` | `skip_known` across sessions | O(log n) per URL, batched |
+| Per-domain token bucket | Rate limiting and `Crawl-delay` | O(1) |
 
 ### 2. Collection (scrape pool)
 - Async HTTPX client with retry + exponential backoff.
@@ -167,7 +214,7 @@ computed, including for a past session.
 src/dataforge/
 ├── agents/          # pipeline stage agents + streaming pipeline
 ├── cli/             # typer app, prompts, UI, recipes, headless runner
-├── collectors/      # HTTP client, sitemap parser, BFS crawler, HTML extractor
+├── collectors/      # HTTP client, sitemap parser, best-first crawler, HTML extractor
 ├── config/          # pydantic-settings, provider registry
 ├── exporters/       # local, HuggingFace, Kaggle
 ├── generators/      # LiteLLM wrapper, synthetic sample generation

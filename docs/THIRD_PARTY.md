@@ -33,6 +33,40 @@ authors and contributors.
 | [jinja2](https://pypi.org/project/jinja2/) | Prompt template engine | BSD-3-Clause |
 | [pyyaml](https://pypi.org/project/PyYAML/) | Recipe file parsing | MIT |
 | [keyring](https://pypi.org/project/keyring/) | OS keychain integration for API key storage | MIT |
+| [truststore](https://pypi.org/project/truststore/) | Verifies TLS with the operating system's certificate store (handles sites with incomplete certificate chains) | MIT |
+
+Installed as a dependency of the above and used directly:
+
+| Library | Purpose | License |
+|---|---|---|
+| [packaging](https://pypi.org/project/packaging/) | Version comparison in `dataforge update` (installed with huggingface-hub; a plain comparison is used if absent) | Apache-2.0 or BSD-2-Clause |
+
+## Optional
+
+Not installed by default. DataForge works without them.
+
+| Library | Install | Purpose | License |
+|---|---|---|---|
+| [mcp](https://pypi.org/project/mcp/) | `pip install "llm-web-crawler[mcp]"` | `dataforge mcp`: DataForge as tools for MCP clients | MIT |
+| [unsloth](https://pypi.org/project/unsloth/) | `pip install "llm-web-crawler[unsloth]"` | Fine-tuning helpers for the Unsloth export | Apache-2.0 |
+| [playwright](https://pypi.org/project/playwright/) | `pip install playwright && playwright install chromium` | Renders JavaScript-built pages during the fallback crawl, when a page has few links but plenty of text | Apache-2.0 |
+
+## Algorithms and data structures (Python standard library)
+
+The crawl and discovery improvements (#59 to #65) add no third-party
+dependency. They use the standard library only:
+
+| Module | Used for |
+|---|---|
+| `heapq` | The fallback crawl's best-first frontier (a binary heap, O(log n) per operation) |
+| `itertools.count` | Tie-breaking in the frontier, so a crawl is deterministic |
+| `urllib.parse` | URL normalisation for the canonical dedup key |
+| `sqlite3` (through SQLAlchemy) | Indexes on `discovered_url (session_id, url)` and `url` |
+
+Near-duplicate detection across pages (MinHash with locality-sensitive
+hashing, [#68](https://github.com/ianktoo/data-forge/issues/68)) may add a
+dependency such as [datasketch](https://pypi.org/project/datasketch/) (MIT); it
+will be listed here if it does.
 
 ## Dev and build dependencies
 

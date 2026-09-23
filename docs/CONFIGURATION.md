@@ -19,8 +19,8 @@ Run `dataforge config` to set your provider and API key interactively.
 | `DATAFORGE_LLM_MODEL` | `gpt-4o-mini` | Model name |
 | `DATAFORGE_RATE_LIMIT` | `2.0` | Requests/sec per domain |
 | `DATAFORGE_MAX_PAGES` | `500` | Max pages scraped per session |
-| `DATAFORGE_MAX_CRAWL_PAGES` | `50` | Max pages found by BFS crawler |
-| `DATAFORGE_MAX_CRAWL_DEPTH` | `3` | Max link depth for BFS crawler |
+| `DATAFORGE_MAX_CRAWL_PAGES` | `50` | Max pages the fallback crawl keeps (it fetches at most 4x this) |
+| `DATAFORGE_MAX_CRAWL_DEPTH` | `3` | Max link depth for the fallback crawl (the seed is depth 0) |
 | `DATAFORGE_CHUNK_SIZE` | `512` | Tokens per chunk |
 | `DATAFORGE_CHUNK_OVERLAP` | `64` | Token overlap between chunks |
 | `DATAFORGE_LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
@@ -56,8 +56,8 @@ can be four lines long.
 | `source.skip_known` | `false` | Skip URLs already scraped in an earlier session |
 | `crawl.rate_limit` | *(global)* | Requests/second/domain |
 | `crawl.max_pages` | *(global)* | Max pages scraped this session |
-| `crawl.max_crawl_pages` | *(global)* | Max pages found by the BFS fallback crawler |
-| `crawl.max_crawl_depth` | *(global)* | Max link depth for the BFS crawler |
+| `crawl.max_crawl_pages` | *(global)* | Max pages the fallback crawl keeps; only pages passing `source.include`/`exclude`/`language` count. It fetches at most 4x this. |
+| `crawl.max_crawl_depth` | *(global)* | Max link depth for the fallback crawl (the seed is depth 0) |
 | `generation.format` | `qa` | `qa` / `instruction` / `conversation` / `custom` |
 | `generation.goal` | `""` | Plain-language description of the dataset's purpose |
 | `generation.n_per_chunk` | `3` | Samples generated per chunk (1–20) |
