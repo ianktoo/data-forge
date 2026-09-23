@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.4.4] - 2026-09-23
+
+The standalone binaries work again (#54), and every change is now tested on
+Linux, Windows and macOS with Python 3.11 to 3.14 before it can be released
+(#55). No changes to crawling, generation, quality or export behaviour.
+
 ### Changed
 - **Supported Python versions are declared and tested: 3.11, 3.12, 3.13 and
   3.14**, on Linux, Windows and macOS (`pyproject.toml` classifiers, CI
