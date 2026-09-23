@@ -9,7 +9,13 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # The full CI suite (every OS, plus the installed-package smoke
+  # test) must pass before anything reaches PyPI.
+  tests:
+    uses: ./.github/workflows/test.yml
+
   build-and-publish:
+    needs: tests
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

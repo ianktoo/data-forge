@@ -1,19 +1,51 @@
 # CI/CD Documentation
 
-This project uses GitHub Actions for automated building and publishing.
+This project uses GitHub Actions for testing, building and publishing.
 
 ## Workflows
 
+### 0. Tests (`test.yml`)
+
+Runs on every push to `master`, every pull request, and on demand.
+
+- **lint**: `ruff check src tests scripts`
+- **test**: `pytest -m "not integration"` on ubuntu, windows and macos, with
+  Python 3.11, 3.12, 3.13 and 3.14 (the supported versions)
+- **package**: builds the wheel, installs it with pip into a clean venv, and
+  runs `scripts/smoke_test.py --mcp --e2e` against the installed `dataforge`
+
+`scripts/smoke_test.py` treats `dataforge` as a black box and spends nothing:
+everyday commands, pure-JSON `--json` output, `update`/`uninstall` refusing a
+non-interactive caller, the MCP handshake, and two offline pipeline runs (a
+local site with a sitemap and one crawled by links, plus a fake
+OpenAI-compatible LLM server). Run it yourself against any install:
+
+```bash
+python scripts/smoke_test.py dataforge --mcp --e2e
+```
+
+### Release smoke test (`release-smoke.yml`)
+
+After each PyPI publish (and on demand, with an optional version), installs
+the released package with pip and with `uv tool` on every OS and Python 3.11
+to 3.14, and runs the smoke test against it.
+
 ### 1. Build Executables (`build-executables.yml`)
 
-Triggered when a version tag is pushed (e.g., `git tag v0.1.3`).
+Triggered when a version tag is pushed (e.g., `git tag v0.1.3`). Also runs on
+pull requests that change the build or the smoke test, and on demand; those
+runs build and smoke-test the binaries but do not create a release.
 
 **Steps:**
 1. Checks out the code
 2. Installs Python 3.11
 3. Installs the package and PyInstaller
-4. Builds standalone executables using PyInstaller
-5. Uploads artifacts to GitHub
+4. Builds standalone executables using PyInstaller, bundling the data files
+   and plugins PyInstaller cannot find by itself (`agent_guide.md`, litellm's
+   model price table, tiktoken's encoding plugin)
+5. Smoke-tests each binary (`scripts/smoke_test.py --mcp --e2e`); a failing
+   binary is never uploaded
+6. Uploads artifacts to GitHub
 
 **Outputs:**
 - `dataforge-windows-x64.exe` (Windows)

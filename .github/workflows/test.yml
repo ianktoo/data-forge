@@ -1,0 +1,81 @@
+name: Tests
+
+# Every push to master and every pull request: lint, the test suite on each
+# OS and supported Python (3.11 to 3.14), and the built package installed and smoke-tested as
+# a user would run it (scripts/smoke_test.py, offline, spends nothing).
+# The release workflows call this too (workflow_call) and publish nothing
+# unless it passes, so a fix that breaks another component cannot ship.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  # github.workflow is the caller's name under workflow_call, so the two
+  # release workflows running on the same tag do not cancel each other.
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.11'
+      - run: uv sync --frozen --extra dev
+      - run: uv run ruff check src tests scripts
+
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ['3.11', '3.12', '3.13', '3.14']   # keep in sync with pyproject classifiers
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --frozen --extra dev
+      # Live-network tests are marked `integration`; CI stays offline-safe.
+      - run: uv run pytest -m "not integration" --cov-report=
+
+  package:
+    # Build the wheel and install it the way users do, then drive the installed
+    # `dataforge` as a black box: everyday commands, MCP, and two offline
+    # pipeline runs against a local site and a fake LLM server.
+    name: package (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ['3.11', '3.14']   # oldest and newest supported
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv build --wheel
+      - name: Install the wheel into a clean venv (with pip, as users do)
+        shell: bash
+        run: |
+          uv venv --seed "$RUNNER_TEMP/venv" --python ${{ matrix.python }}
+          if [ "$RUNNER_OS" = "Windows" ]; then BIN="$RUNNER_TEMP/venv/Scripts"; else BIN="$RUNNER_TEMP/venv/bin"; fi
+          "$BIN/python" -m pip install "$(ls dist/*.whl)[mcp]"
+          echo "DF_BIN=$BIN" >> "$GITHUB_ENV"
+      - name: Smoke test the installed command
+        shell: bash
+        run: |
+          VERSION=$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)
+          "$DF_BIN/python" scripts/smoke_test.py "$DF_BIN/dataforge" --version "$VERSION" --mcp --e2e

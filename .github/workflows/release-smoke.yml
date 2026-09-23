@@ -1,0 +1,71 @@
+name: Release smoke test
+
+# Install the version users actually get from PyPI, with pip and with uv, on
+# every OS and supported Python (3.11 to 3.14), and smoke-test it
+# (scripts/smoke_test.py, offline, spends nothing). Runs after each PyPI publish, on demand, and on PRs
+# that change this workflow or the smoke test.
+
+on:
+  workflow_run:
+    workflows: ['Publish to PyPI']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to test (blank = latest on PyPI)'
+        required: false
+  pull_request:
+    paths:
+      - '.github/workflows/release-smoke.yml'
+      - 'scripts/smoke_test.py'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  smoke:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: ${{ matrix.installer }} (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ['3.11', '3.12', '3.13', '3.14']   # keep in sync with pyproject classifiers
+        installer: [pip, uv-tool]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Pick the version
+        shell: bash
+        run: |
+          V="${{ github.event.inputs.version }}"
+          if [ -z "$V" ] && [ "${{ github.event_name }}" = "workflow_run" ]; then
+            V="${{ github.event.workflow_run.head_branch }}"; V="${V#v}"
+          fi
+          if [ -z "$V" ]; then
+            V=$(curl -s https://pypi.org/pypi/llm-web-crawler/json | python3 -c "import json,sys;print(json.load(sys.stdin)['info']['version'])")
+          fi
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+          echo "Testing llm-web-crawler==$V"
+      - name: Install from PyPI (retry while the release propagates)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then sub=Scripts; else sub=bin; fi
+          for i in 1 2 3 4 5 6; do
+            if [ "${{ matrix.installer }}" = "pip" ]; then
+              uv venv --seed "$RUNNER_TEMP/venv" --python ${{ matrix.python }} --allow-existing &&
+              "$RUNNER_TEMP/venv/$sub/python" -m pip install --no-cache-dir "llm-web-crawler[mcp]==$VERSION" &&
+              echo "DF=$RUNNER_TEMP/venv/$sub/dataforge" >> "$GITHUB_ENV" && break
+            else
+              UV_TOOL_BIN_DIR="$RUNNER_TEMP/bin" uv tool install --refresh --python ${{ matrix.python }} "llm-web-crawler[mcp]==$VERSION" &&
+              echo "DF=$RUNNER_TEMP/bin/dataforge" >> "$GITHUB_ENV" && break
+            fi
+            echo "not installable yet, retrying in 60 s"; sleep 60
+          done
+          test -n "$(grep '^DF=' "$GITHUB_ENV")"
+      - name: Smoke test
+        shell: bash
+        run: uv run --no-project python scripts/smoke_test.py "$DF" --version "$VERSION" --mcp --e2e
