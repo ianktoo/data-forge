@@ -18,13 +18,12 @@ from . import ui
 _PAGE_SIZE = 30
 
 _HELP_TEXT = (
-    "[dim]  n[/dim]=next  [dim]p[/dim]=prev  "
-    "[dim]f <pat>[/dim]=filter  "
-    "[dim]x <#>[/dim]=deselect  [dim]+ <#>[/dim]=select  "
-    "[dim]x <a-b>[/dim]=range  "
-    "[dim]all[/dim]/[dim]none[/dim]  "
-    "[dim]i <#>[/dim]=inspect  "
-    "[dim]done[/dim]=proceed  [dim]back[/dim]=menu  [dim]?[/dim]=help"
+    "Type a command, then Enter:\n"
+    "  [bold]done[/] scrape the ticked pages   [bold]f blog[/] show only URLs containing 'blog'\n"
+    "  [bold]x 3[/] untick row 3 ([bold]x 3-8[/] for a range)   [bold]+ 3[/] tick it again   "
+    "[bold]all[/] / [bold]none[/]\n"
+    "  [bold]n[/] / [bold]p[/] next / previous page   [bold]i 3[/] details of row 3   "
+    "[bold]back[/] main menu   [bold]?[/] full help"
 )
 
 _HELP_FULL = """\
@@ -79,6 +78,7 @@ class _URLReviewer:
         self._selected: set[str] = set(urls)    # selected URLs (mutable)
         self._page: int = 0                      # 0-indexed current page
         self._filter: str = ""                   # active filter pattern
+        self._detail: str = ""                   # extra block for the next render (help, inspect)
 
     # ── Display ───────────────────────────────────────────────────────────────
 
@@ -86,18 +86,16 @@ class _URLReviewer:
         start = self._page * _PAGE_SIZE
         return self._view[start : start + _PAGE_SIZE]
 
-    def _render(self) -> None:
+    def _render(self, message: str = "", notice: str = "") -> None:
+        """Draw the whole review screen: table, then messages, then key hints."""
         page_urls = self._page_slice()
         total_pages = _page_count(len(self._view))
         n_selected = len(self._selected & set(self._view))
 
-        # Header line
-        filter_hint = f"  [dim]filter: {self._filter}[/]" if self._filter else ""
-        ui.console.print(
-            f"\n[bold cyan]URL Review[/]"
-            f"  Page [bold]{self._page + 1}[/] / {total_pages}"
-            f"  [green]{n_selected}[/] / {len(self._view)} selected"
-            f"{filter_hint}"
+        filter_hint = f"  ·  filter: {self._filter}" if self._filter else ""
+        ui.screen(
+            "Choose pages to scrape",
+            f"page {self._page + 1}/{total_pages}  ·  {n_selected}/{len(self._view)} ticked{filter_hint}",
         )
 
         table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
@@ -112,7 +110,14 @@ class _URLReviewer:
             table.add_row(str(row_num), check, _label(url))
 
         ui.console.print(table)
-        ui.info(_HELP_TEXT)
+        if notice:
+            ui.warn(notice)
+        if self._detail:
+            ui.console.print(self._detail)
+            self._detail = ""
+        if message:
+            ui.info(message)
+        ui.hints(_HELP_TEXT)
 
     # ── Command handlers ──────────────────────────────────────────────────────
 
@@ -175,8 +180,9 @@ class _URLReviewer:
             return f"Row {n} not on current page."
         url = page_urls[local]
         parsed = urlparse(url)
-        ui.console.print(
-            f"\n[bold]URL #{n}[/]\n"
+        # Shown on the next redraw, so it survives the screen clear.
+        self._detail = (
+            f"[bold]URL #{n}[/]\n"
             f"  Full URL:  [cyan]{url}[/]\n"
             f"  Scheme:    {parsed.scheme}\n"
             f"  Host:      {parsed.netloc}\n"
@@ -248,8 +254,8 @@ class _URLReviewer:
         if cmd in ("q", "quit", "back", "b"):
             return "", None  # type: ignore[return-value]
 
-        if cmd == "?":
-            ui.console.print(_HELP_FULL)
+        if cmd in ("?", "h", "help"):
+            self._detail = _HELP_FULL
             return "", False
 
         return f"Unknown command '{raw.strip()}' — type ? for help.", False
@@ -260,8 +266,12 @@ class _URLReviewer:
         return sorted(self._selected, key=lambda u: order.get(u, 0))
 
 
-async def run_url_review(urls: list[str]) -> list[str]:
+async def run_url_review(urls: list[str], notice: str = "") -> list[str]:
     """Interactive URL review: paginated browser with filter, select, and inspect.
+
+    The screen is redrawn after every command instead of appended to, so the
+    table, messages and key hints stay in the same place. ``notice`` (e.g. a
+    mixed-language warning) is shown on every redraw.
 
     Returns the user-approved subset in original discovery order.
     """
@@ -272,8 +282,9 @@ async def run_url_review(urls: list[str]) -> list[str]:
 
     session: PromptSession[str] = PromptSession(style=_PT_STYLE)
 
+    msg = ""
     while True:
-        reviewer._render()
+        reviewer._render(msg, notice)
 
         try:
             raw = await session.prompt_async("  review> ")
@@ -288,32 +299,25 @@ async def run_url_review(urls: list[str]) -> list[str]:
             ui.info("Returning to menu.")
             return []
 
-        if msg:
-            ui.info(msg)
-
         if done:
             selected = reviewer.selected_urls()
             total = len(urls)
             picked = len(selected)
 
             if picked == 0:
-                ui.warn("No URLs selected — returning to review.")
+                msg = "No URLs ticked yet. Tick some with + <row> or all, then type done."
                 continue
-
-            ui.info(
-                f"[bold]{picked}[/] / {total} URL{'s' if picked != 1 else ''} selected."
-            )
 
             _QSTYLE = QStyle([
                 ("qmark", "fg:cyan bold"), ("question", "bold"),
                 ("answer", "fg:cyan bold"), ("pointer", "fg:cyan bold"),
             ])
             confirmed = await questionary.confirm(
-                f"Proceed with {picked} URL{'s' if picked != 1 else ''}?",
+                f"Scrape {picked} of {total} page{'s' if picked != 1 else ''}?",
                 default=True,
                 style=_QSTYLE,
             ).ask_async()
 
             if confirmed:
                 return selected
-            # User said no — keep browsing
+            msg = "Selection kept. Keep editing, then type done."

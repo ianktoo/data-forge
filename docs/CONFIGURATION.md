@@ -23,7 +23,8 @@ Run `dataforge config` to set your provider and API key interactively.
 | `DATAFORGE_MAX_CRAWL_DEPTH` | `3` | Max link depth for the fallback crawl (the seed is depth 0) |
 | `DATAFORGE_CHUNK_SIZE` | `512` | Tokens per chunk |
 | `DATAFORGE_CHUNK_OVERLAP` | `64` | Token overlap between chunks |
-| `DATAFORGE_LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+| `DATAFORGE_LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR`. Terminal level; the interactive menu shows `WARNING` and above unless this is set. The log file always records `INFO`. |
+| `DATAFORGE_NO_CLEAR` | unset | Set to `1` to keep all output instead of clearing the screen between steps |
 | `DATAFORGE_OUTPUT_DIR` | `./output` | Session output directory (logs also stored here in `logs/`) |
 | `DATAFORGE_DB_PATH` | `./dataforge.db` | SQLite database path |
 | `DATAFORGE_AUTOSAVE` | `true` | Checkpoint progress to the session DB after every stage |

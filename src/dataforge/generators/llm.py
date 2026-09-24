@@ -7,13 +7,17 @@ from dataclasses import dataclass
 from typing import Any
 
 import litellm
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 
 from dataforge.config import endpoint_kwargs, get_settings, litellm_model, model_supports_thinking
 from dataforge.utils import get_logger
+from dataforge.utils.errors import MissingCredentialError
 
 log = get_logger("llm")
 litellm.set_verbose = False
+# Otherwise LiteLLM prints a "Give Feedback / Get Help" banner on every
+# failed call, which floods the terminal when a key is missing or invalid.
+litellm.suppress_debug_info = True
 
 
 class BudgetTracker:
@@ -122,6 +126,9 @@ class LLMClient:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=20),
+        # A bad or missing key fails the same way every time; retrying only
+        # adds backoff delay before the run can stop.
+        retry=retry_if_not_exception_type(MissingCredentialError),
         reraise=True,
     )
     async def _complete_impl(
@@ -165,8 +172,7 @@ class LLMClient:
             self.usage.errors += 1
             msg = str(exc).lower()
             # Surface actionable errors without a raw traceback
-            if "auth" in msg or "api key" in msg or "401" in msg or "403" in msg:
-                from dataforge.utils.errors import MissingCredentialError
+            if "auth" in msg or "api key" in msg or "api_key" in msg or "401" in msg or "403" in msg:
                 _KEY_MAP = {
                     "openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY",
                     "google": "GEMINI_API_KEY",
@@ -295,8 +301,7 @@ class LLMClient:
         except Exception as exc:
             self.usage.errors += 1
             msg = str(exc).lower()
-            if "auth" in msg or "api key" in msg or "401" in msg or "403" in msg:
-                from dataforge.utils.errors import MissingCredentialError
+            if "auth" in msg or "api key" in msg or "api_key" in msg or "401" in msg or "403" in msg:
                 _KEY_MAP = {
                     "openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY",
                     "google": "GEMINI_API_KEY",
