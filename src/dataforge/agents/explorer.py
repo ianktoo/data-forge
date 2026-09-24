@@ -49,8 +49,9 @@ class ExplorerAgent(BaseAgent):
         # Deduplicate (already maintained by source_map insertion order)
         discovered = all_urls
 
-        # Optionally skip URLs already scraped in any previous session
-        if self.ctx.skip_known and discovered:
+        # Optionally skip URLs already scraped in any previous session. Pages
+        # named one by one are what the user asked for, so they are kept.
+        if self.ctx.skip_known and discovered and self.ctx.discovery_scope != "page":
             discovered = self._filter_already_scraped(discovered)
 
         self.ctx.discovered_urls = discovered
@@ -70,8 +71,12 @@ class ExplorerAgent(BaseAgent):
             urls = await parse_sitemap(client, seed)
             return (urls if urls else [seed], URLSource.sitemap)
 
+        scope = self.ctx.discovery_scope
+        if scope == "page":
+            return ([seed], URLSource.manual)
+
         # 2. Try to discover sitemaps (every one robots.txt lists, #60)
-        sitemap_urls = await discover_sitemap_urls(client, base)
+        sitemap_urls = [] if scope == "links" else await discover_sitemap_urls(client, base)
         sitemap_url = ", ".join(sitemap_urls)
         if sitemap_urls:
             raw_urls = await parse_sitemaps(client, sitemap_urls)
@@ -104,7 +109,8 @@ class ExplorerAgent(BaseAgent):
 
         # 3. Fall back to BFS crawl from seed URL
         self.log.info(
-            f"No usable sitemap for {base}, starting BFS crawl "
+            f"{'Following links from ' + seed if scope == 'links' else 'No usable sitemap for ' + base}, "
+            "starting BFS crawl "
             f"(max_pages={self.ctx.settings.max_crawl_pages}, max_depth={self.ctx.settings.max_crawl_depth})"
         )
         crawled = await crawl(

@@ -9,7 +9,7 @@ from dataforge.agents.quality import QualityAgent
 
 # ── Language group detection ───────────────────────────────────────────────────
 # Import the private helper directly from app module
-from dataforge.cli.app import _detect_language_groups
+from dataforge.cli.url_review import language_groups as _detect_language_groups
 from dataforge.storage import DataFormat, SyntheticSample, open_session
 
 

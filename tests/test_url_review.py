@@ -1,11 +1,15 @@
 """Tests for the interactive URL review module and related helpers."""
 from __future__ import annotations
 
+import contextlib
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
 
 from dataforge.collectors.sitemap import filter_urls
 from dataforge.storage.database import init_db, open_session, persist_url_selection
@@ -272,7 +276,18 @@ def test_reviewer_unknown_command():
     assert "Unknown command" in msg
 
 
-# ── run_url_review integration (mocked PromptSession + questionary.confirm) ───
+# ── run_url_review integration (keys sent through a pipe input) ─────────────
+
+DOWN, UP, ENTER = "\x1b[B", "\x1b[A", "\r"
+
+
+@contextlib.contextmanager
+def keys(text: str):
+    """Run the review screen against *text* as typed keys."""
+    with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
+        inp.send_text(text)
+        yield
+
 
 @pytest.mark.asyncio
 async def test_run_url_review_empty_input():
@@ -282,103 +297,114 @@ async def test_run_url_review_empty_input():
 
 
 @pytest.mark.asyncio
-async def test_run_url_review_done_and_confirm():
-    """done command + confirm=True returns selected URLs."""
+async def test_run_url_review_enter_and_confirm():
+    """Enter + confirm returns every URL (all start ticked)."""
     from dataforge.cli.url_review import run_url_review
 
     urls = ["https://example.com/a", "https://example.com/b"]
-
-    with (
-        patch("dataforge.cli.url_review.PromptSession") as MockSession,
-        patch("dataforge.cli.url_review.questionary") as mock_q,
-    ):
-        MockSession.return_value.prompt_async = AsyncMock(return_value="done")
+    with keys(ENTER), patch("dataforge.cli.url_review.questionary") as mock_q:
         mock_q.confirm.return_value.ask_async = AsyncMock(return_value=True)
-
         result = await run_url_review(urls)
-
-    assert set(result) == set(urls)
+    assert result == urls
 
 
 @pytest.mark.asyncio
-async def test_run_url_review_deselect_then_done():
-    """Deselecting a URL before done excludes it from result."""
+async def test_run_url_review_space_unticks_row():
+    """Space unticks the row under the cursor and moves down."""
     from dataforge.cli.url_review import run_url_review
 
-    urls = ["https://example.com/a", "https://example.com/b"]
-    commands = ["x 1", "done"]
-    call_idx = 0
-
-    async def next_cmd(*_a, **_kw):
-        nonlocal call_idx
-        cmd = commands[call_idx % len(commands)]
-        call_idx += 1
-        return cmd
-
-    with (
-        patch("dataforge.cli.url_review.PromptSession") as MockSession,
-        patch("dataforge.cli.url_review.questionary") as mock_q,
-    ):
-        MockSession.return_value.prompt_async = next_cmd
+    urls = ["https://example.com/a", "https://example.com/b", "https://example.com/c"]
+    # untick a (cursor moves to b), skip b, untick c
+    with keys(" " + DOWN + " " + ENTER), patch("dataforge.cli.url_review.questionary") as mock_q:
         mock_q.confirm.return_value.ask_async = AsyncMock(return_value=True)
-
         result = await run_url_review(urls)
-
     assert result == ["https://example.com/b"]
 
 
 @pytest.mark.asyncio
-async def test_run_url_review_ctrl_c_cancels():
-    """Ctrl-C / KeyboardInterrupt during prompt returns empty list."""
-    from dataforge.cli.url_review import run_url_review
-
-    urls = ["https://example.com/a"]
-
-    with patch("dataforge.cli.url_review.PromptSession") as MockSession:
-        MockSession.return_value.prompt_async = AsyncMock(side_effect=KeyboardInterrupt)
-        result = await run_url_review(urls)
-
-    assert result == []
-
-
-@pytest.mark.asyncio
-async def test_run_url_review_filter_then_done():
-    """Filter command narrows the view; done returns only filtered+selected set."""
+async def test_run_url_review_filter_then_untick_all_shown():
+    """/ filters as you type; a unticks everything shown."""
     from dataforge.cli.url_review import run_url_review
 
     urls = ["https://example.com/blog/a", "https://example.com/products/b"]
-    commands = ["f /blog/*", "done"]
-    call_idx = 0
-
-    async def next_cmd(*_a, **_kw):
-        nonlocal call_idx
-        cmd = commands[call_idx % len(commands)]
-        call_idx += 1
-        return cmd
-
-    with (
-        patch("dataforge.cli.url_review.PromptSession") as MockSession,
-        patch("dataforge.cli.url_review.questionary") as mock_q,
-    ):
-        MockSession.return_value.prompt_async = next_cmd
+    with keys("/blog" + ENTER + "a" + ENTER), patch("dataforge.cli.url_review.questionary") as mock_q:
         mock_q.confirm.return_value.ask_async = AsyncMock(return_value=True)
-
         result = await run_url_review(urls)
-
-    # The filter changes the view but selected still includes all — only the
-    # confirm step matters. Selection is never auto-removed by filtering.
-    assert "https://example.com/blog/a" in result
+    assert result == ["https://example.com/products/b"]
 
 
 @pytest.mark.asyncio
-async def test_run_url_review_quit_returns_empty():
-    """q command returns empty list (user aborted)."""
+async def test_run_url_review_typed_command():
+    """: opens the command line for the typed commands (x 1-2)."""
     from dataforge.cli.url_review import run_url_review
 
-    urls = ["https://example.com/a"]
-
-    with patch("dataforge.cli.url_review.PromptSession") as MockSession:
-        MockSession.return_value.prompt_async = AsyncMock(return_value="q")
+    urls = ["https://example.com/a", "https://example.com/b", "https://example.com/c"]
+    with keys(":x 1-2" + ENTER + ENTER), patch("dataforge.cli.url_review.questionary") as mock_q:
+        mock_q.confirm.return_value.ask_async = AsyncMock(return_value=True)
         result = await run_url_review(urls)
+    assert result == ["https://example.com/c"]
 
+
+@pytest.mark.asyncio
+async def test_run_url_review_q_returns_empty():
+    from dataforge.cli.url_review import run_url_review
+    with keys("q"):
+        result = await run_url_review(["https://example.com/a"])
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_run_url_review_ctrl_c_cancels():
+    from dataforge.cli.url_review import run_url_review
+    with keys("\x03"):
+        result = await run_url_review(["https://example.com/a"])
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_run_url_review_language_choice_ticks_one_language():
+    """On a multilingual site, the language picked up front is the only one ticked."""
+    from dataforge.cli.url_review import run_url_review
+
+    urls = [
+        "https://example.com/floods",
+        "https://example.com/fires",
+        "https://example.com/es/inundaciones",
+        "https://example.com/fr/inondations",
+    ]
+    with keys(ENTER), patch("dataforge.cli.url_review.questionary") as mock_q:
+        mock_q.select.return_value.ask_async = AsyncMock(return_value="")
+        mock_q.confirm.return_value.ask_async = AsyncMock(return_value=True)
+        result = await run_url_review(urls)
+    assert result == ["https://example.com/floods", "https://example.com/fires"]
+
+
+# ── keyboard helpers on _URLReviewer ──────────────────────────────────────────
+
+def test_reviewer_turn_page_moves_cursor():
+    r = make_reviewer([f"https://example.com/p{i}" for i in range(65)])
+    r.turn_page(1)
+    assert r._page == 1 and r._cursor == 30
+    assert r.turn_page(5) == "Already on the last page."
+    r.turn_page(-1)
+    assert r._cursor == 0
+
+
+def test_reviewer_cycle_language():
+    r = make_reviewer([
+        "https://example.com/a", "https://example.com/b", "https://example.com/es/a",
+    ])
+    r.cycle_language()          # most common first: no marker
+    assert r._view == ["https://example.com/a", "https://example.com/b"]
+    r.cycle_language()          # then es
+    assert r._view == ["https://example.com/es/a"]
+    r.cycle_language()          # back to all
+    assert len(r._view) == 3
+
+
+def test_url_language():
+    from dataforge.cli.url_review import url_language
+    assert url_language("https://example.com/es/terremotos") == "es"
+    assert url_language("https://example.com/pt-br/x") == "pt-br"
+    assert url_language("https://example.com/page?lang=fr") == "fr"
+    assert url_language("https://example.com/us/news") == ""

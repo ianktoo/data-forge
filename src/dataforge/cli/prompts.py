@@ -120,6 +120,36 @@ async def ask_input_method() -> str | None:
     return answer
 
 
+async def ask_discovery_scope(n_urls: int) -> str | None:
+    """How far to go from the URLs given: just them, their links, or the whole site."""
+    one = n_urls == 1
+    return await questionary.select(
+        "Scrape just this page, or search for more?" if one
+        else "Scrape just these pages, or search for more?",
+        choices=[
+            questionary.Choice(
+                "Just this page" if one else "Just these pages", value="page",
+                description="No discovery: go straight to scraping "
+                            f"{'this URL' if one else 'these URLs'}.",
+            ),
+            questionary.Choice(
+                "Deep link search: follow links from " + ("this page" if one else "these pages"),
+                value="links",
+                description="Crawl the pages they link to on the same site, "
+                            "then pick which to keep.",
+            ),
+            questionary.Choice(
+                "The whole site", value="site",
+                description="Read the site's sitemap (or crawl it when there is none), "
+                            "then pick which pages to keep.",
+            ),
+            questionary.Separator(),
+            questionary.Choice("(b) Back", value=None),
+        ],
+        **_q(),
+    ).ask_async()
+
+
 async def ask_single_url() -> str | None:
     url = await questionary.text(
         "Enter URL:",
