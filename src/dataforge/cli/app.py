@@ -426,6 +426,7 @@ async def _resume_session(session_id: str | None) -> None:
         format=DataFormat(session.format),
         seed_urls=session.seed_url_list(),
         settings=s,
+        discovery_scope=session.config().get("discovery_scope", "site"),
     )
 
     # Re-hydrate prior-stage data from DB so _checkpoint() doesn't zero out saved counts
@@ -804,10 +805,16 @@ async def _configure() -> None:
     from dataforge.cli import prefs as user_prefs
     user_prefs.set("llm_provider", provider)
     user_prefs.set("llm_model", model)
+    # Settings is loaded once per process: without this, a change made from
+    # the menu only took effect after a restart, and the next run still
+    # checked the old provider's key.
+    s = get_settings()
+    s.llm_provider = provider
+    s.llm_model = model
 
     if info.requires_key:
         import getpass
-        existing = os.getenv(info.key_env, "")
+        existing = os.getenv(info.key_env, "") or user_prefs.get_api_key(info.key_env)
         masked = f"{existing[:8]}..." if len(existing) > 8 else ("set" if existing else "")
         prompt_label = (
             f"  {info.key_env} [{masked}] (leave blank to keep): "
@@ -825,7 +832,9 @@ async def _configure() -> None:
                 updated = _set_env_var(updated, info.key_env, key_value)
                 env_path.write_text("\n".join(updated) + "\n")
                 ui.success(f"Saved {info.key_env} to {env_path.resolve()}")
-        elif not existing:
+        elif existing:
+            os.environ.setdefault(info.key_env, existing)
+        else:
             ui.info(f"No key entered — set {info.key_env} via 'dataforge config' when ready")
 
     ui.success(f"Saved: provider={provider}, model={model}")
@@ -1463,7 +1472,7 @@ async def _browse_discovered_urls(session_id: str) -> None:
         ui.info("No URLs discovered yet for this session.")
         return
     ui.info(f"[dim]Browsing {len(urls)} discovered URLs — changes are not saved[/]")
-    await run_url_review(urls)  # read-only: return value discarded
+    await run_url_review(urls, ask_language=False)  # read-only: return value discarded
 
 
 # ── Explore menu (interactive data browser) ────────────────────────────────────
@@ -1582,6 +1591,15 @@ async def _step_urls(state: dict) -> StepResult:
         ui.error("No valid URLs provided")
         return "back"
     state["seed_urls"] = result
+    # A sitemap already lists the pages to choose from; anything else could
+    # mean one page or a whole site, so ask rather than always crawling.
+    if all(u.lower().endswith(".xml") for u in result):
+        state["discovery_scope"] = "site"
+    else:
+        scope = await prompts.ask_discovery_scope(len(result))
+        if scope is None:
+            return "back"
+        state["discovery_scope"] = scope
     return "next"
 
 
@@ -1640,8 +1658,11 @@ async def _step_config(state: dict) -> StepResult:
 
         from urllib.parse import urlparse as _urlparse
         seed_domain = _urlparse(state.get("seed_urls", [""])[0]).netloc or "this site"
-        skip_known = await prompts.ask_skip_known(seed_domain)
-        state["skip_known"] = skip_known
+        # Pages named one by one are scraped even if seen before.
+        if state.get("discovery_scope", "site") != "page":
+            state["skip_known"] = await prompts.ask_skip_known(seed_domain)
+        else:
+            state["skip_known"] = False
 
         threshold = await prompts.ask_quality_threshold()
         if threshold is None:
@@ -1776,6 +1797,7 @@ async def _interactive_pipeline() -> None:
             n_per_chunk=state["n_per_chunk"],
             ignore_robots=state.get("ignore_robots", False),
             skip_known=state.get("skip_known", False),
+            discovery_scope=state.get("discovery_scope", "site"),
             quality_threshold=state.get("quality_threshold", 0.5),
             generation_model=state.get("generation_model", ""),
             quality_model=state.get("quality_model", ""),
@@ -1887,23 +1909,6 @@ _NEXT_STAGE = {
     PipelineStage.quality:    PipelineStage.export,
 }
 
-_LANG_RE = re.compile(
-    r"/([a-z]{2}(?:-[a-z]{2})?)/|[?&]lang(?:uage)?=([a-z]{2})|[?&]locale=([a-z]{2})",
-    re.IGNORECASE,
-)
-
-
-def _detect_language_groups(urls: list[str]) -> dict[str, int]:
-    """Return {locale_code: count} for URLs containing language/locale patterns."""
-    counts: dict[str, int] = {}
-    for url in urls:
-        m = _LANG_RE.search(url)
-        if m:
-            lang = next(g for g in m.groups() if g).lower()
-            counts[lang] = counts.get(lang, 0) + 1
-    return counts
-
-
 async def _adjust_settings(context: PipelineContext) -> None:
     """Mid-session settings menu — change the model or output dir between stages.
 
@@ -2006,19 +2011,12 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
             ui.warn("Discovery returned 0 URLs. Check that the site has a reachable sitemap or provide a direct sitemap URL.")
             return False
 
-        # The review screen lists the URLs itself; printing them here as well
-        # only pushed the review's key hints off screen.
-        notice = ""
-        lang_groups = _detect_language_groups(context.discovered_urls)
-        if len(lang_groups) >= 2:
-            top = ", ".join(f"{k} ({v})" for k, v in sorted(lang_groups.items(), key=lambda x: -x[1])[:5])
-            notice = (
-                f"Several languages found: {top}. "
-                "To keep one, filter it, e.g. [bold]f /en/[/], then [bold]none[/] / [bold]all[/] as needed."
-            )
-
-        from .url_review import run_url_review
-        selected = await run_url_review(context.discovered_urls, notice=notice)
+        if context.discovery_scope == "page":
+            # The user named the pages; there is nothing to choose from.
+            selected = list(context.discovered_urls)
+        else:
+            from .url_review import run_url_review
+            selected = await run_url_review(context.discovered_urls)
 
         if not selected:
             ui.warn("No URLs selected — returning to menu.")

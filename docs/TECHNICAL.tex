@@ -201,10 +201,15 @@ installed. The browser passes the same gate as every other request
 (\texttt{robots.txt}, rate limit, DataForge's User-Agent), does not load
 images, media or fonts, and is not used at all on a site that declares a
 \texttt{Crawl-delay}, because the sub-requests of a page load cannot be
-spaced one per delay. In interactive use, discovery is followed by a
-review step --- substring, glob, or regex filtering plus per-URL
-selection --- that a recipe replaces declaratively with
-\texttt{source.include} / \texttt{source.exclude} / \texttt{source.max\_urls}.
+spaced one per delay. In interactive use, seed URLs that are not a
+sitemap come with a choice of scope: only the given pages (discovery is
+skipped), the pages they link to (a crawl from the seeds without the
+sitemap), or the whole site. Discovery is then followed by a review
+step: on a site served in several languages the user first picks the one
+to keep, then filters by substring, glob or regular expression and ticks
+URLs from the keyboard. A recipe replaces this step declaratively with
+\texttt{source.language} / \texttt{source.include} /
+\texttt{source.exclude} / \texttt{source.max\_urls}.
 
 \subsection{Collection}
 \label{sec:collection}

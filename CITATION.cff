@@ -12,7 +12,7 @@ authors:
     orcid: 'https://orcid.org/0009-0000-4888-1941'
     affiliation: William Jessup University
 repository-code: 'https://github.com/ianktoo/data-forge'
-version: 2.6.0
+version: 2.7.0
 date-released: '2026-09-24'
 abstract: >-
   DataForge is an open-source pipeline for building synthetic
