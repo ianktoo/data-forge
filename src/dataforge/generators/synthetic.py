@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from dataforge.processors.formatter import DataRecord
 from dataforge.utils import get_logger
-from dataforge.utils.errors import BudgetExceededError
+from dataforge.utils.errors import BudgetExceededError, LLMConnectionError, MissingCredentialError
 
 from .contracts import GenerationParseError, to_message_dict, to_message_list
 from .llm import LLMClient
@@ -60,6 +60,10 @@ async def generate_from_chunk(
     except BudgetExceededError as exc:
         log.debug(f"Skipping chunk {record.chunk_id}: {exc}")
         return []
+    except (MissingCredentialError, LLMConnectionError):
+        # Fatal for every chunk, not just this one: let the caller stop the run
+        # instead of repeating the same failure once per remaining chunk.
+        raise
     except Exception as exc:
         log.warning(f"Generation failed for chunk {record.chunk_id}: {exc}")
         return []
@@ -115,11 +119,15 @@ async def _generate_with_thinking(
                     messages,
                     on_thinking=on_thinking,
                 )
+        except (MissingCredentialError, LLMConnectionError):
+            raise
         except Exception as exc:
             log.warning(f"Thinking-stream generation failed for chunk {record.chunk_id}: {exc}")
             # Fall back to regular completion
             try:
                 resp = await client.complete(messages)
+            except (MissingCredentialError, LLMConnectionError):
+                raise
             except Exception:
                 return []
 
@@ -138,20 +146,36 @@ async def generate_batch(
     concurrency: int = 3,
 ) -> AsyncIterator[GeneratedSample]:
     sem = asyncio.Semaphore(concurrency)
+    stopped = False
 
     async def _worker(rec: DataRecord):
+        nonlocal stopped
         async with sem:
-            return await generate_from_chunk(
-                client, rec,
-                format=format, goal=goal,
-                n_per_chunk=n_per_chunk, custom_system=custom_system,
-            )
+            # A fatal error in another worker means this call would fail too.
+            if stopped:
+                return []
+            try:
+                return await generate_from_chunk(
+                    client, rec,
+                    format=format, goal=goal,
+                    n_per_chunk=n_per_chunk, custom_system=custom_system,
+                )
+            except (MissingCredentialError, LLMConnectionError):
+                stopped = True
+                raise
 
     tasks = [asyncio.create_task(_worker(r)) for r in records]
-    for coro in asyncio.as_completed(tasks):
-        samples = await coro
-        for s in samples:
-            yield s
+    try:
+        for coro in asyncio.as_completed(tasks):
+            samples = await coro
+            for s in samples:
+                yield s
+    finally:
+        # On a fatal error (or the consumer stopping early) the queued chunks
+        # must not keep calling the LLM in the background.
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 # ── Parsing helpers ────────────────────────────────────────────────────────────
