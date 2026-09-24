@@ -123,12 +123,13 @@ async def ask_input_method() -> str | None:
 async def ask_single_url() -> str | None:
     url = await questionary.text(
         "Enter URL:",
-        validate=lambda v: _valid_url(v) or "Enter a valid http(s) URL",
+        instruction="(paste it; quotes are fine)",
+        validate=lambda v: _valid_url(clean_input(v)) or "Enter a valid http(s) URL, e.g. https://example.com",
         **_q(),
     ).ask_async()
     if url is None:
         return None
-    return url.strip()
+    return clean_input(url)
 
 
 async def ask_multiple_urls() -> list[str] | None:
@@ -139,18 +140,19 @@ async def ask_multiple_urls() -> list[str] | None:
     ).ask_async()
     if raw is None:
         return None
-    return [u.strip() for u in raw.splitlines() if u.strip() and _valid_url(u.strip())]
+    return [u for u in _split_urls(raw) if _valid_url(u)]
 
 
 async def ask_file_path() -> Path | None:
     path = await questionary.path(
         "Path to URL file:",
-        validate=lambda v: Path(v).exists() or "File not found",
+        instruction="(drag the file here or paste its path; quotes are fine)",
+        validate=lambda v: _path_exists(v) or f"File not found: {clean_input(v)}",
         **_q(),
     ).ask_async()
     if path is None:
         return None
-    return Path(path)
+    return Path(clean_input(path)).expanduser()
 
 
 async def ask_goal() -> str | None:
@@ -223,7 +225,7 @@ async def ask_output_dir(default: str = "./output") -> str | None:
     ).ask_async()
     if answer is None:
         return None
-    return answer.strip() or default
+    return clean_input(answer) or default
 
 
 async def ask_session_name() -> str | None:
@@ -274,17 +276,36 @@ async def ask_skip_known(domain: str) -> bool:
 
 # ── Stage checkpoints ─────────────────────────────────────────────────────────
 
-async def ask_stage_action(stage: str) -> str:
+async def ask_stage_action(stage: str, next_stage: str = "") -> str:
+    """Checkpoint menu between stages. Each choice explains itself below the list."""
+    nxt = f": {next_stage}" if next_stage else ""
     return await questionary.select(
-        f"Stage '{stage}' complete. What next?",
+        f"{stage} finished. What next?",
         choices=[
-            questionary.Choice("Continue to next stage", value="continue"),
-            questionary.Choice("Adjust settings (model / output dir)", value="adjust"),
-            questionary.Choice("Export available data now", value="export"),
-            questionary.Choice("Save and exit (resume later)", value="pause"),
+            questionary.Choice(
+                f"Continue{nxt}", value="continue",
+                description=f"Run the next step{nxt}.",
+            ),
+            questionary.Choice(
+                "Export what I have so far", value="export",
+                description="Save pages, chunks or samples as Markdown, text, JSON or CSV. "
+                            "You can keep going afterwards.",
+            ),
+            questionary.Choice(
+                "What happens next?", value="explain",
+                description="Explain every step and what the next one will do.",
+            ),
+            questionary.Choice(
+                "Change model or output folder", value="adjust",
+                description="Takes effect from the next step.",
+            ),
+            questionary.Choice(
+                "Stop here (resume later)", value="pause",
+                description="Everything is saved. Pick 'Continue a paused project' from the menu later.",
+            ),
         ],
         **_q(),
-    ).ask_async()
+    ).ask_async() or "pause"
 
 
 async def ask_adjust_settings_target() -> str | None:
@@ -302,6 +323,34 @@ async def ask_adjust_settings_target() -> str | None:
 
 
 # ── Export ────────────────────────────────────────────────────────────────────
+
+async def ask_export_what(options: list[tuple[str, str, str]]) -> list[str]:
+    """Pick what to export. ``options`` is [(label, value, description)]."""
+    answer = await questionary.checkbox(
+        "What do you want to export?",
+        choices=[
+            questionary.Choice(label, value=value, description=desc, checked=(i == 0))
+            for i, (label, value, desc) in enumerate(options)
+        ],
+        instruction="(Space to tick, Enter to confirm)",
+        **_q(),
+    ).ask_async()
+    return answer or []
+
+
+async def ask_export_formats(label: str, formats: tuple[str, ...], names: dict[str, str]) -> list[str]:
+    answer = await questionary.checkbox(
+        f"{label}: which formats?",
+        choices=[
+            questionary.Choice(names.get(f, f), value=f, checked=(i == 0))
+            for i, f in enumerate(formats)
+        ],
+        instruction="(Space to tick, Enter to confirm)",
+        validate=lambda v: bool(v) or "Tick at least one format",
+        **_q(),
+    ).ask_async()
+    return answer or []
+
 
 async def ask_export_targets(hf_configured: bool, kg_configured: bool) -> list[str]:
     choices = [questionary.Choice("Local files (JSONL / Parquet / CSV)", value="local")]
@@ -414,4 +463,39 @@ def _valid_url(v: str) -> bool:
 
 def read_url_file(path: Path) -> list[str]:
     lines = path.read_text(encoding="utf-8").splitlines()
-    return [line.strip() for line in lines if line.strip() and not line.startswith("#") and _valid_url(line.strip())]
+    return [
+        u for line in lines
+        if not line.strip().startswith("#")
+        for u in _split_urls(line)
+        if _valid_url(u)
+    ]
+
+
+# Straight and curly quotes people paste around paths and URLs.
+_QUOTE_PAIRS = {'"': '"', "'": "'", "`": "`", "“": "”", "‘": "’", "<": ">"}
+
+
+def clean_input(value: str) -> str:
+    r"""Normalise a pasted path or URL.
+
+    Handles what terminals and file managers add around a path: surrounding
+    quotes (Windows "Copy as path"), PowerShell's drag-and-drop form
+    ``& 'C:\dir\file.txt'``, and stray whitespace.
+    """
+    v = (value or "").strip()
+    if v.startswith("& "):
+        v = v[2:].strip()
+    while len(v) >= 2 and _QUOTE_PAIRS.get(v[0]) == v[-1]:
+        v = v[1:-1].strip()
+    return v
+
+
+def _split_urls(text: str) -> list[str]:
+    """URLs from free text: one per line, or separated by commas or spaces."""
+    parts = text.replace(",", " ").split()
+    return [c for c in (clean_input(p) for p in parts) if c]
+
+
+def _path_exists(value: str) -> bool:
+    v = clean_input(value)
+    return bool(v) and Path(v).expanduser().exists()

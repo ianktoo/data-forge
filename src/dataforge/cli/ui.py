@@ -67,6 +67,36 @@ def section(title: str) -> None:
     console.rule(f"[bold]{title}[/]", style="cyan")
 
 
+def _can_clear() -> bool:
+    import os
+    # DATAFORGE_NO_CLEAR=1 keeps the full scrollback (useful when debugging).
+    return console.is_terminal and not os.getenv("DATAFORGE_NO_CLEAR")
+
+
+def screen(title: str, subtitle: str = "") -> None:
+    """Start a fresh screen: clear the terminal, then a one-line title bar.
+
+    Every interactive screen follows the same layout so users always know
+    where to look: title at the top, content in the middle, then status
+    messages, then key hints directly above the prompt (see ``hints``).
+    """
+    if _can_clear():
+        console.clear()
+    else:
+        console.print("")
+    head = f"[bold cyan]DataForge[/]  [bold]{title}[/]"
+    if subtitle:
+        head += f"  [dim]{subtitle}[/]"
+    console.print(head)
+    console.rule(style="cyan")
+
+
+def hints(text: str) -> None:
+    """Key hints for the prompt below. Always the last thing before a prompt."""
+    console.rule(style="dim")
+    console.print(f"[dim]{text}[/]")
+
+
 def url_table(urls: list[str], selected: list[bool] | None = None, max_rows: int = 30) -> None:
     t = Table(box=box.SIMPLE_HEAD, show_footer=False)
     t.add_column("#", style="dim", width=5)

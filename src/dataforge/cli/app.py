@@ -115,12 +115,18 @@ def _apply_project_file(s, cwd: Path) -> None:
         pass  # Malformed file: ignore and fall back to defaults
 
 
-def _bootstrap() -> None:
+def _bootstrap(interactive: bool = False) -> None:
     from dataforge.cli.preflight import check_env_file
     check_env_file()
     s = get_settings()
     _apply_project_file(s, Path.cwd())
-    setup_logging(s.logs_dir(), s.log_level)
+    level = s.log_level
+    # The interactive screens already show progress; INFO log lines on top of
+    # them are what made the terminal scroll away. They still go to the log
+    # file. An explicit DATAFORGE_LOG_LEVEL wins.
+    if interactive and not os.getenv("DATAFORGE_LOG_LEVEL"):
+        level = "WARNING"
+    setup_logging(s.logs_dir(), level)
     init_db(s.db_path)
 
 
@@ -159,7 +165,7 @@ def main(
         # Rich respects the NO_COLOR env var; set it so all consoles pick it up
         os.environ["NO_COLOR"] = "1"
     if ctx.invoked_subcommand is None:
-        _bootstrap()
+        _bootstrap(interactive=True)
         if not quiet:
             ui.banner()
         asyncio.run(_interactive_pipeline())
@@ -170,7 +176,7 @@ def main(
 @app.command()
 def pipeline() -> None:
     """Start a new interactive pipeline."""
-    _bootstrap()
+    _bootstrap(interactive=True)
     if not _QUIET:
         ui.banner()
     asyncio.run(_interactive_pipeline())
@@ -224,20 +230,7 @@ def scrape(
             "files": written,
         }, indent=2, ensure_ascii=False))
     else:
-        for p in pages:
-            if p.ok:
-                ui.success(f"{p.url}  [dim]{p.title[:60]}[/]  {p.word_count} words, "
-                           f"{len(p.tables)} table{'s' if len(p.tables) != 1 else ''}")
-                for w in p.warnings:
-                    ui.warn(f"  {w}")
-            else:
-                ui.error(f"{p.url}  {p.status}")
-        for p in ok:
-            for k, t in enumerate(p.tables[:3], 1):
-                _print_table_preview(t, f"{p.title or p.url}: table {k}")
-        n_tables = sum(len(p.tables) for p in ok)
-        ui.info(f"{len(ok)}/{len(pages)} page(s), {n_tables} table(s) saved to "
-                f"[bold]{out_dir.resolve()}[/]")
+        _print_scrape_results(pages, out_dir)
     if not ok:
         raise typer.Exit(code=1)
 
@@ -554,47 +547,8 @@ async def _export_session(session_id: str, approved_only: bool) -> None:
         ui.error(f"Session '{session_id}' not found")
         raise typer.Exit(1)
 
-    # Check what's available
-    with open_session(s.db_path) as db:
-        sample_count = len(db.exec(
-            select(SyntheticSample).where(SyntheticSample.session_id == session_id)
-        ).all())
-
-    if sample_count == 0:
-        ui.warn("No synthetic samples yet. Run at least through the generation stage.")
-        raise typer.Exit(1)
-
-    ui.info(f"{sample_count} samples available")
-    targets = await prompts.ask_export_targets(
-        hf_configured=bool(s.huggingface_token),
-        kg_configured=bool(s.kaggle_username and s.kaggle_key),
-    )
-
-    export_kw: dict = {"targets": targets, "approved_only": approved_only,
-                       "stage_snapshot": session.stage}
-
-    if "huggingface" in targets:
-        export_kw["hf_repo_id"] = await prompts.ask_hf_repo()
-        export_kw["hf_private"] = await prompts.ask_hf_private()
-
-    if "kaggle" in targets:
-        export_kw["kaggle_slug"] = await prompts.ask_kaggle_slug(s.kaggle_username)
-        export_kw["kaggle_title"] = session.name
-
-    from dataforge.agents import PipelineContext
-    from dataforge.agents.exporter import ExporterAgent
-    ctx = PipelineContext(
-        session_id=session.id,
-        session_name=session.name,
-        goal=session.goal,
-        format=DataFormat(session.format),
-        seed_urls=session.seed_url_list(),
-        settings=s,
-    )
-    agent = ExporterAgent(ctx, **export_kw)
-    ctx = await agent.run()
-    ui.export_summary(ctx.export_records)
-    ui.success("Export complete")
+    # Any stage has something worth exporting (URLs, pages, chunks, samples).
+    await _export_flow(_context_for(session), session.stage, approved_only=approved_only)
 
 
 # ── view command ──────────────────────────────────────────────────────────────
@@ -1464,7 +1418,7 @@ def _show_pipeline_plan() -> None:
         PipelineStage.generation, PipelineStage.quality, PipelineStage.export,
     ]
 
-    ui.section("Pipeline Plan")
+    ui.screen("Pipeline steps and project status")
 
     # Find current project sessions for context
     pf = find_project_file(Path.cwd())
@@ -1564,6 +1518,7 @@ async def _explore_menu(limit: int = 5) -> None:
             f"  stage=[cyan]{session.stage}[/]  limit=[bold]{limit}[/]"
         )
         stage_choices = [questionary.Choice(label, value=key) for key, label in _STAGE_OPTIONS]
+        stage_choices.append(questionary.Choice("Export this project's data", value="__export__"))
         stage_choices.append(questionary.Choice(f"Change sample limit  (current: {limit})", value="__limit__"))
         stage_choices.append(questionary.Choice("← Back to main menu", value="__back__"))
 
@@ -1573,6 +1528,10 @@ async def _explore_menu(limit: int = 5) -> None:
 
         if not picked or picked == "__back__":
             break
+
+        if picked == "__export__":
+            await _export_flow(_context_for(session), session.stage)
+            continue
 
         if picked == "__limit__":
             raw = await questionary.text(
@@ -1742,6 +1701,20 @@ async def _interactive_pipeline() -> None:
             action = await _main_menu()
             if action == "new":
                 break  # fall through to wizard
+            if action == "back":
+                continue
+            if action == "clear":
+                ui.screen("Main menu")
+                continue
+            if action == "help":
+                _show_help()
+                continue
+            if action == "scrape":
+                await _quick_scrape_flow()
+                continue
+            if action == "export":
+                await _export_menu()
+                continue
             if action == "resume":
                 await _pick_and_resume()
                 continue
@@ -1752,6 +1725,7 @@ async def _interactive_pipeline() -> None:
                 _show_pipeline_plan()
                 continue
             if action == "sessions":
+                ui.screen("All projects")
                 with open_session(s.db_path) as db:
                     all_s = db.exec(select(PipelineSession)).all()
                 rows = [{"id": x.id, "name": x.name, "stage": x.stage,
@@ -1763,6 +1737,7 @@ async def _interactive_pipeline() -> None:
                 await _configure()
                 continue
             if action == "info":
+                ui.screen("System info")
                 _show_info()
                 continue
             if action == "update":
@@ -1845,15 +1820,16 @@ async def _run_wizard(state: dict) -> str:
         step = STEPS[step_idx]
 
         if step == "urls":
-            ui.section("Input")
+            ui.screen("New dataset", "step 1 of 4: which site?")
             result = await _step_urls(state)
         elif step == "output":
-            ui.section("Output Location")
+            ui.screen("New dataset", "step 2 of 4: where to save")
             result = await _step_output(state)
         elif step == "config":
-            ui.section("Configuration")
+            ui.screen("New dataset", "step 3 of 4: what kind of data")
             result = await _step_config(state)
         elif step == "review":
+            ui.screen("New dataset", "step 4 of 4: check and start")
             result = await _step_review(state)
         else:
             result = "next"
@@ -1902,6 +1878,14 @@ _STAGE_PRE_DESCRIPTIONS = {
 }
 
 _STAGE_TOTAL = 6
+
+_NEXT_STAGE = {
+    PipelineStage.discovery:  PipelineStage.collection,
+    PipelineStage.collection: PipelineStage.processing,
+    PipelineStage.processing: PipelineStage.generation,
+    PipelineStage.generation: PipelineStage.quality,
+    PipelineStage.quality:    PipelineStage.export,
+}
 
 _LANG_RE = re.compile(
     r"/([a-z]{2}(?:-[a-z]{2})?)/|[?&]lang(?:uage)?=([a-z]{2})|[?&]locale=([a-z]{2})",
@@ -1979,8 +1963,11 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
 
     async def stage_hook(stage: str, context: PipelineContext) -> bool:
         name, step = _stage_map.get(stage, (stage, 0))
+        nxt = _NEXT_STAGE.get(stage)
+        next_name = _stage_map[nxt][0] if nxt in _stage_map else ""
 
-        # Show summary + contextual tip
+        # Results first, then the tip, then the menu: the helper text always
+        # sits directly above the prompt instead of scrolling off the top.
         _print_stage_summary(stage, context)
         ui.tip(stage)
 
@@ -1988,14 +1975,19 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
         if stage in (PipelineStage.collection, PipelineStage.processing,
                      PipelineStage.generation, PipelineStage.quality):
             while True:
-                action = await prompts.ask_stage_action(name)
+                action = await prompts.ask_stage_action(name, next_name)
                 if action == "adjust":
                     await _adjust_settings(context)
                     continue  # re-show the same menu so the user can continue/export/pause next
+                if action == "explain":
+                    ui.pipeline_overview_panel(current_stage=stage, next_stage=nxt)
+                    if nxt in _STAGE_PRE_DESCRIPTIONS:
+                        ui.stage_description(next_name, _stage_map[nxt][1], _STAGE_TOTAL,
+                                             _STAGE_PRE_DESCRIPTIONS[nxt])
+                    continue
                 if action == "export":
-                    await _quick_export(context, stage)
-                    cont = await prompts.ask_confirm("Continue pipeline after export?")
-                    return cont
+                    await _export_flow(context, stage)
+                    continue  # back to the checkpoint: continue, export more, or stop
                 if action == "pause":
                     ui.info(f"Session saved. Resume with: [bold]dataforge resume {context.session_id[:8]}[/]")
                     return False
@@ -2014,19 +2006,19 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
             ui.warn("Discovery returned 0 URLs. Check that the site has a reachable sitemap or provide a direct sitemap URL.")
             return False
 
-        ui.url_table(context.discovered_urls)
-
-        # Locale hint
+        # The review screen lists the URLs itself; printing them here as well
+        # only pushed the review's key hints off screen.
+        notice = ""
         lang_groups = _detect_language_groups(context.discovered_urls)
         if len(lang_groups) >= 2:
-            ui.language_groups_panel(lang_groups, total)
-            ui.warn(
-                "Multiple language variants detected — use the filter "
-                "(e.g. [bold]/en/[/]) in the review step to keep one locale."
+            top = ", ".join(f"{k} ({v})" for k, v in sorted(lang_groups.items(), key=lambda x: -x[1])[:5])
+            notice = (
+                f"Several languages found: {top}. "
+                "To keep one, filter it, e.g. [bold]f /en/[/], then [bold]none[/] / [bold]all[/] as needed."
             )
 
         from .url_review import run_url_review
-        selected = await run_url_review(context.discovered_urls)
+        selected = await run_url_review(context.discovered_urls, notice=notice)
 
         if not selected:
             ui.warn("No URLs selected — returning to menu.")
@@ -2049,6 +2041,9 @@ async def _run_orchestrator(ctx: PipelineContext, start_from: str | None = None)
     async def pre_stage_hook(stage: str, context: PipelineContext) -> bool:
         name, step = _stage_map.get(stage, (stage, 0))
         detail = _STAGE_PRE_DESCRIPTIONS.get(stage, "")
+        # Each stage starts on a fresh screen so progress output from the
+        # previous one does not pile up.
+        ui.screen(f"Step {step} of {_STAGE_TOTAL}: {name}", context.session_name)
         ui.stage_description(name, step, _STAGE_TOTAL, detail)
         if stage == PipelineStage.generation:
             from dataforge.generators.templates import build_prompt
@@ -2165,25 +2160,88 @@ def _print_stage_summary(stage: str, ctx: PipelineContext) -> None:
             ui.quality_distribution_panel(scores, ctx.quality_threshold)
 
 
-async def _quick_export(ctx: PipelineContext, stage: str) -> None:
-    s = ctx.settings
-    targets = await prompts.ask_export_targets(
-        hf_configured=bool(s.huggingface_token),
-        kg_configured=bool(s.kaggle_username),
-    )
-    export_kw: dict = {"targets": targets, "stage_snapshot": stage}
-    if "huggingface" in targets:
-        export_kw["hf_repo_id"] = await prompts.ask_hf_repo()
-        export_kw["hf_private"] = await prompts.ask_hf_private()
-    if "kaggle" in targets:
-        export_kw["kaggle_slug"] = await prompts.ask_kaggle_slug(s.kaggle_username)
-        export_kw["kaggle_title"] = ctx.session_name
+async def _export_flow(ctx: PipelineContext, stage: str = "", approved_only: bool = True) -> None:
+    """Export whatever the session has so far: training data and/or plain files.
 
-    from dataforge.agents.exporter import ExporterAgent
-    agent = ExporterAgent(ctx, **export_kw)
-    ctx_out = await agent.run()
-    ui.info("Export complete!")
-    ui.export_summary(ctx_out.export_records)
+    Works at every stage. Before generation there are no samples, but the
+    discovered URLs, scraped pages and chunks are still worth having as
+    Markdown, text or JSON.
+    """
+    from datetime import datetime
+
+    from dataforge.exporters.stage_data import FORMAT_LABELS, KINDS, available_data
+
+    s = ctx.settings
+    have = available_data(s.db_path, ctx.session_id)
+    if not have:
+        ui.warn("Nothing to export yet: this project has no URLs, pages or samples.")
+        return
+
+    with open_session(s.db_path) as db:
+        n_approved = len(db.exec(
+            select(SyntheticSample.id)
+            .where(SyntheticSample.session_id == ctx.session_id)
+            .where(SyntheticSample.approved == True)  # noqa: E712
+        ).all())
+    n_training = n_approved if approved_only else have.get("samples", 0)
+
+    options: list[tuple[str, str, str]] = []
+    if n_training:
+        options.append((
+            f"Training dataset ({n_training} samples)", "training",
+            "JSONL, Parquet, CSV and Unsloth files ready for fine-tuning. "
+            "Can also upload to HuggingFace or Kaggle.",
+        ))
+    descriptions = {
+        "urls":    "The list of links found on the site.",
+        "pages":   "The text of each page, cleaned. Good for reading, search or RAG.",
+        "chunks":  "Pages split into smaller passages, with their source URL.",
+        "samples": "Every generated sample, approved or not, with its quality score.",
+    }
+    # Latest stage first: that is usually what people want right now.
+    for kind in reversed(list(KINDS)):
+        if kind in have:
+            options.append((f"{KINDS[kind].label} ({have[kind]})", kind, descriptions[kind]))
+
+    picked = await prompts.ask_export_what(options)
+    if not picked:
+        ui.info("Nothing exported.")
+        return
+
+    export_dir = ctx.session_dir() / "exports" / datetime.now().strftime("%Y%m%d_%H%M%S")
+    written: list[tuple[str, Path]] = []
+    for kind in picked:
+        if kind == "training":
+            continue
+        fmts = await prompts.ask_export_formats(KINDS[kind].label, KINDS[kind].formats, FORMAT_LABELS)
+        if not fmts:
+            continue
+        from dataforge.exporters.stage_data import export_stage_data
+        paths = export_stage_data(s.db_path, ctx.session_id, kind, fmts, export_dir)
+        written += [(f"{KINDS[kind].label} ({fmt})", p) for fmt, p in paths.items()]
+
+    if "training" in picked:
+        targets = await prompts.ask_export_targets(
+            hf_configured=bool(s.huggingface_token),
+            kg_configured=bool(s.kaggle_username and s.kaggle_key),
+        ) or ["local"]
+        export_kw: dict = {"targets": targets, "approved_only": approved_only,
+                           "stage_snapshot": stage or ctx.current_stage}
+        if "huggingface" in targets:
+            export_kw["hf_repo_id"] = await prompts.ask_hf_repo()
+            export_kw["hf_private"] = await prompts.ask_hf_private()
+        if "kaggle" in targets:
+            export_kw["kaggle_slug"] = await prompts.ask_kaggle_slug(s.kaggle_username)
+            export_kw["kaggle_title"] = ctx.session_name
+        from dataforge.agents.exporter import ExporterAgent
+        ctx_out = await ExporterAgent(ctx, **export_kw).run()
+        ui.export_summary(ctx_out.export_records)
+
+    if written:
+        ui.info(f"Files saved in [bold]{export_dir}[/]")
+    for label, path in written:
+        suffix = "/" if path.is_dir() else ""
+        ui.success(f"{label}  [dim]{path.name}{suffix}[/]")
 
 
 async def _ask_export_config(s) -> dict:
@@ -2243,6 +2301,168 @@ async def _collect_urls() -> list[str] | None:
     return []
 
 
+async def _pick_session(question: str) -> PipelineSession | None:
+    """Choose any session, newest first. None on back/cancel or when there are none."""
+    import questionary
+    s = get_settings()
+    with open_session(s.db_path) as db:
+        rows = sorted(db.exec(select(PipelineSession)).all(),
+                      key=lambda x: x.created_at, reverse=True)
+    if not rows:
+        ui.info("No projects yet. Start one from the main menu.")
+        return None
+    choices = [
+        questionary.Choice(
+            f"{x.name}  [{x.id[:8]}]", value=x.id,
+            description=f"Reached: {x.stage}  ·  status: {x.status}  ·  "
+                        f"started {x.created_at.strftime('%Y-%m-%d %H:%M')}",
+        )
+        for x in rows
+    ]
+    choices.append(questionary.Choice("← Back", value="__back__"))
+    sid = await questionary.select(question, choices=choices, **prompts._q()).ask_async()
+    if not sid or sid == "__back__":
+        return None
+    return next(x for x in rows if x.id == sid)
+
+
+def _context_for(session: PipelineSession) -> PipelineContext:
+    from dataforge.agents import PipelineContext
+    return PipelineContext(
+        session_id=session.id,
+        session_name=session.name,
+        goal=session.goal,
+        format=DataFormat(session.format),
+        seed_urls=session.seed_url_list(),
+        settings=get_settings(),
+    )
+
+
+async def _export_menu() -> None:
+    session = await _pick_session("Export data from which project?")
+    if session:
+        await _export_flow(_context_for(session), session.stage)
+
+
+async def _quick_scrape_flow() -> None:
+    """Menu version of `dataforge scrape`: pages and tables, no AI, no API key."""
+    from datetime import datetime
+
+    import questionary
+
+    from dataforge import scrape as qs
+
+    ui.screen("Scrape pages", "no AI, no API key needed")
+    ui.info("Fetches the exact pages you give it (it does not crawl the whole site) "
+            "and saves their text and tables.")
+    urls = await _collect_urls()
+    if not urls:
+        return
+    fmts = await questionary.checkbox(
+        "Save as:",
+        choices=[
+            questionary.Choice("Markdown, one .md file per page", value="md", checked=True),
+            questionary.Choice("JSON Lines (pages.jsonl, tables.jsonl)", value="jsonl", checked=True),
+            questionary.Choice("Tables as CSV and JSON", value="csv", checked=True),
+        ],
+        instruction="(Space to tick, Enter to confirm)",
+        validate=lambda v: bool(v) or "Tick at least one format",
+        **prompts._q(),
+    ).ask_async()
+    if not fmts:
+        return
+    default_out = str(Path("scrape") / datetime.now().strftime("%Y%m%d-%H%M%S"))
+    out = await prompts.ask_output_dir(default_out)
+    if out is None:
+        return
+    s = get_settings()
+    with ui.console.status(f"Fetching {len(urls)} page(s)…"):
+        pages = await qs.scrape_urls(urls, rate_limit=s.rate_limit, tables="csv" in fmts)
+    out_dir = Path(out).expanduser()
+    qs.write_outputs(pages, out_dir, tuple(fmts))
+    _print_scrape_results(pages, out_dir)
+
+
+def _print_scrape_results(pages: list, out_dir: Path) -> None:
+    ok = [p for p in pages if p.ok]
+    for p in pages:
+        if p.ok:
+            ui.success(f"{p.url}  [dim]{p.title[:60]}[/]  {p.word_count} words, "
+                       f"{len(p.tables)} table{'s' if len(p.tables) != 1 else ''}")
+            for w in p.warnings:
+                ui.warn(f"  {w}")
+        else:
+            ui.error(f"{p.url}  {p.status}")
+    for p in ok:
+        for k, t in enumerate(p.tables[:3], 1):
+            _print_table_preview(t, f"{p.title or p.url}: table {k}")
+    n_tables = sum(len(p.tables) for p in ok)
+    ui.info(f"{len(ok)}/{len(pages)} page(s), {n_tables} table(s) saved to "
+            f"[bold]{out_dir.resolve()}[/]")
+
+
+_MENU_HELP = """\
+[bold]What each option does[/]
+
+  [bold cyan]Scrape pages (no AI)[/]
+      Give it one or more page URLs; get their text as Markdown/JSON and any
+      tables as CSV. No API key, costs nothing.
+
+  [bold cyan]Build an AI training dataset[/]
+      The full pipeline. Finds every page on a site, lets you pick which to
+      keep, scrapes them, splits the text into chunks, has an LLM write
+      training examples, filters them for quality, and exports.
+      You can stop after any step and export what you have so far
+      (pages as Markdown or text, chunks as JSON, and so on).
+      Needs an LLM: an API key, or a local model through Ollama.
+
+  [bold cyan]Continue a paused project[/]
+      Pick up a project you stopped, from the step where it stopped.
+
+  [bold cyan]Browse my data[/]
+      Look through the URLs, pages, chunks and samples of any project.
+
+  [bold cyan]Export data[/]
+      Save any project's data as Markdown, text, JSON, CSV or a training set.
+
+  [bold cyan]Settings and tools[/]
+      Set your LLM provider and API key, see system info, update or uninstall.
+
+[bold]Moving around[/]
+  Arrow keys to move, Enter to choose, Space to tick in lists with boxes.
+  Ctrl+C goes back or stops safely; your progress is always saved.
+  Set DATAFORGE_NO_CLEAR=1 to keep all output instead of clearing the screen."""
+
+
+def _show_help() -> None:
+    ui.screen("Help")
+    ui.console.print(_MENU_HELP)
+    ui.console.print("")
+    ui.pipeline_overview_panel()
+
+
+async def _settings_menu() -> str:
+    """Less common actions, grouped so the main menu stays short."""
+    import questionary
+    return await questionary.select(
+        "Settings and tools",
+        choices=[
+            questionary.Choice("LLM provider and API key", value="config",
+                               description="Choose OpenAI, Anthropic, Gemini, Groq, Ollama… and save your key."),
+            questionary.Choice("List all projects", value="sessions",
+                               description="Every project in this folder's database, with its status."),
+            questionary.Choice("Pipeline steps and project status", value="plan",
+                               description="What each step does and where your latest project is."),
+            questionary.Choice("System info", value="info",
+                               description="Version, paths, provider and machine resources."),
+            questionary.Choice("Update DataForge", value="update"),
+            questionary.Choice("Uninstall DataForge", value="uninstall"),
+            questionary.Choice("← Back", value="back"),
+        ],
+        **prompts._q(),
+    ).ask_async() or "back"
+
+
 async def _main_menu() -> str:
     import questionary
     s = get_settings()
@@ -2255,35 +2475,57 @@ async def _main_menu() -> str:
     except Exception:
         paused_count, total_sessions = 0, 0
 
-    resume_label = "Resume a paused session" + (f"  ({paused_count} waiting)" if paused_count else "")
-
+    # Worded as tasks, each with a one-line explanation that questionary shows
+    # in the same spot under the list as the user moves through it.
     choices = [
-        questionary.Choice("New pipeline",              value="new"),
-        questionary.Choice(resume_label,                value="resume"),
+        questionary.Choice(
+            "Scrape pages (no AI)", value="scrape",
+            description="Save the text and tables of pages you choose. No API key needed.",
+        ),
+        questionary.Choice(
+            "Build an AI training dataset", value="new",
+            description="Crawl a site, pick pages, and turn them into training examples. "
+                        "You can stop and export after any step.",
+        ),
     ]
-    if total_sessions > 0:
+    if paused_count:
+        choices.append(questionary.Choice(
+            f"Continue a paused project  ({paused_count} waiting)", value="resume",
+            description="Pick up where you stopped. Nothing is lost.",
+        ))
+    if total_sessions:
         choices += [
-            questionary.Choice("Explore sessions",          value="explore"),
-            questionary.Choice("List all sessions",         value="sessions"),
+            questionary.Choice(
+                "Browse my data", value="explore",
+                description="Look through the URLs, pages, chunks and samples of a project.",
+            ),
+            questionary.Choice(
+                "Export data", value="export",
+                description="Save a project's data as Markdown, text, JSON, CSV or a training set.",
+            ),
         ]
     choices += [
-        questionary.Choice("Plan / project status",     value="plan"),
-        questionary.Choice("Configure LLM provider",    value="config"),
-        questionary.Choice("System info",               value="info"),
-        questionary.Choice("Update DataForge",          value="update"),
-        questionary.Choice("Uninstall DataForge",       value="uninstall"),
-        questionary.Choice("Exit",                      value="exit"),
+        questionary.Choice(
+            "Settings and tools", value="settings",
+            description="LLM provider and API key, system info, update, uninstall.",
+        ),
+        questionary.Choice("Help", value="help", description="What every option does, and how the pipeline works."),
+        questionary.Choice("Clear the screen", value="clear", description="Tidy up the terminal and show this menu again."),
+        questionary.Choice("Exit", value="exit"),
     ]
 
     ui.console.print("")
     result = await questionary.select(
         "What would you like to do?",
         choices=choices,
+        instruction="(arrows to move, Enter to choose)",
         **prompts._q(),
     ).ask_async()
 
     if result is None:
         raise typer.Exit()
+    if result == "settings":
+        return await _settings_menu()
     return result
 
 
