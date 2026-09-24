@@ -6,14 +6,13 @@
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**Current release: 2.6.0.** An easier interactive menu: tasks in plain
-words, one screen per step, help at every stage, and "export what I have so
-far" at any point (discovered URLs, pages, chunks or samples). A missing or
-invalid API key now stops the run with one clear message instead of retrying
-every chunk. `dataforge scrape` saves pages and their tables with no AI, API
-key or cost. Tested on Linux, Windows and macOS with Python 3.11 to 3.14,
-with standalone binaries for Windows, Linux and Apple Silicon Macs. See the
-[changelog](CHANGELOG.md#260---2026-09-24).
+**Current release: 2.7.0.** Easier URL selection: tick pages from the
+keyboard (arrows, Space, Left and Right to turn pages, `/` to filter), choose
+which language to keep on a multilingual site, and scrape just the page you
+gave, its links, or the whole site. A key saved with "Save API key globally"
+is now found in every folder. Tested on Linux, Windows and macOS with Python
+3.11 to 3.14, with standalone binaries for Windows, Linux and Apple Silicon
+Macs. See the [changelog](CHANGELOG.md#270---2026-09-24).
 
 Fine-tuning needs data, and good domain data is trapped in documentation
 sites, knowledge bases and public archives. Getting it out usually means

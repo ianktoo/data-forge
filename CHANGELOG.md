@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-09-24
+
+Easier URL selection: pick pages from the keyboard, choose the language on a
+multilingual site, and scrape just the page you gave instead of the whole
+site. Also fixes an API key saved globally not being found.
+
 ### Added
 - **Scrape just the page you gave**: after entering URLs that are not a
   sitemap, the wizard asks whether to scrape only those pages (no discovery,
