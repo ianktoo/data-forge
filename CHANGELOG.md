@@ -5,6 +5,55 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-09-24
+
+A simpler interactive menu with a fixed screen layout, help at every stage and
+export at any stage, plus a fix for runs that looked like an endless error
+loop when the API key was missing or invalid. One behaviour change: Ctrl+C at
+a stage checkpoint now stops and saves the run.
+
+### Added
+- **Export at any stage** (`exporters/stage_data.py`). Discovered URLs (txt,
+  csv, json), scraped pages (one Markdown file per page with front matter,
+  plain text, json, jsonl), chunks (jsonl, json, txt) and all samples (jsonl,
+  json). "Export what I have so far" at a checkpoint offers whatever exists,
+  plus the training set when there are samples. `dataforge export <id>` uses
+  the same flow and no longer refuses a session without samples; Browse my
+  data has an export entry too.
+- **Help**: "What happens next?" at each stage checkpoint explains every
+  stage and the next one. A Help page in the main menu; `help` and `h` work in
+  the URL review.
+- "Scrape pages (no AI)" in the main menu runs `dataforge scrape`.
+
+### Changed
+- **Main menu worded as tasks**: Scrape pages (no AI), Build an AI training
+  dataset, Continue a paused project, Browse my data, Export data, Settings
+  and tools, Help, Clear the screen, Exit. Rarely used items (provider and
+  key, system info, update, uninstall, project list) moved to a submenu.
+  Every choice shows a one-line description.
+- **Screen layout**: wizard steps, pipeline stages and the URL review start on
+  a fresh screen, in one order (title, content, messages, then key hints
+  directly above the prompt). The URL review redraws in place and the URL
+  list is no longer printed twice. `DATAFORGE_NO_CLEAR=1` keeps all output.
+- The interactive menu shows WARNING and above on the terminal unless
+  `DATAFORGE_LOG_LEVEL` is set; the log file still records INFO.
+- **Input**: paths and URLs accept surrounding quotes (Windows "Copy as
+  path"), PowerShell drag-and-drop (`& 'C:\...'`), curly quotes, `<url>`,
+  and URL lists separated by commas, spaces or lines.
+- **Behaviour change**: Ctrl+C at a stage checkpoint stops and saves the run;
+  it previously continued to the next stage.
+
+### Fixed
+- **A missing or invalid API key no longer loops.** Fatal credential and
+  connection errors now reach the generator and streaming agent instead of
+  being swallowed per chunk; auth failures are not retried; LiteLLM debug
+  banners are suppressed; `generate_batch` stops dispatching and cancels
+  pending work on the first fatal error. With 40 chunks and a bad key, the run
+  stops in about 3 seconds with one message, where it previously made 3 calls
+  per chunk.
+- "Export what I have so far" after collection or processing wrote nothing,
+  because it exported only samples.
+
 ## [2.5.0] - 2026-09-23
 
 Quick scrape (#69, first part): `dataforge scrape` and the MCP tool
