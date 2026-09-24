@@ -212,7 +212,9 @@ class Orchestrator:
                     seed_urls=json.dumps(self.ctx.seed_urls),
                     # A recipe may set its own output_dir; later commands
                     # (stats, resume) need it to find this session's files.
-                    config_json=json.dumps({"output_dir": str(s.output_dir.resolve())}),
+                    # discovery_scope lets resume repeat discovery the same way.
+                    config_json=json.dumps({"output_dir": str(s.output_dir.resolve()),
+                                            "discovery_scope": self.ctx.discovery_scope}),
                 ))
                 db.commit()
 

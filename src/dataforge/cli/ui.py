@@ -157,6 +157,12 @@ def review_panel(state: dict) -> None:
         t.add_row("", url)
     if len(seed_urls) > 5:
         t.add_row("", f"[dim]... and {len(seed_urls) - 5} more[/]")
+    scope = {
+        "page": "Only the URL(s) above",
+        "links": "The URL(s) above and the pages they link to",
+        "site": "The whole site",
+    }.get(state.get("discovery_scope", "site"), "")
+    t.add_row("Scrape", scope)
     t.add_row("Session", state.get("session_name", ""))
     goal_text = state.get("goal", "")[:80]
     t.add_row("Goal", goal_text)

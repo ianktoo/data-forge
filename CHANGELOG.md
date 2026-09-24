@@ -5,6 +5,34 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Scrape just the page you gave**: after entering URLs that are not a
+  sitemap, the wizard asks whether to scrape only those pages (no discovery,
+  no URL review), follow the links from them (a crawl from the pages, without
+  the sitemap), or take the whole site as before. Resume repeats the same
+  choice.
+- **Language choice in the URL review**: on a site with pages in several
+  languages (`/es/...`, `?lang=fr`), the review first asks which language to
+  tick; the others stay listed, unticked. `l` cycles the list through one
+  language at a time.
+
+### Changed
+- **Keyboard URL review**: arrow keys move, Space ticks or unticks, Left and
+  Right turn pages (the pager shows arrows where there are more URLs), `a`
+  ticks or unticks everything shown, `/` filters as you type, `i` shows
+  details, Enter finishes and Esc goes back. The page fits the terminal. The
+  typed commands (`x 3-8`, `f blog`, ...) still work after `:`; row numbers
+  now refer to the whole list, not only the current page.
+
+### Fixed
+- **Globally saved API key not found**: "Save API key globally" stores the
+  key in the OS keychain, but startup only read `prefs.json`, and only when
+  the folder had no `.env` (which `dataforge config` always creates), so the
+  run still asked for the key. Saved keys, provider and model are now loaded
+  whether or not `.env` exists (shell environment first, then `.env`, then the
+  global config), the key check looks in the keychain before prompting, and a
+  provider changed from the menu takes effect without a restart.
+
 ## [2.6.0] - 2026-09-24
 
 A simpler interactive menu with a fixed screen layout, help at every stage and

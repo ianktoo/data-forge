@@ -34,28 +34,48 @@ _PROVIDER_KEY_MAP = {
 }
 
 
+def apply_saved_config(env_path: Path | None = None) -> None:
+    """Load the global config into the process environment.
+
+    Precedence: the process environment, then the project's .env, then the
+    global config saved by ``dataforge config``. Keys saved globally live in
+    the OS keychain (prefs.json only when no keychain is available), so both
+    are read. A key found in .env is exported too: litellm reads keys from the
+    environment, not from Settings.
+    """
+    from dotenv import dotenv_values
+
+    from dataforge.cli import prefs as user_prefs
+
+    env_path = env_path or Path(".env")
+    in_file = {k: v for k, v in dotenv_values(env_path).items() if v} if env_path.exists() else {}
+
+    for var, pref in (("DATAFORGE_LLM_PROVIDER", "llm_provider"), ("DATAFORGE_LLM_MODEL", "llm_model")):
+        saved = user_prefs.get(pref)
+        if saved and not os.getenv(var) and var not in in_file:
+            os.environ[var] = saved
+
+    key_envs = {k for k in _PROVIDER_KEY_MAP.values() if k}
+    key_envs.update(user_prefs.load().get("api_keys", {}))
+    for key_env in sorted(key_envs):
+        if os.getenv(key_env):
+            continue
+        value = in_file.get(key_env) or user_prefs.get_api_key(key_env)
+        if value:
+            os.environ[key_env] = value
+
+
 def check_env_file() -> bool:
     """Warn (not fatal) if .env doesn't exist or no provider key is configured."""
     from dataforge.cli import prefs as user_prefs
 
     env_path = Path(".env").resolve()
-    env_exists = env_path.exists()
-    if not env_exists:
+    if not env_path.exists():
         show_warning(
             f".env file not found at {env_path}",
             f"Run:  dataforge config  to save settings globally to {user_prefs._prefs_path()}",
         )
-        # Apply saved prefs as env var defaults so pip-installed users keep their config
-        saved_provider = user_prefs.get("llm_provider")
-        saved_model = user_prefs.get("llm_model")
-        if saved_provider and not os.getenv("DATAFORGE_LLM_PROVIDER"):
-            os.environ["DATAFORGE_LLM_PROVIDER"] = saved_provider
-        if saved_model and not os.getenv("DATAFORGE_LLM_MODEL"):
-            os.environ["DATAFORGE_LLM_MODEL"] = saved_model
-        # Apply globally-saved API keys so pip-installed users work without .env
-        for key_env, value in user_prefs.load().get("api_keys", {}).items():
-            if value and not os.getenv(key_env):
-                os.environ[key_env] = value
+    apply_saved_config(env_path)
 
     # Check whether the active provider is satisfied (keyless like Ollama, or has a key set)
     s = get_settings()
@@ -85,6 +105,11 @@ def check_llm_credentials() -> tuple[bool, str | None]:
         return _check_openai_compatible(s.local_base_url, s.local_api_key)
 
     if key_env and not os.getenv(key_env) and not getattr(s, key_env.lower(), ""):
+        from dataforge.cli import prefs as user_prefs
+        saved = user_prefs.get_api_key(key_env)
+        if saved:
+            os.environ[key_env] = saved
+            return True, None
         # Offer a live prompt before failing
         try:
             value = getpass.getpass(f"  {key_env} not set — paste your key now (hidden, session-only): ")

@@ -40,6 +40,10 @@ class PipelineContext:
     n_per_chunk: int = 3
     ignore_robots: bool = False
     skip_known: bool = False  # skip URLs already scraped in prior sessions
+    # How far discovery reaches from the seed URLs: "site" reads the site's
+    # sitemap (crawling when there is none), "links" crawls from the seeds
+    # without the sitemap, "page" uses the seeds as given.
+    discovery_scope: str = "site"
     # The recipe's language/include/exclude check. The fallback crawl spends
     # its page budget only on URLs that pass it (#63). None = keep all.
     url_filter: Callable[[str], bool] | None = None

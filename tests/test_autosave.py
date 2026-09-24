@@ -46,4 +46,4 @@ def test_checkpoint_skipped_when_autosave_disabled(tmp_settings):
         session = db.get(PipelineSession, ctx.session_id)
         # _init_session records the output folder (#40); with autosave off the
         # checkpoint must add none of its counters.
-        assert set(session.config()) == {"output_dir"}
+        assert set(session.config()) == {"output_dir", "discovery_scope"}
