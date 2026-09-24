@@ -357,6 +357,11 @@ $i$ gives \texttt{page\_id}, \texttt{chunk\_id}, \texttt{chunk\_index} and
 version~2.4.2 the Unsloth file had no lineage at all (project issue
 \#19), so a consumer training from it lost the ability to cite a sample's
 source document.
+Earlier stages are exportable too, without an LLM: the discovered URL
+list (text, CSV, JSON), the scraped pages (one Markdown or plain-text file
+per page, or JSON), and the chunks with their source URL (JSON, JSONL,
+text), so a session that stops before generation still yields a usable
+corpus.
 
 \subsubsection{Dataset introspection}
 \label{sec:introspection}
