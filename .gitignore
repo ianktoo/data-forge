@@ -89,6 +89,7 @@ Thumbs.db
 
 # Project-specific
 dataforge.db
+.dataforge
 run.bat
 run.ps1
 run.sh
