@@ -5,6 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.2] - 2026-09-24
+
+Point **Pages I scraped earlier** at the folder you have in mind.
+
 ### Fixed
 - **Pages I scraped earlier** only accepted the exact run folder
   (`scrape/<date-time>/`). Pointing at `scrape/` or at `pages.jsonl` was
