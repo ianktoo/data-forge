@@ -176,6 +176,41 @@ def write_outputs(pages: list[ScrapedPage], out_dir: Path,
 
 # ── A scrape folder as dataset input ──────────────────────────────────────────
 
+def _has_pages(d: Path) -> bool:
+    return (d / "pages.jsonl").is_file() or any(d.glob("page_*.md"))
+
+
+def resolve_scrape_dir(path: str | Path) -> Path:
+    """The scrape folder ``path`` points at, absolute.
+
+    Accepts the folder itself, a file inside it (``pages.jsonl``, a
+    ``page_NNN.md``), or a folder of scrape runs such as ``scrape/``, where
+    the newest run with pages is used. Raises ``ValueError`` with a message
+    that names the full location looked at and what was expected there.
+    """
+    p = Path(path).expanduser()
+    full = p.resolve()
+    if not p.exists():
+        return _fail(f"Not found: {full}")
+    if p.is_file():
+        if p.name == "pages.jsonl" or (p.name.startswith("page_") and p.suffix == ".md"):
+            return full.parent
+        return _fail(f"{full} is a file. Point to the scrape folder that holds pages.jsonl "
+                     "or page_NNN.md files.")
+    if _has_pages(p):
+        return full
+    runs = sorted((d for d in p.iterdir() if d.is_dir() and _has_pages(d)), reverse=True)
+    if runs:
+        return runs[0].resolve()
+    return _fail(f"No scraped pages in {full}. Expected pages.jsonl or page_NNN.md files "
+                 "in this folder or in one of its subfolders (a `dataforge scrape` run "
+                 "writes them to scrape/<date-time>/ by default).")
+
+
+def _fail(msg: str) -> Path:
+    raise ValueError(msg)
+
+
 def load_scrape_dir(folder: Path) -> list[ScrapedPage]:
     """Read back the pages a scrape saved in ``folder``. Only pages with text.
 

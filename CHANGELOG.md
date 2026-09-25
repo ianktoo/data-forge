@@ -5,6 +5,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Pages I scraped earlier** only accepted the exact run folder
+  (`scrape/<date-time>/`). Pointing at `scrape/` or at `pages.jsonl` was
+  rejected with a message that did not say where it looked. It now takes the
+  run folder, a file inside it, or a parent folder such as `scrape/` (the
+  newest run with pages is used). Errors give the full path checked and what
+  was expected there, and an unreadable `pages.jsonl` is reported instead
+  of crashing.
+
 ## [2.7.1] - 2026-09-24
 
 Live feedback while scraping, a Back option that goes back, and a way to
