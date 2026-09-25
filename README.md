@@ -6,13 +6,14 @@
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**Current release: 2.7.0.** Easier URL selection: tick pages from the
-keyboard (arrows, Space, Left and Right to turn pages, `/` to filter), choose
-which language to keep on a multilingual site, and scrape just the page you
-gave, its links, or the whole site. A key saved with "Save API key globally"
-is now found in every folder. Tested on Linux, Windows and macOS with Python
-3.11 to 3.14, with standalone binaries for Windows, Linux and Apple Silicon
-Macs. See the [changelog](CHANGELOG.md#270---2026-09-24).
+**Current release: 2.7.1.** Scraping several URLs now shows each page as
+it is fetched, Back works in every menu, and the Multiple URLs box finishes on
+Enter at an empty line. New: build a dataset from pages you already scraped
+with no AI, without fetching them again. 2.7.0 added keyboard URL review, a
+language choice on multilingual sites, and scraping just the page you gave.
+Tested on Linux, Windows and macOS with Python 3.11 to 3.14, with standalone
+binaries for Windows, Linux and Apple Silicon Macs. See the
+[changelog](CHANGELOG.md#271---2026-09-24).
 
 Fine-tuning needs data, and good domain data is trapped in documentation
 sites, knowledge bases and public archives. Getting it out usually means

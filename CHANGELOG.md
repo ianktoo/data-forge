@@ -5,6 +5,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.1] - 2026-09-24
+
+Live feedback while scraping, a Back option that goes back, and a way to
+build a dataset from pages you already scraped.
+
 ### Added
 - **Use a scrape folder as dataset input**: *Build an AI training dataset*
   now offers **Pages I scraped earlier** next to the URL options. Pick a
