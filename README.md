@@ -6,13 +6,13 @@
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**Current release: 2.7.2.** **Pages I scraped earlier** now accepts the
+**Current release: 2.7.3.** **Pages I scraped earlier** now accepts the
 run folder, a file in it, or `scrape/` (the newest run is used), and says
 exactly where it looked when nothing is found. 2.7.1 added live feedback
 while scraping, a working Back, and building a dataset from pages you
 already scraped. Tested on Linux, Windows and macOS with Python 3.11 to
 3.14, with standalone binaries for Windows, Linux and Apple Silicon Macs.
-See the [changelog](CHANGELOG.md#272---2026-09-24).
+See the [changelog](CHANGELOG.md#273---2026-09-24).
 
 Fine-tuning needs data, and good domain data is trapped in documentation
 sites, knowledge bases and public archives. Getting it out usually means
