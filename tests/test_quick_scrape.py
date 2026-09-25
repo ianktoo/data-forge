@@ -186,3 +186,34 @@ async def test_imported_pages_go_through_processing(site, tmp_path, tmp_settings
 
     ctx = await ProcessorAgent(ctx).run()
     assert ctx.processed_chunk_ids
+
+
+def test_resolve_scrape_dir_accepts_folder_file_or_parent(tmp_path):
+    old, new = tmp_path / "scrape" / "20260101-000000", tmp_path / "scrape" / "20260201-000000"
+    for d in (old, new):
+        d.mkdir(parents=True)
+        (d / "pages.jsonl").write_text("", encoding="utf-8")
+    (tmp_path / "scrape" / "20260301-000000").mkdir()  # newer but empty: skipped
+    assert qs.resolve_scrape_dir(old) == old.resolve()
+    assert qs.resolve_scrape_dir(old / "pages.jsonl") == old.resolve()
+    assert qs.resolve_scrape_dir(tmp_path / "scrape") == new.resolve()
+
+
+def test_resolve_scrape_dir_errors_name_the_full_location(tmp_path):
+    with pytest.raises(ValueError, match="Not found: .*missing"):
+        qs.resolve_scrape_dir(tmp_path / "missing")
+    with pytest.raises(ValueError, match=r"No scraped pages in .*pages\.jsonl or page_NNN\.md"):
+        qs.resolve_scrape_dir(tmp_path)
+    other = tmp_path / "notes.txt"
+    other.write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError, match="is a file"):
+        qs.resolve_scrape_dir(other)
+    assert str(tmp_path.resolve()) in _err(tmp_path)
+
+
+def _err(path) -> str:
+    try:
+        qs.resolve_scrape_dir(path)
+    except ValueError as e:
+        return str(e)
+    return ""

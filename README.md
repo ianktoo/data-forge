@@ -6,14 +6,13 @@
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**Current release: 2.7.1.** Scraping several URLs now shows each page as
-it is fetched, Back works in every menu, and the Multiple URLs box finishes on
-Enter at an empty line. New: build a dataset from pages you already scraped
-with no AI, without fetching them again. 2.7.0 added keyboard URL review, a
-language choice on multilingual sites, and scraping just the page you gave.
-Tested on Linux, Windows and macOS with Python 3.11 to 3.14, with standalone
-binaries for Windows, Linux and Apple Silicon Macs. See the
-[changelog](CHANGELOG.md#271---2026-09-24).
+**Current release: 2.7.3.** **Pages I scraped earlier** now accepts the
+run folder, a file in it, or `scrape/` (the newest run is used), and says
+exactly where it looked when nothing is found. 2.7.1 added live feedback
+while scraping, a working Back, and building a dataset from pages you
+already scraped. Tested on Linux, Windows and macOS with Python 3.11 to
+3.14, with standalone binaries for Windows, Linux and Apple Silicon Macs.
+See the [changelog](CHANGELOG.md#273---2026-09-24).
 
 Fine-tuning needs data, and good domain data is trapped in documentation
 sites, knowledge bases and public archives. Getting it out usually means
@@ -150,7 +149,8 @@ text), `-f csv` to write only the tables, and `--json` before the command for
 a machine-readable summary. AI agents get the same through the MCP tool
 `scrape_page`. To turn a scrape folder into training data later, start
 **Build an AI training dataset** in `dataforge` and choose **Pages I scraped
-earlier**: the pages are not fetched again and the run starts at processing.
+earlier** (a run folder, or `scrape/` for the newest run): the pages are not
+fetched again and the run starts at processing.
 
 To update or remove DataForge, run `dataforge update` or `dataforge uninstall`
 yourself, in your own terminal. Both close DataForge first, so nothing is
