@@ -28,6 +28,15 @@ def _q(**kw):
     return {**kw, "style": _STYLE}
 
 
+# questionary gives a Choice with value=None its title as the value, so a
+# "Back" entry needs a real value that the caller then turns into None.
+_BACK = "__back__"
+
+
+def _none_if_back(answer):
+    return None if answer == _BACK else answer
+
+
 # ── Ghost-text command prompt ─────────────────────────────────────────────────
 
 class _SuggestFromChoices(AutoSuggest):
@@ -104,26 +113,53 @@ async def ask_command(choices: list[str], aliases: dict[str, str] | None = None)
 
 # ── Input collection ───────────────────────────────────────────────────────────
 
-async def ask_input_method() -> str | None:
+SCRAPE_FOLDER = "Pages I scraped earlier"
+
+
+async def ask_input_method(allow_scrape_folder: bool = False) -> str | None:
+    choices = ["Single URL", "Multiple URLs", "Text file", "Sitemap URL"]
+    if allow_scrape_folder:
+        choices.append(questionary.Choice(
+            SCRAPE_FOLDER, value=SCRAPE_FOLDER,
+            description="Use a folder saved by 'Scrape pages (no AI)': "
+                        "no fetching, goes straight to processing.",
+        ))
     answer = await questionary.select(
         "How would you like to provide URLs?",
-        choices=[
-            "Single URL",
-            "Multiple URLs",
-            "Text file",
-            "Sitemap URL",
-            questionary.Separator(),
-            questionary.Choice("(b) Back to menu", value=None),
-        ],
+        choices=[*choices, questionary.Separator(),
+                 questionary.Choice("(b) Back to menu", value=_BACK)],
         **_q(),
     ).ask_async()
-    return answer
+    return _none_if_back(answer)
+
+
+async def ask_scrape_dir(default: str = "") -> Path | None:
+    """Folder written by a no-AI scrape (pages.jsonl or page_NNN.md files)."""
+    def _ok(v: str) -> bool | str:
+        d = Path(clean_input(v)).expanduser()
+        if not d.is_dir():
+            return f"Folder not found: {clean_input(v)}"
+        if not ((d / "pages.jsonl").is_file() or any(d.glob("page_*.md"))):
+            return "No pages.jsonl or page_NNN.md files in that folder"
+        return True
+
+    path = await questionary.path(
+        "Scrape folder:",
+        default=default,
+        only_directories=True,
+        instruction="(Enter for the latest; drag a folder here or paste its path)",
+        validate=_ok,
+        **_q(),
+    ).ask_async()
+    if path is None:
+        return None
+    return Path(clean_input(path)).expanduser()
 
 
 async def ask_discovery_scope(n_urls: int) -> str | None:
     """How far to go from the URLs given: just them, their links, or the whole site."""
     one = n_urls == 1
-    return await questionary.select(
+    answer = await questionary.select(
         "Scrape just this page, or search for more?" if one
         else "Scrape just these pages, or search for more?",
         choices=[
@@ -144,10 +180,11 @@ async def ask_discovery_scope(n_urls: int) -> str | None:
                             "then pick which pages to keep.",
             ),
             questionary.Separator(),
-            questionary.Choice("(b) Back", value=None),
+            questionary.Choice("(b) Back", value=_BACK),
         ],
         **_q(),
     ).ask_async()
+    return _none_if_back(answer)
 
 
 async def ask_single_url() -> str | None:
@@ -162,15 +199,52 @@ async def ask_single_url() -> str | None:
     return clean_input(url)
 
 
+def _multiline_url_keys():
+    """Enter adds a line; Enter on an empty line finishes (as the prompt says).
+
+    questionary's multiline text only finishes on Alt+Enter or Esc then Enter,
+    so a plain Enter on a blank line looked like the prompt had hung.
+    """
+    from prompt_toolkit.key_binding import KeyBindings
+
+    kb = KeyBindings()
+
+    @kb.add("enter")
+    def _(event) -> None:
+        buf = event.current_buffer
+        if buf.document.current_line.strip():
+            buf.insert_text("\n")
+        else:
+            buf.validate_and_handle()
+
+    return kb
+
+
+def _has_url(text: str) -> bool | str:
+    urls = _split_urls(text)
+    if any(_valid_url(u) for u in urls):
+        return True
+    if urls:
+        return f"'{urls[0]}' is not a valid http(s) URL"
+    return "Enter at least one URL (or Ctrl+C to go back)"
+
+
 async def ask_multiple_urls() -> list[str] | None:
+    """Several URLs, one per line (or separated by spaces or commas).
+
+    Returns every entry given; the caller drops and reports invalid ones.
+    """
     raw = await questionary.text(
-        "Enter URLs (one per line, blank line to finish):",
+        "Enter URLs:",
         multiline=True,
+        instruction="(one per line; press Enter on an empty line to finish, Ctrl+C to go back)",
+        validate=_has_url,
+        key_bindings=_multiline_url_keys(),
         **_q(),
     ).ask_async()
     if raw is None:
         return None
-    return [u for u in _split_urls(raw) if _valid_url(u)]
+    return _split_urls(raw)
 
 
 async def ask_file_path() -> Path | None:
@@ -340,16 +414,17 @@ async def ask_stage_action(stage: str, next_stage: str = "") -> str:
 
 async def ask_adjust_settings_target() -> str | None:
     """Which mid-session setting to change. Returns None on cancel/back."""
-    return await questionary.select(
+    answer = await questionary.select(
         "Adjust which setting?",
         choices=[
             questionary.Choice("Generation model", value="generation_model"),
             questionary.Choice("Quality model", value="quality_model"),
             questionary.Choice("Output directory", value="output_dir"),
-            questionary.Choice("← Back", value=None),
+            questionary.Choice("← Back", value=_BACK),
         ],
         **_q(),
     ).ask_async()
+    return _none_if_back(answer)
 
 
 # ── Export ────────────────────────────────────────────────────────────────────

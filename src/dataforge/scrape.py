@@ -6,12 +6,15 @@ first step is wanted: the text of a few pages, or the table on one of them.
 request DataForge makes (robots.txt, per-domain rate limit, ``Crawl-delay``)
 and no LLM, API key, session or database.
 
-Used by ``dataforge scrape`` and the MCP ``scrape_page`` tool.
+Used by ``dataforge scrape`` and the MCP ``scrape_page`` tool. A folder it
+wrote can later be the input of a dataset run (:func:`load_scrape_dir`,
+:func:`import_into_session`), which then starts at processing.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +26,10 @@ from dataforge.utils.url_sanitiser import sanitise
 # Non-AI checks (--check): a page with less text than this is flagged.
 MIN_WORDS = 50
 FORMATS = ("jsonl", "md", "csv")
+
+# progress(index, total, url, page): called with page=None just before a URL
+# is fetched, then again with its result, so a long list shows activity.
+Progress = Callable[[int, int, str, "ScrapedPage | None"], None]
 
 
 @dataclass
@@ -56,48 +63,53 @@ async def scrape_urls(
     rate_limit: float,
     tables: bool = True,
     check: bool = False,
+    progress: Progress | None = None,
 ) -> list[ScrapedPage]:
     """Fetch each URL once, in order, and extract its content (and tables)."""
-    import httpx
-
     from dataforge.collectors import HTTPClient
     from dataforge.utils import RateLimiter
 
     results: list[ScrapedPage] = []
     seen_content: dict[str, str] = {}  # content hash -> first URL with it
     async with HTTPClient(RateLimiter(rate_limit)) as client:
-        for raw in urls:
-            url = sanitise(raw)
-            if not url:
-                results.append(ScrapedPage(url=raw, status="error: not a valid http(s) URL"))
-                continue
-            now = datetime.now(UTC).isoformat(timespec="seconds")
-            try:
-                resp = await client.get(url)
-            except PermissionError:
-                results.append(ScrapedPage(url=url, status="blocked by robots.txt", fetched_at=now))
-                continue
-            except httpx.HTTPStatusError as exc:
-                results.append(ScrapedPage(url=url, status=f"http {exc.response.status_code}",
-                                           fetched_at=now))
-                continue
-            except Exception as exc:
-                results.append(ScrapedPage(url=url, status=f"error: {type(exc).__name__}: {exc}",
-                                           fetched_at=now))
-                continue
-            if "html" not in resp.headers.get("content-type", "html"):
-                results.append(ScrapedPage(url=url, status="not html", fetched_at=now))
-                continue
-            content = extract(resp.text, url)
-            page = ScrapedPage(
-                url=url, status="ok", title=content.title, markdown=content.markdown,
-                text=content.text, word_count=content.word_count,
-                tables=extract_tables(resp.text) if tables else [], fetched_at=now,
-            )
-            if check:
-                page.warnings = _checks(page, seen_content)
+        total = len(urls)
+        for i, raw in enumerate(urls, 1):
+            if progress:
+                progress(i, total, raw, None)
+            page = await _scrape_one(client, raw, tables, check, seen_content)
             results.append(page)
+            if progress:
+                progress(i, total, page.url, page)
     return results
+
+
+async def _scrape_one(client, raw: str, tables: bool, check: bool,
+                      seen_content: dict[str, str]) -> ScrapedPage:
+    import httpx
+
+    url = sanitise(raw)
+    if not url:
+        return ScrapedPage(url=raw, status="error: not a valid http(s) URL")
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    try:
+        resp = await client.get(url)
+    except PermissionError:
+        return ScrapedPage(url=url, status="blocked by robots.txt", fetched_at=now)
+    except httpx.HTTPStatusError as exc:
+        return ScrapedPage(url=url, status=f"http {exc.response.status_code}", fetched_at=now)
+    except Exception as exc:
+        return ScrapedPage(url=url, status=f"error: {type(exc).__name__}: {exc}", fetched_at=now)
+    if "html" not in resp.headers.get("content-type", "html"):
+        return ScrapedPage(url=url, status="not html", fetched_at=now)
+    content = extract(resp.text, url)
+    page = ScrapedPage(
+        url=url, status="ok", title=content.title, markdown=content.markdown,
+        text=content.text, word_count=content.word_count,
+        tables=extract_tables(resp.text) if tables else [], fetched_at=now,
+    )
+    if check:
+        page.warnings = _checks(page, seen_content)
+    return page
 
 
 def _checks(page: ScrapedPage, seen: dict[str, str]) -> list[str]:
@@ -160,3 +172,80 @@ def write_outputs(pages: list[ScrapedPage], out_dir: Path,
                 f.write(json.dumps(t, ensure_ascii=False) + "\n")
         written["tables"].append(str(p))
     return written
+
+
+# ── A scrape folder as dataset input ──────────────────────────────────────────
+
+def load_scrape_dir(folder: Path) -> list[ScrapedPage]:
+    """Read back the pages a scrape saved in ``folder``. Only pages with text.
+
+    Uses ``pages.jsonl`` when it is there; otherwise the ``page_NNN.md``
+    files (a scrape saved as Markdown only), whose first line holds the URL.
+    """
+    folder = Path(folder)
+    jsonl = folder / "pages.jsonl"
+    pages: list[ScrapedPage] = []
+    if jsonl.is_file():
+        for line in jsonl.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            d = json.loads(line)
+            if d.get("status") != "ok" or not (d.get("markdown") or d.get("text")):
+                continue
+            pages.append(ScrapedPage(
+                url=d.get("url", ""), status="ok", title=d.get("title", ""),
+                markdown=d.get("markdown") or d.get("text", ""), text=d.get("text", ""),
+                word_count=d.get("word_count", 0), fetched_at=d.get("fetched_at", ""),
+            ))
+        return pages
+    for md in sorted(folder.glob("page_*.md")):
+        body = md.read_text(encoding="utf-8")
+        first, _, rest = body.partition("\n")
+        url = first.removeprefix("<!--").removesuffix("-->").strip() if first.startswith("<!--") else ""
+        if not url:
+            continue
+        rest = rest.lstrip("\n")
+        title = ""
+        if rest.startswith("# "):
+            title, _, rest = rest.partition("\n")
+            title = title[2:].strip()
+        text = rest.strip()
+        if text:
+            pages.append(ScrapedPage(url=url, status="ok", title=title, markdown=text,
+                                     text=text, word_count=len(text.split())))
+    return pages
+
+
+def import_into_session(ctx, pages: list[ScrapedPage]) -> list[int]:
+    """Store scraped pages as a session's collection, so the run starts at processing.
+
+    Writes each page's Markdown where the scraper would (``sessions/<id>/raw``)
+    and adds the URL and page rows the later stages and ``resume`` read.
+    Returns the new page ids, which are also set on ``ctx``.
+    """
+    from dataforge.storage import DiscoveredURL, URLSource, open_session
+    from dataforge.storage import ScrapedPage as PageRow
+
+    raw_dir = ctx.session_dir() / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True, mode=0o750)
+    ids: list[int] = []
+    with open_session(ctx.settings.db_path) as db:
+        for i, page in enumerate(pages):
+            raw_path = raw_dir / f"page_{i:05d}.md"
+            raw_path.write_text(page.markdown or page.text, encoding="utf-8")
+            url_row = DiscoveredURL(session_id=ctx.session_id, url=page.url,
+                                    source=URLSource.file, selected=True, scraped=True,
+                                    http_status=200)
+            db.add(url_row)
+            db.flush()
+            row = PageRow(session_id=ctx.session_id, url_id=url_row.id or 0, url=page.url,
+                          title=page.title, raw_path=str(raw_path), word_count=page.word_count)
+            db.add(row)
+            db.flush()
+            ids.append(row.id)
+        db.commit()
+    urls = [p.url for p in pages]
+    ctx.discovered_urls = list(urls)
+    ctx.selected_urls = list(urls)
+    ctx.scraped_page_ids = ids
+    return ids

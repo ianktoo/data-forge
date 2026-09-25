@@ -92,7 +92,7 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 # Type alias for step result sentinels
-StepResult = Literal["next", "back", "back_to_urls", "back_to_config", "home", "exit"]
+StepResult = Literal["next", "back", "retry", "back_to_urls", "back_to_config", "home", "exit"]
 
 
 def _apply_project_file(s, cwd: Path) -> None:
@@ -216,7 +216,14 @@ def scrape(
     logger.add(_sys.stderr, level="WARNING", format="{level}: {message}")
 
     s = get_settings()
-    pages = asyncio.run(qs.scrape_urls(urls, rate_limit=s.rate_limit, tables=tables, check=check))
+    if _JSON_OUTPUT:
+        # stdout carries only the JSON; a person watching still sees each page.
+        progress = _stderr_scrape_progress if _sys.stderr.isatty() else None
+        pages = asyncio.run(qs.scrape_urls(urls, rate_limit=s.rate_limit, tables=tables,
+                                           check=check, progress=progress))
+    else:
+        pages = asyncio.run(_scrape_with_progress(urls, rate_limit=s.rate_limit,
+                                                  tables=tables, check=check))
     from datetime import datetime
 
     out_dir = out or Path("scrape") / datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -230,9 +237,48 @@ def scrape(
             "files": written,
         }, indent=2, ensure_ascii=False))
     else:
-        _print_scrape_results(pages, out_dir)
+        _print_scrape_results(pages, out_dir, per_page=False)
     if not ok:
         raise typer.Exit(code=1)
+
+
+def _stderr_scrape_progress(i: int, total: int, url: str, page) -> None:
+    import sys as _sys
+    if page is not None:
+        _sys.stderr.write(f"[{i}/{total}] {page.status}  {url}\n")
+        _sys.stderr.flush()
+
+
+def _scrape_line(page) -> str:
+    if page.ok:
+        n = len(page.tables)
+        line = (f"[bold green]✓[/] {page.url}  [dim]{page.title[:60]}[/]  {page.word_count} words, "
+                f"{n} table{'s' if n != 1 else ''}")
+        return line + "".join(f"\n  [bold yellow]⚠[/]  {w}" for w in page.warnings)
+    return f"[bold red]✗[/] {page.url}  {page.status}"
+
+
+async def _scrape_with_progress(urls: list[str], **kw) -> list:
+    """scrape_urls with a live bar naming the page being fetched, and a line
+    per page as it finishes, so a long list never looks stalled."""
+    from dataforge import scrape as qs
+
+    total = len(urls)
+    prog = ui.make_progress("Scraping")
+    task = prog.add_task("Scraping", total=total)
+
+    def on_page(i: int, n: int, url: str, page) -> None:
+        if page is None:
+            short = url if len(url) <= 60 else "…" + url[-57:]
+            prog.update(task, description=f"[cyan]Fetching {i}/{n}[/]  [dim]{short}[/]")
+            return
+        prog.console.print(_scrape_line(page))
+        prog.update(task, completed=i)
+
+    ui.info(f"Fetching {total} page{'s' if total != 1 else ''}. "
+            "Pages on the same site are spaced out to respect its rate limit.")
+    with prog:
+        return await qs.scrape_urls(urls, progress=on_page, **kw)
 
 
 def _print_table_preview(table, title: str, max_rows: int = 8) -> None:
@@ -1580,17 +1626,24 @@ async def _step_urls(state: dict) -> StepResult:
         if keep:
             return "next"
 
+    # Choosing again replaces an earlier scrape folder choice.
+    state.pop("scrape_dir", None)
+    state.pop("scrape_pages", None)
     try:
-        urls = await _collect_urls()
+        urls = await _collect_urls(state)
     except KeyboardInterrupt:
         return "home"
-    result = None if urls is None else urls
-    if result is None:
-        return "back"
-    if not result:
+    if urls is None:
+        return "home"
+    if not urls:
         ui.error("No valid URLs provided")
-        return "back"
-    state["seed_urls"] = result
+        return "retry"
+    state["seed_urls"] = urls
+    if state.get("scrape_pages"):
+        # Already scraped: no discovery, collection is the imported pages.
+        state["discovery_scope"] = "page"
+        return "next"
+    result = urls
     # A sitemap already lists the pages to choose from; anything else could
     # mean one page or a whole site, so ask rather than always crawling.
     if all(u.lower().endswith(".xml") for u in result):
@@ -1598,7 +1651,7 @@ async def _step_urls(state: dict) -> StepResult:
     else:
         scope = await prompts.ask_discovery_scope(len(result))
         if scope is None:
-            return "back"
+            return "retry"
         state["discovery_scope"] = scope
     return "next"
 
@@ -1651,7 +1704,10 @@ async def _step_config(state: dict) -> StepResult:
             return "back"
         state["n_per_chunk"] = n_per_chunk
 
-        ignore_robots = await prompts.ask_ignore_robots()
+        # Imported pages are not fetched, so robots.txt and "skip pages
+        # seen before" do not apply.
+        imported = bool(state.get("scrape_pages"))
+        ignore_robots = False if imported else await prompts.ask_ignore_robots()
         if ignore_robots:
             ui.warn("robots.txt enforcement disabled — ensure you have permission to scrape this site.")
         state["ignore_robots"] = ignore_robots
@@ -1659,7 +1715,7 @@ async def _step_config(state: dict) -> StepResult:
         from urllib.parse import urlparse as _urlparse
         seed_domain = _urlparse(state.get("seed_urls", [""])[0]).netloc or "this site"
         # Pages named one by one are scraped even if seen before.
-        if state.get("discovery_scope", "site") != "page":
+        if state.get("discovery_scope", "site") != "page" and not imported:
             state["skip_known"] = await prompts.ask_skip_known(seed_domain)
         else:
             state["skip_known"] = False
@@ -1825,7 +1881,15 @@ async def _interactive_pipeline() -> None:
         ui.info(f"Session directory: [dim]{ctx.session_dir()}[/]")
         ui.info(f"Database: [dim]{s.db_path.resolve()}[/]")
 
-        await _run_orchestrator(ctx)
+        start_from = None
+        if state.get("scrape_pages"):
+            from dataforge import scrape as qs
+            qs.import_into_session(ctx, state["scrape_pages"])
+            ui.info(f"Using {len(ctx.scraped_page_ids)} page(s) from "
+                    f"[dim]{state['scrape_dir']}[/]; starting at processing.")
+            start_from = PipelineStage.processing.value
+
+        await _run_orchestrator(ctx, start_from=start_from)
 
         # ── Post-pipeline: offer explore or loop back to menu ─────────────────
         ui.section("Pipeline Complete")
@@ -1859,7 +1923,11 @@ async def _run_wizard(state: dict) -> str:
         if result == "next":
             step_idx += 1
         elif result == "back":
-            step_idx = max(0, step_idx - 1)
+            if step_idx == 0:
+                return "home"
+            step_idx -= 1
+        elif result == "retry":
+            continue
         elif result == "back_to_urls":
             step_idx = STEPS.index("urls")
         elif result == "back_to_config":
@@ -2248,20 +2316,37 @@ async def _ask_export_config(s) -> dict:
     return {"targets": ["local"], "approved_only": True}
 
 
-async def _collect_urls() -> list[str] | None:
+async def _collect_urls(state: dict | None = None) -> list[str] | None:
+    """Ask for URLs. None when the user backs out of the method list.
+
+    Backing out of a later prompt (the URL box, the file path) returns to
+    the method list. With ``state`` (the dataset wizard), a folder from an
+    earlier no-AI scrape may be chosen instead: its pages go in
+    ``state["scrape_pages"]`` and their URLs are returned.
+    """
+    while True:
+        method = await prompts.ask_input_method(allow_scrape_folder=state is not None)
+        if method is None:
+            return None
+        urls = await _urls_by(method, state)
+        if urls is not None:
+            return urls
+
+
+async def _urls_by(method: str, state: dict | None) -> list[str] | None:
+    """URLs for one input method; None when the user backs out of it."""
     from dataforge.utils import sanitise, sanitise_many
 
-    method = await prompts.ask_input_method()
-    if method is None:
-        return None
-    if method == "Single URL":
+    if method == prompts.SCRAPE_FOLDER and state is not None:
+        return await _collect_scrape_folder(state)
+    if method in ("Single URL", "Sitemap URL"):
         url = await prompts.ask_single_url()
         if url is None:
             return None
         clean = sanitise(url)
         if not clean:
             ui.error(f"'{url}' is not a valid URL — skipping.")
-            return None
+            return []
         if clean != url:
             ui.info(f"URL corrected to: [dim]{clean}[/]")
         return [clean]
@@ -2273,6 +2358,7 @@ async def _collect_urls() -> list[str] | None:
         dropped = len(urls) - len(clean)
         if dropped:
             ui.warn(f"{dropped} invalid URL(s) removed.")
+        ui.info(f"{len(clean)} URL{'s' if len(clean) != 1 else ''} added.")
         return clean
     if method == "Text file":
         path = await prompts.ask_file_path()
@@ -2285,18 +2371,31 @@ async def _collect_urls() -> list[str] | None:
             ui.warn(f"{dropped} invalid URL(s) removed from file.")
         ui.info(f"Loaded {len(clean)} URLs from [dim]{path.resolve()}[/]")
         return clean
-    if method == "Sitemap URL":
-        url = await prompts.ask_single_url()
-        if url is None:
-            return None
-        clean = sanitise(url)
-        if not clean:
-            ui.error(f"'{url}' is not a valid URL — skipping.")
-            return None
-        if clean != url:
-            ui.info(f"URL corrected to: [dim]{clean}[/]")
-        return [clean]
     return []
+
+
+def _latest_scrape_dir() -> str:
+    root = Path("scrape")
+    dirs = sorted((d for d in root.glob("*") if d.is_dir()), reverse=True) if root.is_dir() else []
+    return str(dirs[0]) if dirs else ""
+
+
+async def _collect_scrape_folder(state: dict) -> list[str] | None:
+    from dataforge import scrape as qs
+
+    folder = await prompts.ask_scrape_dir(_latest_scrape_dir())
+    if folder is None:
+        return None
+    pages = qs.load_scrape_dir(folder)
+    if not pages:
+        ui.error(f"No pages with text in [dim]{folder.resolve()}[/]")
+        return []
+    words = sum(p.word_count for p in pages)
+    ui.info(f"Loaded {len(pages)} page{'s' if len(pages) != 1 else ''} ({words:,} words) "
+            f"from [dim]{folder.resolve()}[/]. They will not be fetched again.")
+    state["scrape_dir"] = str(folder.resolve())
+    state["scrape_pages"] = pages
+    return [p.url for p in pages]
 
 
 async def _pick_session(question: str) -> PipelineSession | None:
@@ -2374,23 +2473,20 @@ async def _quick_scrape_flow() -> None:
     if out is None:
         return
     s = get_settings()
-    with ui.console.status(f"Fetching {len(urls)} page(s)…"):
-        pages = await qs.scrape_urls(urls, rate_limit=s.rate_limit, tables="csv" in fmts)
+    pages = await _scrape_with_progress(urls, rate_limit=s.rate_limit, tables="csv" in fmts)
     out_dir = Path(out).expanduser()
     qs.write_outputs(pages, out_dir, tuple(fmts))
-    _print_scrape_results(pages, out_dir)
+    _print_scrape_results(pages, out_dir, per_page=False)
+    if any(p.ok for p in pages) and ("md" in fmts or "jsonl" in fmts):
+        ui.info("To turn these pages into training data: Build an AI training dataset, "
+                f"then [bold]{prompts.SCRAPE_FOLDER}[/].")
 
 
-def _print_scrape_results(pages: list, out_dir: Path) -> None:
+def _print_scrape_results(pages: list, out_dir: Path, per_page: bool = True) -> None:
     ok = [p for p in pages if p.ok]
-    for p in pages:
-        if p.ok:
-            ui.success(f"{p.url}  [dim]{p.title[:60]}[/]  {p.word_count} words, "
-                       f"{len(p.tables)} table{'s' if len(p.tables) != 1 else ''}")
-            for w in p.warnings:
-                ui.warn(f"  {w}")
-        else:
-            ui.error(f"{p.url}  {p.status}")
+    if per_page:
+        for p in pages:
+            ui.console.print(_scrape_line(p))
     for p in ok:
         for k, t in enumerate(p.tables[:3], 1):
             _print_table_preview(t, f"{p.title or p.url}: table {k}")

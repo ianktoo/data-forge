@@ -5,6 +5,32 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Use a scrape folder as dataset input**: *Build an AI training dataset*
+  now offers **Pages I scraped earlier** next to the URL options. Pick a
+  folder written by *Scrape pages (no AI)* or `dataforge scrape` (the latest
+  one is the default); its pages become the session's collection without
+  being fetched again, the robots.txt and skip-known questions are skipped,
+  and the run starts at processing. Reads `pages.jsonl`, or the
+  `page_NNN.md` files when only Markdown was saved.
+
+### Fixed
+- **No feedback while scraping several URLs**: *Scrape pages (no AI)* and
+  `dataforge scrape` now show a live bar naming the page being fetched
+  (`Fetching 2/5`) and print each page's result as it finishes, instead of
+  one spinner until the end. With `--json`, the same lines go to stderr when
+  it is a terminal. `scrape_urls` takes a `progress` callback.
+- **Multiple URLs box looked frozen**: it said "blank line to finish", but
+  Enter on a blank line only added another line (questionary's multiline box
+  finishes on Alt+Enter). Enter on an empty line now finishes, an empty box
+  says so instead of submitting nothing, and the count of URLs added is shown.
+- **Back did not go back**: questionary gives a choice with `value=None` its
+  title as the value, so *Back* in the URL method list, the scope question
+  and the adjust-settings menu returned text instead of None. In the wizard
+  this re-showed the same step, and Back on the scope question saved
+  "(b) Back" as the scope. Back now returns to the previous prompt: from a
+  URL box to the method list, from the method list to the main menu.
+
 ## [2.7.0] - 2026-09-24
 
 Easier URL selection: pick pages from the keyboard, choose the language on a
