@@ -70,9 +70,13 @@ after a review of their terms and access policies, although
 \texttt{robots.txt} alone would have permitted at least six of them. The
 LLM judge approved 97.6\% of samples, but the same model generated and
 judged them, so we treat that figure as unvalidated until a human audit is
-complete. We also describe agent access through the Model Context
-Protocol, situate the resulting synthetic, fine-tuning-oriented
-dataset relative to retrieval-augmented generation as a complementary
+complete. We describe the same collection machinery run without the LLM,
+as a scrape that extracts a page's text and its tables as structured rows
+and whose output can later be fed back in as a run's input, so gathering
+a corpus and paying to generate from it need not be the same decision. We
+also describe agent access through the Model Context Protocol, situate
+the resulting synthetic, fine-tuning-oriented dataset relative to
+retrieval-augmented generation as a complementary
 route to reducing hallucination, discuss the responsible-use
 considerations inherent to an unattended web-scraping and synthetic-data
 tool, and situate the system relative to prior work in web-scale data
@@ -172,7 +176,8 @@ field path, rather than being silently ignored, and a recipe run
 returns a distinct exit code for each class of outcome (invalid recipe,
 zero URLs after filtering, paused, zero approved samples), so it
 composes with a scheduler or CI pipeline without a human watching the
-log.
+log. This note describes version~2.7.3; where behaviour changed, the
+version that changed it is named.
 
 \subsection{Discovery}
 \label{sec:discovery}
@@ -211,9 +216,9 @@ URLs from the keyboard. A recipe replaces this step declaratively with
 \texttt{source.language} / \texttt{source.include} /
 \texttt{source.exclude} / \texttt{source.max\_urls}.
 The wizard also accepts the folder written by a no-AI scrape
-(\texttt{dataforge scrape}) in place of URLs: its pages are stored as the
-session's collection, without being fetched again, and the run starts at
-processing.
+(\texttt{dataforge scrape}, Section~\ref{sec:nollm}) in place of URLs:
+its pages are stored as the session's collection, without being fetched
+again, and the run starts at processing.
 
 \subsection{Collection}
 \label{sec:collection}
@@ -259,7 +264,11 @@ into overlapping, token-bounded chunks. Token counts use
 model, so chunk sizes are approximate for models with a different
 tokenizer. Chunk size and overlap are recipe-configurable; overlap exists
 so that a fact spanning a chunk boundary is not lost to the generation
-stage entirely.
+stage entirely. The conversion keeps a table as Markdown, which reads
+acceptably to the generation model but is not structured data; the
+no-LLM path of Section~\ref{sec:nollm} extracts tables as rows instead,
+and Section~\ref{sec:limitations} treats structured input as future
+work.
 
 \subsection{Generation}
 \label{sec:generation}
@@ -291,6 +300,18 @@ calls already in flight when it is reached (at most one per concurrent
 generation worker and judge task). Once the budget is exhausted, remaining
 chunks are skipped cleanly and the run reports how many calls were
 skipped, rather than crashing or continuing to spend.
+
+A budget bounds what a working run may spend; it does not bound what a
+broken one wastes in time. Until version~2.6.0 a missing or invalid API
+key, or an unreachable provider, was caught per chunk and retried, so a
+run with a bad key made three calls for every chunk and printed the same
+error once per chunk before ending with nothing. Credential and
+connection failures are now classified as fatal: they are exempt from the
+retry policy, they propagate out of the per-chunk handler to the
+generator and to the streaming agent, and the first one stops dispatch
+and cancels the work already queued. A run against forty chunks with a
+bad key now ends in about three seconds with a single message naming the
+cause. The judge stage does the same, and reports how far it got.
 
 \subsection{Quality}
 \label{sec:quality}
@@ -385,6 +406,55 @@ outside the export step, so realized proportions are reported without a
 comparison against the target. After \texttt{dataforge run}, each session
 also holds a \texttt{run\_summary.json} with timing per stage, LLM calls
 and cost, budget use, and errors.
+
+\subsection{The pipeline without the LLM}
+\label{sec:nollm}
+The six stages above answer one question: what does it take to turn a
+site into a fine-tuning dataset. A recurring second question is narrower
+and much more common: what does this page say, and what is in the table
+on it. Answering it through the full pipeline means a session, a
+database, an API key and a bill, for work no model needs to do. Since
+version~2.5.0 that path exists on its own, as \texttt{dataforge scrape}
+(and, for an agent, the \texttt{scrape\_page} tool of
+Section~\ref{sec:mcp}).
+
+A scrape fetches each URL once, in order, through the same client as
+every other request DataForge makes, so \texttt{robots.txt}, the
+per-domain rate limit and a declared \texttt{Crawl-delay} bind it exactly
+as they bind a run (Section~\ref{sec:collection}). No LLM is called, no
+API key is read, and nothing is written to the session database; the
+output is a folder. Each page yields its title, its Markdown and its
+plain text, and every \texttt{<table>} on it is extracted as a header row
+plus data rows rather than being flattened into prose. Header detection
+accepts the three forms real pages use: a row of \texttt{<th>} cells, a
+row inside \texttt{<thead>}, or, on hand-made pages, a first row whose
+non-empty cells are entirely bold while the second row's are not;
+duplicate header names are made unique. \texttt{colspan} repeats a cell
+across the columns it spans and \texttt{rowspan} carries it down into the
+rows below, so every row has every column and the result is rectangular.
+Nested tables are extracted in their own right and do not fold their text
+into the cell containing them, tables used for layout (one row, or one
+column with no header) are skipped, and spans are capped so that a
+hostile page cannot force a large allocation. Tables are written per page
+as CSV and JSON, and together as \texttt{tables.jsonl} with each row's
+\texttt{source\_url}, so lineage survives this path too.
+
+An optional \texttt{--check} pass applies the rule-based checks that need
+no model: a page with no extracted text at all (the usual cause being
+that it is built by JavaScript), a page under fifty words, and a page
+whose normalized text is identical to one already fetched, which is
+reported against the URL that produced it first. These are the same
+failure modes the quality stage of Section~\ref{sec:quality} would spend
+LLM calls to notice.
+
+The two paths meet again at the folder. A scrape folder can be given to
+the wizard in place of URLs (Section~\ref{sec:discovery}): its pages
+become the session's collection without being fetched a second time, and
+the run starts at processing. Together with the stage exports of
+Section~\ref{sec:export}, this means the collection work and the
+generation work can be done at different times, by different people, or
+on different terms: a corpus can be gathered, inspected and kept while
+the decision to spend anything on generation is still open.
 
 \section{Concurrency: streaming vs.\ batch}
 \label{sec:streaming}
@@ -877,9 +947,13 @@ into \texttt{start\_run}, which returns immediately, and
 (\texttt{list\_sessions}, \texttt{session\_stats}, \texttt{view\_samples})
 invoke the CLI's own \texttt{--json} output rather than reimplementing
 its queries, and \texttt{validate\_recipe} runs the CLI's dry run, so the
-CLI stays the source of truth for those; \texttt{explore\_site} calls the
-discovery library directly. Third, and most important, the safety
-constraints that matter most are \emph{enforced by the server} rather
+CLI stays the source of truth for those; \texttt{explore\_site} and
+\texttt{scrape\_page} call the discovery and scrape libraries directly.
+\texttt{scrape\_page} in particular gives the no-LLM path of
+Section~\ref{sec:nollm} to an agent: asked what a page says, or what is
+in the table on it, the agent answers from one read instead of starting
+a run that crawls and spends to find out. Third, and most important,
+the safety constraints that matter most are \emph{enforced by the server} rather
 than requested of the model. \texttt{start\_run} refuses a recipe that
 sets no spending cap (\texttt{generation.max\_cost\_usd} or
 \texttt{generation.max\_llm\_calls}, Section~\ref{sec:budget}) unless the
@@ -1144,17 +1218,31 @@ export's loss of source lineage, now carried in a sidecar file
 split's output file, now shuffled (Section~\ref{sec:row-shuffle}). Both
 are recorded here as a reminder that lineage and ordering guarantees
 need to be verified per output format and per pipeline stage, not
-assumed to hold uniformly once established for one.
+assumed to hold uniformly once established for one. The same pattern
+recurred in version~2.6.0 with error handling rather than lineage: the
+per-chunk \texttt{try} that made the generation stage tolerant of one bad
+chunk also swallowed the failures that were not per-chunk at all
+(Section~\ref{sec:budget}). A handler written for one class of failure
+had silently become the handler for every class.
 
 The most significant near-term extension, and the one we consider the
 project's actual next step rather than a background item, is support for
 \textbf{non-text source material}. The pipeline today assumes its input
 is HTML prose reachable by an HTTP client: PDFs and images are filtered
 out of crawl candidates before any request is made, rather than processed,
-tabular and structured data embedded in a page is flattened or lost by
-the Markdown-conversion step (Section~\ref{sec:processing}), and there is no handling for
-audio or video sources at all. Domains where the authoritative content is
-a table (regulatory filings, statistical releases), a scanned or
+and there is no handling for audio or video sources at all. Structured
+data embedded in a page is half-handled. Version~2.4.5 added the table
+extractor of Section~\ref{sec:nollm}, so an HTML table can leave the
+system as rows, with its headers, its spans expanded and its source URL
+attached; but that extractor serves the no-LLM path only. The dataset
+pipeline still passes a table through the Markdown-conversion step
+(Section~\ref{sec:processing}), which flattens it, so the rows a scrape
+can hand to a spreadsheet are not the rows the generation stage sees.
+Routing the extractor's output into chunking, so that a chunk can be a
+group of rows with their headers rather than a paragraph of run-together
+cells, is the smaller half of this gap and the part already within
+reach. Domains where the authoritative content is a table (regulatory
+filings, statistical releases), a scanned or
 image-based PDF (many government and legal documents), or a recorded
 briefing are currently out of scope, not because the downstream
 pipeline (chunking, generation, quality, leak-aware export) is
