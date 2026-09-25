@@ -5,6 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.7.3] - 2026-09-24
+
+Same code as 2.7.2. The 2.7.2 tag was made on a commit that never reached
+`master` (a direct push was declined by the repository rules), so this
+release is tagged on the merge of the release PR instead.
+
 ## [2.7.2] - 2026-09-24
 
 Point **Pages I scraped earlier** at the folder you have in mind.
