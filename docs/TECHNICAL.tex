@@ -10,6 +10,32 @@
 \usepackage{xcolor}
 \usepackage{enumitem}
 \usepackage{amsmath}
+\usepackage{tikz}
+\usetikzlibrary{positioning, arrows.meta, fit, backgrounds, calc}
+\usepackage{pgfplots}
+% 1.16 rather than a newer value: nothing here depends on later behaviour, and
+% this compiles on older TeX Live installations as well as current Overleaf.
+\pgfplotsset{compat=1.16}
+
+% Figure palette. Validated for colour-vision deficiency separation against a
+% light surface; every coloured mark also carries a direct label, so the
+% figures survive greyscale printing.
+\definecolor{figblue}{HTML}{2A78D6}
+\definecolor{figorange}{HTML}{EB6834}
+\definecolor{figaqua}{HTML}{1BAF7A}
+\definecolor{figink}{HTML}{0B0B0B}
+\definecolor{figmuted}{HTML}{52514E}
+\definecolor{figrule}{HTML}{C9C8C3}
+
+\tikzset{
+  stage/.style   = {draw=figink, fill=white, rounded corners=2pt,
+                    minimum height=7mm, inner xsep=3pt, font=\small},
+  artifact/.style= {font=\footnotesize\itshape, text=figmuted, inner sep=1.5pt,
+                    fill=white},
+  note/.style    = {font=\footnotesize, text=figmuted, align=left},
+  flow/.style    = {-{Stealth[length=4pt]}, draw=figink},
+  band/.style    = {rounded corners=3pt, draw=figrule, line width=0.6pt},
+}
 
 \hypersetup{
   colorlinks=true,
@@ -70,9 +96,13 @@ after a review of their terms and access policies, although
 \texttt{robots.txt} alone would have permitted at least six of them. The
 LLM judge approved 97.6\% of samples, but the same model generated and
 judged them, so we treat that figure as unvalidated until a human audit is
-complete. We also describe agent access through the Model Context
-Protocol, situate the resulting synthetic, fine-tuning-oriented
-dataset relative to retrieval-augmented generation as a complementary
+complete. We describe the same collection machinery run without the LLM,
+as a scrape that extracts a page's text and its tables as structured rows
+and whose output can later be fed back in as a run's input, so gathering
+a corpus and paying to generate from it need not be the same decision. We
+also describe agent access through the Model Context Protocol, situate
+the resulting synthetic, fine-tuning-oriented dataset relative to
+retrieval-augmented generation as a complementary
 route to reducing hallucination, discuss the responsible-use
 considerations inherent to an unattended web-scraping and synthetic-data
 tool, and situate the system relative to prior work in web-scale data
@@ -161,7 +191,57 @@ in Section~\ref{sec:leakage}.
   \end{tabular}
 \end{table}
 
-DataForge is organized as six stages (Table~\ref{tab:architecture}):
+\begin{figure}[h]
+  \centering
+  \begin{tikzpicture}[node distance=6mm and 0mm]
+    \node[stage] (disc)  {Discovery};
+    \node[stage, below=of disc] (coll) {Collection};
+    \node[stage, below=of coll] (proc) {Processing};
+    \node[stage, below=of proc] (gen)  {Generation};
+    \node[stage, below=of gen]  (qual) {Quality};
+    \node[stage, below=of qual] (exp)  {Export};
+
+    \draw[flow] (disc) -- node[artifact, right=6mm] {candidate URLs} (coll);
+    \draw[flow] (coll) -- node[artifact, right=6mm] {pages} (proc);
+    \draw[flow] (proc) -- node[artifact, right=6mm] {chunks} (gen);
+    \draw[flow] (gen)  -- node[artifact, right=6mm] {candidate samples} (qual);
+    \draw[flow] (qual) -- node[artifact, right=6mm] {approved samples} (exp);
+
+    \node[note, right=26mm of disc, text width=38mm]
+      {sitemap first, then a bounded best-first crawl};
+    \node[note, right=26mm of coll, text width=38mm]
+      {\texttt{robots.txt}, per-domain rate limit, \texttt{Crawl-delay}};
+    \node[note, right=26mm of gen, text width=38mm]
+      {$n$ samples per chunk, under one shared cost and call budget};
+    \node[note, right=26mm of qual, text width=38mm]
+      {free filters first; only the judge costs money};
+    \node[note, right=26mm of exp, text width=38mm]
+      {group-aware split; lineage on every record};
+
+    \begin{scope}[on background layer]
+      \node[band, fill=figblue!7, fit=(coll)(proc)(gen),
+            inner xsep=4mm, inner ysep=2mm] (streamband) {};
+      \node[band, fill=figorange!7, fit=(qual)(exp),
+            inner xsep=4mm, inner ysep=2mm] (batchband) {};
+    \end{scope}
+
+    \node[note, left=1mm of streamband, text width=24mm, align=right]
+      {concurrent pools joined by bounded queues};
+    \node[note, left=1mm of batchband, text width=24mm, align=right]
+      {batch only: needs the whole sample set};
+  \end{tikzpicture}
+  \caption{The six stages, what passes between them, and where the
+  guarantees attach. Collection, Processing and Generation overlap as
+  concurrent worker pools (Section~\ref{sec:streaming}); Quality and
+  Export cannot, because deduplication and group-aware splitting are
+  properties of the whole sample set. Every URL, page, chunk and sample
+  is checkpointed as it completes, so a resumed run replays only the
+  unfinished work.}
+  \label{fig:pipeline}
+\end{figure}
+
+DataForge is organized as six stages (Table~\ref{tab:architecture} and
+Figure~\ref{fig:pipeline}):
 Discovery, Collection, Processing, Generation, Quality, and Export. A
 run is specified either by a YAML \emph{recipe} --- a declarative,
 version-controllable description of every stage's parameters --- or by
@@ -172,7 +252,8 @@ field path, rather than being silently ignored, and a recipe run
 returns a distinct exit code for each class of outcome (invalid recipe,
 zero URLs after filtering, paused, zero approved samples), so it
 composes with a scheduler or CI pipeline without a human watching the
-log.
+log. This note describes version~2.7.3; where behaviour changed, the
+version that changed it is named.
 
 \subsection{Discovery}
 \label{sec:discovery}
@@ -211,9 +292,9 @@ URLs from the keyboard. A recipe replaces this step declaratively with
 \texttt{source.language} / \texttt{source.include} /
 \texttt{source.exclude} / \texttt{source.max\_urls}.
 The wizard also accepts the folder written by a no-AI scrape
-(\texttt{dataforge scrape}) in place of URLs: its pages are stored as the
-session's collection, without being fetched again, and the run starts at
-processing.
+(\texttt{dataforge scrape}, Section~\ref{sec:nollm}) in place of URLs:
+its pages are stored as the session's collection, without being fetched
+again, and the run starts at processing.
 
 \subsection{Collection}
 \label{sec:collection}
@@ -259,7 +340,11 @@ into overlapping, token-bounded chunks. Token counts use
 model, so chunk sizes are approximate for models with a different
 tokenizer. Chunk size and overlap are recipe-configurable; overlap exists
 so that a fact spanning a chunk boundary is not lost to the generation
-stage entirely.
+stage entirely. The conversion keeps a table as Markdown, which reads
+acceptably to the generation model but is not structured data; the
+no-LLM path of Section~\ref{sec:nollm} extracts tables as rows instead,
+and Section~\ref{sec:limitations} treats structured input as future
+work.
 
 \subsection{Generation}
 \label{sec:generation}
@@ -291,6 +376,18 @@ calls already in flight when it is reached (at most one per concurrent
 generation worker and judge task). Once the budget is exhausted, remaining
 chunks are skipped cleanly and the run reports how many calls were
 skipped, rather than crashing or continuing to spend.
+
+A budget bounds what a working run may spend; it does not bound what a
+broken one wastes in time. Until version~2.6.0 a missing or invalid API
+key, or an unreachable provider, was caught per chunk and retried, so a
+run with a bad key made three calls for every chunk and printed the same
+error once per chunk before ending with nothing. Credential and
+connection failures are now classified as fatal: they are exempt from the
+retry policy, they propagate out of the per-chunk handler to the
+generator and to the streaming agent, and the first one stops dispatch
+and cancels the work already queued. A run against forty chunks with a
+bad key now ends in about three seconds with a single message naming the
+cause. The judge stage does the same, and reports how far it got.
 
 \subsection{Quality}
 \label{sec:quality}
@@ -386,6 +483,55 @@ comparison against the target. After \texttt{dataforge run}, each session
 also holds a \texttt{run\_summary.json} with timing per stage, LLM calls
 and cost, budget use, and errors.
 
+\subsection{The pipeline without the LLM}
+\label{sec:nollm}
+The six stages above answer one question: what does it take to turn a
+site into a fine-tuning dataset. A recurring second question is narrower
+and much more common: what does this page say, and what is in the table
+on it. Answering it through the full pipeline means a session, a
+database, an API key and a bill, for work no model needs to do. Since
+version~2.5.0 that path exists on its own, as \texttt{dataforge scrape}
+(and, for an agent, the \texttt{scrape\_page} tool of
+Section~\ref{sec:mcp}).
+
+A scrape fetches each URL once, in order, through the same client as
+every other request DataForge makes, so \texttt{robots.txt}, the
+per-domain rate limit and a declared \texttt{Crawl-delay} bind it exactly
+as they bind a run (Section~\ref{sec:collection}). No LLM is called, no
+API key is read, and nothing is written to the session database; the
+output is a folder. Each page yields its title, its Markdown and its
+plain text, and every \texttt{<table>} on it is extracted as a header row
+plus data rows rather than being flattened into prose. Header detection
+accepts the three forms real pages use: a row of \texttt{<th>} cells, a
+row inside \texttt{<thead>}, or, on hand-made pages, a first row whose
+non-empty cells are entirely bold while the second row's are not;
+duplicate header names are made unique. \texttt{colspan} repeats a cell
+across the columns it spans and \texttt{rowspan} carries it down into the
+rows below, so every row has every column and the result is rectangular.
+Nested tables are extracted in their own right and do not fold their text
+into the cell containing them, tables used for layout (one row, or one
+column with no header) are skipped, and spans are capped so that a
+hostile page cannot force a large allocation. Tables are written per page
+as CSV and JSON, and together as \texttt{tables.jsonl} with each row's
+\texttt{source\_url}, so lineage survives this path too.
+
+An optional \texttt{--check} pass applies the rule-based checks that need
+no model: a page with no extracted text at all (the usual cause being
+that it is built by JavaScript), a page under fifty words, and a page
+whose normalized text is identical to one already fetched, which is
+reported against the URL that produced it first. These are the same
+failure modes the quality stage of Section~\ref{sec:quality} would spend
+LLM calls to notice.
+
+The two paths meet again at the folder. A scrape folder can be given to
+the wizard in place of URLs (Section~\ref{sec:discovery}): its pages
+become the session's collection without being fetched a second time, and
+the run starts at processing. Together with the stage exports of
+Section~\ref{sec:export}, this means the collection work and the
+generation work can be done at different times, by different people, or
+on different terms: a corpus can be gathered, inspected and kept while
+the decision to spend anything on generation is still open.
+
 \section{Concurrency: streaming vs.\ batch}
 \label{sec:streaming}
 
@@ -394,11 +540,62 @@ leave the LLM --- the highest-latency, highest-cost component --- idle
 for the entire duration of the crawl. DataForge's streaming mode
 (\texttt{stream: true}, the recipe default) instead runs collection,
 chunking, and generation as three concurrent worker pools connected by
-bounded queues:
+bounded queues (Figure~\ref{fig:streaming}):
 
 \[
 \text{urls} \;\longrightarrow\; [\text{scrape pool}] \;\longrightarrow\; \text{pages} \;\longrightarrow\; [\text{chunk pool}] \;\longrightarrow\; \text{chunks} \;\longrightarrow\; [\text{LLM pool}] \;\longrightarrow\; \text{samples}
 \]
+
+\begin{figure}[h]
+  \centering
+  \begin{tikzpicture}[
+      bar/.style={draw=figink, rounded corners=1pt, minimum height=5mm,
+                  font=\scriptsize, inner sep=1pt, anchor=west},
+      rowlbl/.style={font=\small, anchor=east},
+      tick/.style={font=\scriptsize, text=figmuted, anchor=north},
+      span/.style={{Bar[width=4pt]}-{Bar[width=4pt]}, draw=figorange,
+                   line width=0.6pt},
+    ]
+    % batch
+    \node[rowlbl] at (-0.2,0) {batch};
+    \node[bar, fill=figblue!25,   minimum width=36mm] at (0,0)   {collection};
+    \node[bar, fill=figrule!50,   minimum width=7mm]  at (3.6,0) {};
+    \node[bar, fill=figorange!30, minimum width=36mm] at (4.3,0) {generation};
+
+    \draw[span] (0,0.55) -- (4.3,0.55);
+    \node[font=\scriptsize, text=figorange, anchor=south] at (2.15,0.6)
+      {LLM idle for the whole crawl};
+
+    % streaming
+    \node[rowlbl] at (-0.2,-1.5) {streaming};
+    \node[bar, fill=figblue!25,   minimum width=36mm] at (0,-1.2)   {collection};
+    \node[bar, fill=figrule!50,   minimum width=36mm] at (0.4,-1.8) {processing};
+    \node[bar, fill=figorange!30, minimum width=38mm] at (0.8,-2.4) {generation};
+
+    \draw[figmuted, line width=0.4pt, dashed] (4.6,-3.1) -- (4.6,0.35);
+    \draw[figmuted, line width=0.4pt, dashed] (7.9,-3.1) -- (7.9,0.35);
+
+    % axis
+    \draw[draw=figrule, line width=0.6pt, -{Stealth[length=4pt]}]
+      (0,-3.1) -- (8.4,-3.1);
+    \node[tick, anchor=west] at (8.4,-3.05) {time};
+    \node[tick] at (4.6,-3.15) {streaming done};
+    \node[tick] at (7.9,-3.15) {batch done};
+
+    \node[font=\scriptsize, text=figmuted, anchor=west, align=left]
+      at (5.0,-1.8) {pool sizes tuned per stage;\\bounded queues apply\\backpressure between them};
+  \end{tikzpicture}
+  \caption{Why the stages are overlapped, drawn schematically. Run
+  sequentially, the LLM sits idle for the entire crawl, and the crawl is
+  rate-limit bound rather than compute bound. Streaming runs collection,
+  chunking and generation as concurrent pools joined by bounded queues,
+  so generation starts on the first chunks while later pages are still
+  being fetched. The proportions here are illustrative: the benchmark of
+  Section~\ref{sec:eval} ran in streaming mode only, so the saving is a
+  design rationale and not a measured result
+  (Section~\ref{sec:eval-limits}).}
+  \label{fig:streaming}
+\end{figure}
 
 Pool sizes are tuned independently, since each stage is bound by a
 different resource: scraping is rate-limit bound (typically one or a few
@@ -428,8 +625,8 @@ the benchmark ran in streaming mode only (Section~\ref{sec:eval-limits}).
 
 \subsection{The problem}
 A synthetic dataset produced this way has a clustered generative
-structure: $n$ samples are drawn per chunk, and multiple chunks are
-drawn per page. Two samples generated from the same chunk --- or from
+structure (Figure~\ref{fig:leakage}): $n$ samples are drawn per chunk,
+and multiple chunks are drawn per page. Two samples generated from the same chunk --- or from
 adjacent, overlapping chunks of the same page --- draw on the same
 underlying facts and the same grounding text, even when they are worded
 differently. This is precisely the condition under
@@ -442,6 +639,101 @@ general \emph{data leakage} problem well documented in the machine
 learning literature \cite{kaufman2012leakage}, and closely related to
 the near-duplicate contamination concerns raised for pretraining corpora
 \cite{lee2022deduplicating}.
+
+\begin{figure}[h]
+  \centering
+  \begin{tikzpicture}[
+      every node/.style={font=\footnotesize},
+      src/.style={draw=figink, fill=white, rounded corners=2pt,
+                  minimum width=11mm, minimum height=5mm, inner sep=1pt},
+      chunk/.style={draw=figmuted, fill=white, rounded corners=1.5pt,
+                    minimum width=7mm, minimum height=4.5mm, inner sep=1pt,
+                    font=\scriptsize},
+      pchip/.style={draw=figblue, fill=figblue!12, rounded corners=1.5pt,
+                    minimum width=6mm, minimum height=4.5mm, inner sep=1pt,
+                    font=\scriptsize, text=figink},
+      qchip/.style={draw=figaqua, fill=figaqua!12, rounded corners=1.5pt,
+                    minimum width=6mm, minimum height=4.5mm, inner sep=1pt,
+                    font=\scriptsize, text=figink},
+      bin/.style={draw=figrule, rounded corners=2pt, inner xsep=2mm,
+                  inner ysep=1.5mm},
+      lbl/.style={font=\scriptsize, text=figmuted},
+      lnk/.style={draw=figmuted, line width=0.4pt},
+    ]
+
+    % ---- (a) how the data is generated -------------------------------------
+    \node[src] (P) at (0,0) {page $P$};
+    \node[src] (Q) at (4.2,0) {page $Q$};
+
+    \node[chunk] (c1) at (-0.9,-0.95) {$c_1$};
+    \node[chunk] (c2) at ( 0.9,-0.95) {$c_2$};
+    \node[chunk] (c3) at ( 4.2,-0.95) {$c_3$};
+
+    \foreach \a/\b in {P/c1, P/c2, Q/c3} \draw[lnk] (\a) -- (\b);
+
+    \node[pchip] (p1) at (-1.5,-1.95) {$P_1$};
+    \node[pchip] (p2) at (-0.3,-1.95) {$P_2$};
+    \node[pchip] (p3) at ( 0.3,-1.95) {$P_3$};
+    \node[pchip] (p4) at ( 1.5,-1.95) {$P_4$};
+    \node[qchip] (q1) at ( 3.6,-1.95) {$Q_1$};
+    \node[qchip] (q2) at ( 4.8,-1.95) {$Q_2$};
+
+    \foreach \a/\b in {c1/p1, c1/p2, c2/p3, c2/p4, c3/q1, c3/q2}
+      \draw[lnk] (\a) -- (\b);
+
+    \node[lbl, anchor=west] at (5.6,0)     {source pages};
+    \node[lbl, anchor=west] at (5.6,-0.95) {chunks};
+    \node[lbl, anchor=west, align=left] at (5.6,-1.95)
+      {samples: not independent\\draws, they cluster by page};
+
+    % ---- (b) the two splits ------------------------------------------------
+    \node[pchip] (rt1) at (-0.6,-3.6) {$P_1$};
+    \node[pchip] (rt2) at ( 0.1,-3.6) {$P_3$};
+    \node[qchip] (rt3) at ( 0.8,-3.6) {$Q_1$};
+    \node[bin, fit=(rt1)(rt2)(rt3)] (rtrain) {};
+    \node[lbl, left=1mm of rtrain] {train};
+
+    \node[pchip] (rs1) at (-0.6,-4.5) {$P_2$};
+    \node[pchip] (rs2) at ( 0.1,-4.5) {$P_4$};
+    \node[qchip] (rs3) at ( 0.8,-4.5) {$Q_2$};
+    \node[bin, fit=(rs1)(rs2)(rs3)] (rtest) {};
+    \node[lbl, left=1mm of rtest] {test};
+
+    \draw[figorange, dashed, line width=0.7pt] (rt1) -- (rs1);
+    \node[lbl, text=figorange, anchor=north, align=center] at (0.1,-5.1)
+      {$P$ on both sides: a test item is\\answerable from a training paraphrase};
+
+    \node[font=\small] at (0.1,-2.95) {(a) uniformly random};
+
+    \node[pchip] (gt1) at (4.0,-3.6) {$P_1$};
+    \node[pchip] (gt2) at (4.7,-3.6) {$P_2$};
+    \node[pchip] (gt3) at (5.4,-3.6) {$P_3$};
+    \node[pchip] (gt4) at (6.1,-3.6) {$P_4$};
+    \node[bin, fit=(gt1)(gt2)(gt3)(gt4)] (gtrain) {};
+    \node[lbl, left=1mm of gtrain] {train};
+
+    \node[qchip] (gs1) at (4.0,-4.5) {$Q_1$};
+    \node[qchip] (gs2) at (4.7,-4.5) {$Q_2$};
+    \node[bin, fit=(gs1)(gs2)(gtrain.east |- gs1)] (gtest) {};
+    \node[lbl, left=1mm of gtest] {test};
+
+    \node[lbl, anchor=north, align=center] at (5.05,-5.1)
+      {page-disjoint: whole pages move\\as atomic units};
+
+    \node[font=\small] at (5.05,-2.95) {(b) group-aware};
+
+    \draw[figrule, line width=0.6pt] (2.6,-2.7) -- (2.6,-5.6);
+  \end{tikzpicture}
+  \caption{Why a uniformly random split leaks. Several samples are drawn
+  per chunk and several chunks per page, so samples cluster by source
+  page rather than arriving as independent draws. Splitting rows at
+  random (a) scatters one page's samples across the boundary, and the
+  held-out score then partly measures memorization of a near-duplicate
+  seen in training. Group-aware splitting (b) assigns whole pages as
+  atomic units, and the assignment is verified page-disjoint before any
+  file is written.}
+  \label{fig:leakage}
+\end{figure}
 
 \subsection{The mitigation}
 DataForge's export stage implements \emph{group-aware} splitting: the
@@ -679,7 +971,8 @@ recipe's limit of 40 pages (\texttt{crawl.max\_crawl\_pages}), of which the
 the number of chunks because the judge makes one call per chunk: for
 example, 128 calls for Ready.gov's 64 chunks.
 
-The stage timings suggest which resource limited each run, although we
+The stage timings (Figure~\ref{fig:timings}) suggest which resource
+limited each run, although we
 did not measure LLM idle time directly. USCIS spent 212.7 of its 296
 seconds in the streaming stage, close to the 200-second floor that 20
 pages at one request per 10 seconds imposes, and a further 54.2 seconds
@@ -689,7 +982,98 @@ crawl delay. The Python tutorial, with no crawl delay and nine times as
 many chunks as pages, spent 142.5 seconds streaming and 83.8 seconds in
 the judge, consistent with a run limited by the LLM.
 
-The quality stage rejected 20 of 831 samples (2.4\%). The free filters
+\begin{figure}[h]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+        xbar stacked,
+        bar width=4.5mm,
+        y=10mm,
+        width=11cm,
+        height=5.4cm,
+        xmin=0, xmax=330,
+        symbolic y coords={iantoo.space, Python tutorial, USCIS, Ready.gov},
+        ytick=data,
+        xlabel={seconds},
+        xlabel style={font=\small, text=figmuted},
+        tick label style={font=\small},
+        axis lines=left,
+        axis line style={draw=figrule},
+        xmajorgrids, grid style={draw=figrule, line width=0.3pt},
+        tickwidth=0pt,
+        legend style={at={(0.5,1.14)}, anchor=north, legend columns=3,
+                      draw=none, font=\small, column sep=1.5ex},
+        point meta=explicit symbolic,
+        every node near coord/.append style={font=\tiny, text=figink,
+                                             anchor=center},
+        enlarge y limits=0.22,
+      ]
+      \addplot+[fill=figblue!30, draw=figink, nodes near coords]
+        coordinates {(0.3,Ready.gov) [] (54.2,USCIS) [54]
+                     (31.1,Python tutorial) [31] (0.2,iantoo.space) []};
+      \addplot+[fill=figorange!30, draw=figink, nodes near coords]
+        coordinates {(53.9,Ready.gov) [54] (212.7,USCIS) [213]
+                     (142.5,Python tutorial) [142] (9.0,iantoo.space) [9]};
+      \addplot+[fill=figaqua!30, draw=figink, nodes near coords]
+        coordinates {(36.3,Ready.gov) [36] (27.6,USCIS) [28]
+                     (83.8,Python tutorial) [84] (4.6,iantoo.space) []};
+      \legend{discovery, streaming, judge}
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Where each benchmark run spent its time. USCIS is dominated
+  by its declared \texttt{Crawl-delay}: 212.7 seconds streaming against
+  the 200-second floor that 20 pages at one request per 10 seconds
+  imposes, plus 54.2 in discovery fetching a sitemap index and five
+  sub-sitemaps at the same spacing. The Python tutorial, with no crawl
+  delay and nine times as many chunks as pages, spends its time in the
+  LLM instead. Export takes under a second everywhere and is omitted.
+  These are stage timings, not a direct measurement of LLM idle time,
+  which the benchmark did not record.}
+  \label{fig:timings}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \begin{tikzpicture}[
+      gate/.style={draw=figink, fill=white, rounded corners=2pt,
+                   minimum height=9mm, minimum width=22mm, font=\small,
+                   align=center, inner sep=2pt},
+      drop/.style={-{Stealth[length=4pt]}, draw=figorange, line width=0.6pt},
+      droplbl/.style={font=\scriptsize, text=figmuted, align=left, anchor=north west},
+      cost/.style={font=\scriptsize\itshape, text=figmuted, anchor=south},
+    ]
+    \node[gate] (gen)  at (0,0)   {831\\generated};
+    \node[gate] (free) at (3.4,0) {free\\filters};
+    \node[gate] (judge) at (6.8,0) {LLM\\judge};
+    \node[gate, fill=figaqua!10, draw=figaqua] (ok) at (10.2,0) {811 approved\\(97.6\%)};
+
+    \draw[flow] (gen)  -- (free);
+    \draw[flow] (free) -- node[artifact, above=0pt] {820} (judge);
+    \draw[flow] (judge) -- (ok);
+
+    \node[cost] at (3.4,0.55) {costs nothing};
+    \node[cost] at (6.8,0.55) {one call per chunk};
+
+    \draw[drop] (free) -- (3.4,-1.1);
+    \node[droplbl] at (3.0,-1.15)
+      {11 rejected\\9 refer to the source\\2 exact duplicates\\0 near-duplicates};
+
+    \draw[drop] (judge) -- (6.8,-1.1);
+    \node[droplbl] at (6.4,-1.15)
+      {9 rejected\\6 not standalone\\3 scored below 4\\0 ungrounded};
+  \end{tikzpicture}
+  \caption{How the 831 generated samples were filtered. The order is
+  deliberate: the filters that cost nothing run first, so the judge, the
+  only stage that spends money, never runs on a sample a free filter
+  would have rejected. Counts are pooled across the four sites. The
+  near-duplicate and ungrounded checks never fired, which
+  Section~\ref{sec:eval-limits} discusses rather than treats as
+  confirmation that they work.}
+  \label{fig:funnel}
+\end{figure}
+
+The quality stage rejected 20 of 831 samples (2.4\%), in the order
+Figure~\ref{fig:funnel} shows. The free filters
 rejected 11: 9 caught by the source-reference regular expressions and 2
 exact duplicates. The judge rejected 9: 6 as not standalone and 3 with a
 score of 3, below the minimum of 4. (In these runs both kinds of
@@ -877,9 +1261,13 @@ into \texttt{start\_run}, which returns immediately, and
 (\texttt{list\_sessions}, \texttt{session\_stats}, \texttt{view\_samples})
 invoke the CLI's own \texttt{--json} output rather than reimplementing
 its queries, and \texttt{validate\_recipe} runs the CLI's dry run, so the
-CLI stays the source of truth for those; \texttt{explore\_site} calls the
-discovery library directly. Third, and most important, the safety
-constraints that matter most are \emph{enforced by the server} rather
+CLI stays the source of truth for those; \texttt{explore\_site} and
+\texttt{scrape\_page} call the discovery and scrape libraries directly.
+\texttt{scrape\_page} in particular gives the no-LLM path of
+Section~\ref{sec:nollm} to an agent: asked what a page says, or what is
+in the table on it, the agent answers from one read instead of starting
+a run that crawls and spends to find out. Third, and most important,
+the safety constraints that matter most are \emph{enforced by the server} rather
 than requested of the model. \texttt{start\_run} refuses a recipe that
 sets no spending cap (\texttt{generation.max\_cost\_usd} or
 \texttt{generation.max\_llm\_calls}, Section~\ref{sec:budget}) unless the
@@ -1144,17 +1532,31 @@ export's loss of source lineage, now carried in a sidecar file
 split's output file, now shuffled (Section~\ref{sec:row-shuffle}). Both
 are recorded here as a reminder that lineage and ordering guarantees
 need to be verified per output format and per pipeline stage, not
-assumed to hold uniformly once established for one.
+assumed to hold uniformly once established for one. The same pattern
+recurred in version~2.6.0 with error handling rather than lineage: the
+per-chunk \texttt{try} that made the generation stage tolerant of one bad
+chunk also swallowed the failures that were not per-chunk at all
+(Section~\ref{sec:budget}). A handler written for one class of failure
+had silently become the handler for every class.
 
 The most significant near-term extension, and the one we consider the
 project's actual next step rather than a background item, is support for
 \textbf{non-text source material}. The pipeline today assumes its input
 is HTML prose reachable by an HTTP client: PDFs and images are filtered
 out of crawl candidates before any request is made, rather than processed,
-tabular and structured data embedded in a page is flattened or lost by
-the Markdown-conversion step (Section~\ref{sec:processing}), and there is no handling for
-audio or video sources at all. Domains where the authoritative content is
-a table (regulatory filings, statistical releases), a scanned or
+and there is no handling for audio or video sources at all. Structured
+data embedded in a page is half-handled. Version~2.4.5 added the table
+extractor of Section~\ref{sec:nollm}, so an HTML table can leave the
+system as rows, with its headers, its spans expanded and its source URL
+attached; but that extractor serves the no-LLM path only. The dataset
+pipeline still passes a table through the Markdown-conversion step
+(Section~\ref{sec:processing}), which flattens it, so the rows a scrape
+can hand to a spreadsheet are not the rows the generation stage sees.
+Routing the extractor's output into chunking, so that a chunk can be a
+group of rows with their headers rather than a paragraph of run-together
+cells, is the smaller half of this gap and the part already within
+reach. Domains where the authoritative content is a table (regulatory
+filings, statistical releases), a scanned or
 image-based PDF (many government and legal documents), or a recorded
 briefing are currently out of scope, not because the downstream
 pipeline (chunking, generation, quality, leak-aware export) is
