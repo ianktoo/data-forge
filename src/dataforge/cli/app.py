@@ -2386,9 +2386,14 @@ async def _collect_scrape_folder(state: dict) -> list[str] | None:
     folder = await prompts.ask_scrape_dir(_latest_scrape_dir())
     if folder is None:
         return None
-    pages = qs.load_scrape_dir(folder)
+    try:
+        pages = qs.load_scrape_dir(folder)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+        ui.error(f"Could not read the scrape in [dim]{folder}[/]: {e}")
+        return []
     if not pages:
-        ui.error(f"No pages with text in [dim]{folder.resolve()}[/]")
+        ui.error(f"No pages with text in [dim]{folder}[/]. Every page there failed "
+                 "or was empty; re-run the scrape or pick another folder.")
         return []
     words = sum(p.word_count for p in pages)
     ui.info(f"Loaded {len(pages)} page{'s' if len(pages) != 1 else ''} ({words:,} words) "

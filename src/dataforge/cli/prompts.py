@@ -134,26 +134,31 @@ async def ask_input_method(allow_scrape_folder: bool = False) -> str | None:
 
 
 async def ask_scrape_dir(default: str = "") -> Path | None:
-    """Folder written by a no-AI scrape (pages.jsonl or page_NNN.md files)."""
+    """Folder written by a no-AI scrape, resolved by :func:`scrape.resolve_scrape_dir`.
+
+    The run folder, a file in it, or a parent such as ``scrape/`` (newest run).
+    """
+    from dataforge.scrape import resolve_scrape_dir
+
     def _ok(v: str) -> bool | str:
-        d = Path(clean_input(v)).expanduser()
-        if not d.is_dir():
-            return f"Folder not found: {clean_input(v)}"
-        if not ((d / "pages.jsonl").is_file() or any(d.glob("page_*.md"))):
-            return "No pages.jsonl or page_NNN.md files in that folder"
+        if not clean_input(v):
+            return "Enter a folder path"
+        try:
+            resolve_scrape_dir(clean_input(v))
+        except ValueError as e:
+            return str(e)
         return True
 
     path = await questionary.path(
         "Scrape folder:",
         default=default,
-        only_directories=True,
-        instruction="(Enter for the latest; drag a folder here or paste its path)",
+        instruction="(Enter for the latest; a run folder, its pages.jsonl, or scrape/ for the newest run)",
         validate=_ok,
         **_q(),
     ).ask_async()
     if path is None:
         return None
-    return Path(clean_input(path)).expanduser()
+    return resolve_scrape_dir(clean_input(path))
 
 
 async def ask_discovery_scope(n_urls: int) -> str | None:
