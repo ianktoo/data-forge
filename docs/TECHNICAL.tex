@@ -210,6 +210,10 @@ to keep, then filters by substring, glob or regular expression and ticks
 URLs from the keyboard. A recipe replaces this step declaratively with
 \texttt{source.language} / \texttt{source.include} /
 \texttt{source.exclude} / \texttt{source.max\_urls}.
+The wizard also accepts the folder written by a no-AI scrape
+(\texttt{dataforge scrape}) in place of URLs: its pages are stored as the
+session's collection, without being fetched again, and the run starts at
+processing.
 
 \subsection{Collection}
 \label{sec:collection}

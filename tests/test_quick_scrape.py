@@ -138,3 +138,51 @@ async def test_mcp_scrape_page(site):
     assert out["tables"][0]["rows"][0] == ["Ochoa", "(510) 723-3130"]
     assert len(out["markdown"]) == 40 and out["truncated"] is True
     assert "text" not in out
+
+
+async def test_progress_reports_each_url_before_and_after(site):
+    events = []
+    await qs.scrape_urls([f"{site}/schools", f"{site}/nope"], rate_limit=1000,
+                         progress=lambda i, n, url, page: events.append(
+                             (i, n, page.status if page else None)))
+    assert events == [(1, 2, None), (1, 2, "ok"), (2, 2, None), (2, 2, "http 404")]
+
+
+# ── A scrape folder as dataset input ──────────────────────────────────────────
+
+async def test_load_scrape_dir_reads_ok_pages_from_jsonl(site, tmp_path):
+    pages = await qs.scrape_urls([f"{site}/schools", f"{site}/nope"], rate_limit=1000)
+    qs.write_outputs(pages, tmp_path)
+    (page,) = qs.load_scrape_dir(tmp_path)
+    assert page.url == f"{site}/schools" and page.title == "Middle Schools"
+    assert "Emergency kits" in page.markdown and page.word_count > 50
+
+
+async def test_load_scrape_dir_falls_back_to_markdown_files(site, tmp_path):
+    pages = await qs.scrape_urls([f"{site}/schools", f"{site}/copy"], rate_limit=1000)
+    qs.write_outputs(pages, tmp_path, ("md",))
+    loaded = qs.load_scrape_dir(tmp_path)
+    assert [p.url for p in loaded] == [f"{site}/schools", f"{site}/copy"]
+    assert loaded[0].title == "Middle Schools"
+    assert not loaded[0].markdown.startswith("<!--") and "Emergency kits" in loaded[0].markdown
+
+
+async def test_imported_pages_go_through_processing(site, tmp_path, tmp_settings):
+    from sqlmodel import select
+
+    from dataforge.agents import PipelineContext, ProcessorAgent
+    from dataforge.storage import DataFormat, DiscoveredURL, open_session
+
+    pages = await qs.scrape_urls([f"{site}/schools", f"{site}/copy"], rate_limit=1000)
+    qs.write_outputs(pages, tmp_path / "scrape")
+    ctx = PipelineContext(session_id="imp-1", session_name="imp", goal="", format=DataFormat.qa,
+                          seed_urls=[], settings=tmp_settings)
+    ids = qs.import_into_session(ctx, qs.load_scrape_dir(tmp_path / "scrape"))
+    assert len(ids) == 2 and ctx.scraped_page_ids == ids
+    assert ctx.selected_urls == [f"{site}/schools", f"{site}/copy"]
+    with open_session(tmp_settings.db_path) as db:
+        rows = db.exec(select(DiscoveredURL).where(DiscoveredURL.session_id == "imp-1")).all()
+    assert all(r.scraped and r.selected for r in rows)
+
+    ctx = await ProcessorAgent(ctx).run()
+    assert ctx.processed_chunk_ids

@@ -162,6 +162,8 @@ def review_panel(state: dict) -> None:
         "links": "The URL(s) above and the pages they link to",
         "site": "The whole site",
     }.get(state.get("discovery_scope", "site"), "")
+    if state.get("scrape_dir"):
+        scope = f"Already scraped, not fetched again: {state['scrape_dir']}"
     t.add_row("Scrape", scope)
     t.add_row("Session", state.get("session_name", ""))
     goal_text = state.get("goal", "")[:80]

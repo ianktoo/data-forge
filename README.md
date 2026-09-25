@@ -147,7 +147,9 @@ dataforge scrape https://www.husd.us/schools/middle-schools -o schools
 Add `--check` for rule-based checks (empty or very short pages, duplicate
 text), `-f csv` to write only the tables, and `--json` before the command for
 a machine-readable summary. AI agents get the same through the MCP tool
-`scrape_page`.
+`scrape_page`. To turn a scrape folder into training data later, start
+**Build an AI training dataset** in `dataforge` and choose **Pages I scraped
+earlier**: the pages are not fetched again and the run starts at processing.
 
 To update or remove DataForge, run `dataforge update` or `dataforge uninstall`
 yourself, in your own terminal. Both close DataForge first, so nothing is
