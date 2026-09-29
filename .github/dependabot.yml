@@ -1,0 +1,20 @@
+version: 2
+
+updates:
+  # Workflow actions are pinned to commit SHAs, which is what keeps a moved
+  # tag from silently changing what runs in the publish workflow. Dependabot
+  # is what keeps those pins from going stale: it opens a PR with the new SHA
+  # and the matching version comment.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "deps"
