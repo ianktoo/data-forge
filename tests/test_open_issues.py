@@ -81,13 +81,13 @@ def test_llm_client_completes_against_a_local_openai_compatible_server(local_ser
     from dataforge.generators import llm as llm_mod
 
     s = Settings(llm_provider="openai_compatible", llm_model="local-model",
-                 local_base_url=local_server, local_api_key="secret-123")
+                 local_base_url=local_server, local_api_key="local-test-credential")
     monkeypatch.setattr(llm_mod, "get_settings", lambda: s)
     client = llm_mod.LLMClient()
     resp = asyncio.run(client.complete([{"role": "user", "content": "hi"}]))
     assert resp.content == "hello from the local server"
     assert _FakeOpenAIServer.seen[-1]["model"] == "local-model"
-    assert _FakeOpenAIServer.seen[-1]["auth"] == "Bearer secret-123"
+    assert _FakeOpenAIServer.seen[-1]["auth"] == "Bearer local-test-credential"
 
 
 def test_preflight_reaches_the_local_server(local_server):

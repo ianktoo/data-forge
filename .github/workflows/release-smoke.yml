@@ -34,16 +34,20 @@ jobs:
         python: ['3.11', '3.12', '3.13', '3.14']   # keep in sync with pyproject classifiers
         installer: [pip, uv-tool]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           python-version: ${{ matrix.python }}
       - name: Pick the version
         shell: bash
         run: |
           V="${{ github.event.inputs.version }}"
+          # The triggering tag is also on the workflow_run event head branch,
+          # but that is attacker-influenceable input read in a privileged
+          # workflow_run context, so take the version from the checked-out
+          # default branch, which is where the release tag was cut from.
           if [ -z "$V" ] && [ "${{ github.event_name }}" = "workflow_run" ]; then
-            V="${{ github.event.workflow_run.head_branch }}"; V="${V#v}"
+            V=$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)
           fi
           if [ -z "$V" ]; then
             V=$(curl -s https://pypi.org/pypi/llm-web-crawler/json | python3 -c "import json,sys;print(json.load(sys.stdin)['info']['version'])")
