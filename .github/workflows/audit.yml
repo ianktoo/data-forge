@@ -1,0 +1,43 @@
+name: Dependency audit
+
+# Checks the exact package versions in uv.lock against the public database of
+# known vulnerabilities. Runs on every pull request and push to master, and
+# weekly, so a newly published advisory is noticed even when nobody is
+# changing the code. A finding fails the run.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    - cron: '17 6 * * 1'   # Mondays, 06:17 UTC
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: '3.11'
+      - run: uv sync --frozen --extra dev
+      - name: Export the locked versions
+        run: uv export --frozen --no-emit-project --format requirements-txt -o "$RUNNER_TEMP/locked.txt"
+      # Accepted findings are listed here with the reason, and must be removed
+      # when the cause goes away.
+      #   PYSEC-2026-3716 (datasets) and PYSEC-2026-4217 (fsspec): the fixed
+      #   versions are blocked by the optional `unsloth` extra, which needs the
+      #   older ones. Tracked in #87.
+      - name: Audit
+        run: >-
+          uv run pip-audit --require-hashes --disable-pip -r "$RUNNER_TEMP/locked.txt"
+          --ignore-vuln PYSEC-2026-3716
+          --ignore-vuln PYSEC-2026-4217
