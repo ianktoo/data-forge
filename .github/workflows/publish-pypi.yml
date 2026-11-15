@@ -17,8 +17,12 @@ jobs:
   tests:
     uses: ./.github/workflows/test.yml
 
+  # Known-vulnerability check of the locked packages; blocks the release.
+  audit:
+    uses: ./.github/workflows/audit.yml
+
   build-and-publish:
-    needs: tests
+    needs: [tests, audit]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -33,9 +37,6 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --frozen --extra dev
-
-      - name: Audit dependencies
-        run: uv run pip-audit --require-hashes -r <(uv export --no-emit-project --format requirements-txt) || true
 
       - name: Build distributions
         run: uv build --no-sources
