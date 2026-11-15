@@ -31,7 +31,13 @@ jobs:
         with:
           python-version: '3.11'
       - run: uv sync --frozen --extra dev
-      - run: uv run ruff check src tests scripts
+      - run: uv run ruff check src tests scripts evals
+      # Type checking is reported but does not fail the build yet: there are
+      # hundreds of existing findings being fixed module by module (#91).
+      # Once that is done, remove continue-on-error to make it a gate.
+      - name: Type check (informational)
+        continue-on-error: true
+        run: uv run mypy src
 
   test:
     name: test (${{ matrix.os }}, py${{ matrix.python }})
@@ -48,6 +54,20 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: uv sync --frozen --extra dev
       # Live-network tests are marked `integration`; CI stays offline-safe.
+      - run: uv run pytest -m "not integration" --cov-report=
+
+  # Newest Python, one OS. Informational: a failure here is an early warning
+  # for the next supported version, not a reason to block a change.
+  test-next-python:
+    name: test (ubuntu-latest, py3.15, informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: '3.15'
+      - run: uv sync --frozen --extra dev
       - run: uv run pytest -m "not integration" --cov-report=
 
   package:

@@ -84,6 +84,11 @@ markers = [
     "integration: marks tests that require live network access (deselect with -m 'not integration')",
 ]
 
+[tool.coverage.report]
+# A floor, not a goal: total coverage was 66% when this was set (#90). Raise it
+# as tests are added (#92); never lower it to make a change pass.
+fail_under = 64
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
