@@ -19,6 +19,9 @@ on:
       - '.github/workflows/release-smoke.yml'
       - 'scripts/smoke_test.py'
 
+permissions:
+  contents: read
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
